@@ -1,0 +1,246 @@
+[project]
+name = "aegis"
+version = "0.1.0"
+description = "Aegis: 本机代码工程 Agent，自研 Agent Runtime（无 LangGraph、无 RAG）"
+readme = "README.md"
+requires-python = ">=3.12"
+# 版本只写下限；实际版本由 uv.lock 固定，升级是显式动作（uv lock --upgrade-package <name>）。
+# 选型理由见 docs/01_architecture/05_tech_stack.md。
+dependencies = [
+    # HTTP 接入
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sse-starlette>=2.1",
+    "httpx>=0.27",
+    # 模型 SDK：创建客户端时必须 max_retries=0，重试由自有网关负责
+    "openai>=1.50",
+    # 数据模型与配置
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    # 持久化
+    "aiosqlite>=0.20",
+    # 日志
+    "loguru>=0.7",
+    # MCP 客户端
+    "mcp>=1.0",
+    # 分词估算（仅局部决策；首次使用要联网下载词表，须预置 TIKTOKEN_CACHE_DIR）
+    "tiktoken>=0.7",
+    # 技能元数据
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# web_search sidecar 所需。搜索提供者的包待技术验证后补充（见 05_tech_stack §9 第 3 项）。
+web-search = [
+    "trafilatura>=1.12",
+]
+tracing-otlp = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp>=1.25",
+]
+tracing-langfuse = [
+    "langfuse>=2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "respx>=0.21",
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+    "import-linter>=2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/aegis_config",
+    "src/agent_runtime",
+    "src/tools",
+    "src/mcps",
+    "src/services",
+    "src/skills",
+    "src/evaluation",
+]
+
+# ------------------------------------------------------------------------------
+# 测试
+# ------------------------------------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-m 'not real_llm and not slow' --strict-markers"
+markers = [
+    "unit: 单元测试",
+    "integration: 集成测试",
+    "e2e: 端到端测试",
+    "security: 安全与对抗测试",
+    "slow: 慢测试，默认不运行",
+    "real_llm: 需要真实模型密钥与网络，默认不运行，显式 -m real_llm 触发",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+# ------------------------------------------------------------------------------
+# 代码风格与类型
+# ------------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM", "RUF"]
+ignore = [
+    "RUF001",  # 注释与文档字符串里的全角标点是有意的
+    "RUF002",
+    "RUF003",
+]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+# 核心包逐步收紧到严格模式
+strict = [
+    "src/agent_runtime/core",
+    "src/agent_runtime/guardrails",
+]
+
+# ------------------------------------------------------------------------------
+# 模块依赖方向（import-linter）
+# 规则出处：docs/01_architecture/03_code_layout_and_roadmap.md §1
+# ------------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = [
+    "aegis_config",
+    "agent_runtime",
+    "tools",
+    "mcps",
+    "services",
+    "skills",
+    "evaluation",
+]
+include_external_packages = false
+
+# 1. 运行时内部分层：只能从上往下依赖。同一行用 | 隔开的是互相独立的同层模块。
+[[tool.importlinter.contracts]]
+name = "运行时分层"
+type = "layers"
+layers = [
+    "agent_runtime.api",
+    "agent_runtime.runtime",
+    "agent_runtime.loop | agent_runtime.checkpoint | agent_runtime.approval",
+    "agent_runtime.subagents",
+    "agent_runtime.context | agent_runtime.llm | agent_runtime.memory | agent_runtime.skills",
+    "agent_runtime.guardrails",
+    "agent_runtime.core",
+]
+
+# 2. core 是纯契约层：不依赖项目内任何其他部分
+[[tool.importlinter.contracts]]
+name = "core 零项目内依赖"
+type = "forbidden"
+source_modules = ["agent_runtime.core"]
+forbidden_modules = [
+    "agent_runtime.api",
+    "agent_runtime.runtime",
+    "agent_runtime.loop",
+    "agent_runtime.checkpoint",
+    "agent_runtime.approval",
+    "agent_runtime.subagents",
+    "agent_runtime.context",
+    "agent_runtime.llm",
+    "agent_runtime.memory",
+    "agent_runtime.skills",
+    "agent_runtime.guardrails",
+    "agent_runtime.observability",
+    "aegis_config",
+    "tools",
+    "mcps",
+    "services",
+    "skills",
+    "evaluation",
+]
+
+# 3. 工具层不依赖运行时。只允许用 core（工具协议、错误）和 guardrails（注入扫描等纯函数）
+[[tool.importlinter.contracts]]
+name = "工具层不依赖运行时"
+type = "forbidden"
+source_modules = ["tools", "mcps"]
+forbidden_modules = [
+    "agent_runtime.api",
+    "agent_runtime.runtime",
+    "agent_runtime.loop",
+    "agent_runtime.checkpoint",
+    "agent_runtime.approval",
+    "agent_runtime.subagents",
+    "agent_runtime.context",
+    "agent_runtime.llm",
+    "agent_runtime.memory",
+    "agent_runtime.skills",
+    "agent_runtime.observability",
+]
+
+# 3b. 护栏是纯函数集合：不依赖工具、MCP、sidecar
+[[tool.importlinter.contracts]]
+name = "护栏保持纯净"
+type = "forbidden"
+source_modules = ["agent_runtime.guardrails"]
+forbidden_modules = ["tools", "mcps", "services", "skills", "evaluation"]
+
+# 4. sidecar 服务完全独立：只通过 HTTP 对话，不导入运行时、工具或 MCP
+[[tool.importlinter.contracts]]
+name = "sidecar 服务独立"
+type = "forbidden"
+source_modules = ["services"]
+forbidden_modules = ["agent_runtime", "tools", "mcps", "skills", "evaluation"]
+
+# 5. 观测是横切旁路：不依赖任何业务层
+[[tool.importlinter.contracts]]
+name = "观测不依赖业务层"
+type = "forbidden"
+source_modules = ["agent_runtime.observability"]
+forbidden_modules = [
+    "agent_runtime.api",
+    "agent_runtime.runtime",
+    "agent_runtime.loop",
+    "agent_runtime.checkpoint",
+    "agent_runtime.approval",
+    "agent_runtime.subagents",
+    "agent_runtime.context",
+    "agent_runtime.llm",
+    "agent_runtime.memory",
+    "agent_runtime.skills",
+    "agent_runtime.guardrails",
+    "tools",
+    "mcps",
+    "services",
+]
+
+# 6. 配置包是所有层共用的底座：不依赖项目内任何其他部分，反过来谁都可以导入它
+[[tool.importlinter.contracts]]
+name = "配置包零项目内依赖"
+type = "forbidden"
+source_modules = ["aegis_config"]
+forbidden_modules = [
+    "agent_runtime",
+    "tools",
+    "mcps",
+    "services",
+    "skills",
+    "evaluation",
+]

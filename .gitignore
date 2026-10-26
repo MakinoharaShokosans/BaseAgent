@@ -1,154 +1,40 @@
-# Python Bytecode & Builds
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-build/
-dist/
-*.egg-info/
-
-# Virtual Environments (Root & Subprojects)
-.venv/
-**/.venv/
-venv/
-**/venv/
-env/
-**/env/
-
-# Type Checking & Linters
-.mypy_cache/
-**/.mypy_cache/
-.ruff_cache/
-**/.ruff_cache/
-
-# Testing & Coverage
-.pytest_cache/
-**/.pytest_cache/
-.hypothesis/
-**/.hypothesis/
-.coverage
-.coverage.*
-coverage/
-**/coverage/
-htmlcov/
-coverage.xml
-
-# Logging
-*.log
-logs/
-**/logs/
-
-# Environment Variables & Secrets (保留 .env.example)
+# 密钥与本机配置——绝不入库
 .env
-**/.env
 .env.*
-**/.env.*
 !.env.example
-!**/.env.example
-*.pem
-*.key
+*.token
+api_token
+canary_salt
 
-# IDEs & System Files
-.idea/
-.vscode/
-.obsidian/
-**/.obsidian/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-.directory
-
-# Cache & Downloaded Models
-.cache/
-**/.cache/
-.fastembed/
-**/.fastembed/
-.trafilatura/
-**/.trafilatura/
-
-# Subproject Runtime Storage (保留 .gitkeep，忽略数据)
-**/storage/checkpoints/*
-!**/storage/checkpoints/.gitkeep
-**/storage/traces/*
-!**/storage/traces/.gitkeep
-**/storage/artifacts/*
-!**/storage/artifacts/.gitkeep
-**/storage/qdrant_data/*
-!**/storage/qdrant_data/.gitkeep
-**/storage/cache/*
-!**/storage/cache/.gitkeep
-**/storage/logs/*
-!**/storage/logs/.gitkeep
-**/storage/*.db
-**/storage/*.db-wal
-**/storage/*.db-shm
-
-# 接入层访问令牌（0600，绝不入版本库）
-**/storage/api_token
-**/storage/*.token
-
-# SQLite & Databases
+# 数据目录（数据库、轨迹、产物、日志）
+storage/
+eval_reports/
 *.db
 *.db-wal
 *.db-shm
-*.db-journal
-*.sqlite
-*.sqlite3
-*.sqlite-wal
-*.sqlite-shm
-*.sqlite-journal
 
-# 误生成产物：把 SQLite 内存库 URI ":memory:" 当成了文件路径
-# （aiosqlite/sqlite3 遇到 Path(":memory:") 会真的落盘一个名为 ":memory:" 的文件）
-:memory:
-
-# 测试与评测的临时输出
-**/.benchmarks/
-**/evaluation/**/benchmark_report.md.tmp
-
-# Node / MCP / Frontend
-node_modules/
-**/node_modules/
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 dist/
-**/dist/
-dist-ssr/
-**/dist-ssr/
+build/
+*.egg-info/
+
+# Node / 前端
+node_modules/
 .vite/
-**/.vite/
 .turbo/
-**/.turbo/
 *.tsbuildinfo
-**/*.tsbuildinfo
-playwright-report/
-**/playwright-report/
-blob-report/
-**/blob-report/
-test-results/
-**/test-results/
 
-# Archives & Compressed Packages
-*.zip
-*.tar
-*.tar.gz
-*.tgz
-*.gz
-*.7z
-*.rar
-
-# Personal Resumes & Career Materials (Protect personal privacy)
-resume/
-**/resume/
-RESUME_PROJECT_AEGIS.md
-documents/07_面试与求职复盘/
-documents/07_面试与求职复盘/**
-documents/temp.md
-documents/简历Skills.md
-documents/interview_prep/
-
-# Local AI Agent IDE configurations & assistant skills
-.agents/
-**/.agents/
-
-
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store

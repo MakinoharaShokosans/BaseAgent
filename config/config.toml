@@ -1,0 +1,542 @@
+# ==============================================================================
+# Aegis 配置文件 (config/config.toml)
+#
+# 规则：
+#   1. 本文件可以入版本库，**不含任何密钥**。密钥只写环境变量名 (api_key_env 等)，
+#      真实值放在 .env，见 .env.example。
+#   2. 优先级（高覆盖低）：命令行参数 > 环境变量 AEGIS_<节>__<键> > 本文件 > 代码内置默认值。
+#      例：AEGIS_SERVER__PORT=8010 覆盖 [server] port。
+#   3. 路径类配置中的相对路径，相对数据目录 AEGIS_HOME 解析（见 [app]），不是当前目录。
+#   4. 加载时强校验，不合法直接拒绝启动（例如监听非回环地址）。
+#   5. 标注“待验证”的值依据官方文档摘要，上线前需用真实密钥验证，见 docs/07_llm_gateway/04_deepseek.md。
+#
+# 文档：docs/01_architecture/04_configuration.md
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# 1. 应用与数据目录
+# ------------------------------------------------------------------------------
+[app]
+# 数据目录。环境变量 AEGIS_HOME 优先。所有相对路径都相对它解析。
+# 这里必须是绝对路径或以 ~ 开头（相对路径会让不同目录启动得到不同数据集）。
+# 开发时想用仓库内的目录，设环境变量 AEGIS_HOME=./storage。
+home = "~/.local/share/aegis"
+
+
+# ------------------------------------------------------------------------------
+# 2. 日志
+# ------------------------------------------------------------------------------
+[logging]
+level = "INFO"                      # 控制台最低级别；文件固定 DEBUG
+console = true
+file = "logs/aegis.jsonl"           # JSON Lines，含 task_id / span_id
+rotation_mb = 20
+retention_files = 10
+
+
+# ------------------------------------------------------------------------------
+# 3. 存储与保留策略
+# ------------------------------------------------------------------------------
+[storage]
+metadata_db = "aegis_meta.db"       # 工作区、会话、对话流水、记忆
+checkpoint_db = "checkpoints/state.db"   # 新库文件名，不与旧版 LangGraph 库混用
+events_db = "events/events.db"      # 任务事件持久化
+traces_dir = "traces"               # 轨迹、span、llm.call 外置内容
+artifacts_dir = "artifacts"         # 被裁剪的观察值、命令全量日志、网页正文
+
+[storage.retention]
+# 到期或超量时在启动与每日清理。0 表示不按该维度清理。
+events_days = 30
+events_max_tasks = 200
+llm_blob_days = 7
+llm_blob_max_mb = 1024
+artifacts_days = 30
+artifacts_max_mb = 4096
+
+
+# ------------------------------------------------------------------------------
+# 4. HTTP API 接入层
+# ------------------------------------------------------------------------------
+[server]
+host = "127.0.0.1"                  # 安全红线：只允许回环地址 (127.0.0.1 / localhost / ::1)，其他值拒绝启动
+port = 8000
+max_concurrent_tasks = 1            # 单机串行化；超出返回 429
+cors_allow_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+allowed_hosts = []                  # 回环名始终允许；经反代或自定义本地域名访问时补充
+sse_heartbeat_sec = 15
+sse_buffer_events = 1000            # 热缓存条数；完整历史在事件库中
+sse_subscriber_queue = 256          # 单订阅者队列；满了通知并让其重连
+request_max_bytes = 2_000_000
+task_goal_max_chars = 20000
+docs_enabled = true                 # /docs 与 /openapi.json；非开发环境建议关闭
+
+[server.auth]
+enabled = true                      # 令牌认证。除健康检查外所有接口都需要
+token_file = "api_token"            # 首次启动自动生成 256 位随机令牌，权限 0600
+token_env = "AEGIS_API_TOKEN"       # 可选：环境变量优先于文件（测试或容器场景）
+fail_limit = 10                     # 同一来源连续失败达到次数后短暂拒绝
+fail_window_sec = 60
+
+[server.filesystem]
+# 目录浏览与原生选择窗口的边界
+browse_roots = ["~"]                # 只能浏览这些根之下；要允许整个磁盘必须显式写 "/"
+browse_max_entries = 500
+native_picker_enabled = true
+native_picker_timeout_sec = 120
+
+[server.workspace]
+# 工作区 root_path 的校验
+forbidden_roots = ["/", "/etc", "/usr", "/bin", "/sbin", "/boot", "/sys", "/proc", "/dev", "/var", "/root"]
+forbid_home_itself = true           # 不允许直接把用户主目录整个当作工作区
+
+
+# ------------------------------------------------------------------------------
+# 5. 运行时护栏与检查点
+# ------------------------------------------------------------------------------
+[runtime.guardrails]
+max_steps = 25                      # 单任务最大执行步数
+max_total_tokens = 200000           # 单任务累计 Token 上限（服务商返回的总用量，含子智能体与研究）
+max_wall_time_sec = 900             # 单任务总挂钟上限（续跑时重置计时）
+warning_ratio = 0.9                 # 达到上限的该比例时注入软告警
+consecutive_errors_limit = 3        # 连续工具失败达到次数触发重规划通知
+identical_fingerprint_limit = 3     # 相同（工具，参数）连续出现次数，达到则整批拦截
+
+[runtime.checkpoint]
+dispatch_marker = true              # 派发前提交标记，用于崩溃后识别“结果可能未知”
+recover_on_start = true             # 启动时扫描未完成任务（标记失败待续跑 / 恢复为待审批）
+
+[runtime.approval]
+default_level = "workspace_write"   # 新任务默认权限基线: read_only | workspace_write | full_permissions
+expire_sec = 0                      # 待审批请求自动过期秒数；0 = 不过期
+require_full_permissions_confirm = true   # 以 full_permissions 提交任务需显式确认字段
+
+
+# ------------------------------------------------------------------------------
+# 6. 模型：两档，每档有序端点列表（顺序即降级顺序）
+#    当前选用 DeepSeek（OpenAI 兼容协议）。模型名以官方文档当前列出的为准，只在此处出现。
+# ------------------------------------------------------------------------------
+[models.reasoning]                  # 规划、评估：需要推理
+temperature = 0.0                   # 思考模式下 DeepSeek 忽略该参数
+
+[[models.reasoning.endpoints]]
+name = "deepseek-pro"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-pro"           # 待验证：以官方文档当前名称为准
+api_key_env = "DEEPSEEK_API_KEY"
+timeout_sec = 180
+context_window = 1_000_000          # 该端点的上下文窗口（Token）
+max_output_tokens = 16384           # 显式设置，避免 JSON 被默认值截断
+reasoning_effort = "high"           # low | medium | high | max；不写则不发送
+
+[models.reasoning.endpoints.capabilities]
+tools = true
+parallel_tools = true               # 待验证
+json_object = true
+json_schema = false                 # 文档未提及，按不支持
+usage_in_response = true
+merge_consecutive_user = false      # 端点要求角色严格交替时设为 true
+thinking_control = "deepseek"       # none | deepseek：显式发送 thinking 开关
+thinking_with_tools = false         # 带 tools 的请求关闭思考（DeepSeek 带工具必须回传全部历史思考）
+reasoning_field = "reasoning_content"
+reasoning_passback = "never"        # never | tool_turns | opaque | all_when_tools
+
+[models.fast]                       # 工具调度、记忆压缩、研究提炼、子智能体：要便宜、要快
+temperature = 0.2
+
+[[models.fast.endpoints]]
+name = "deepseek-flash"
+base_url = "https://api.deepseek.com"
+model = "deepseek-flash"            # 待验证
+api_key_env = "DEEPSEEK_API_KEY"
+timeout_sec = 90
+context_window = 1_000_000
+max_output_tokens = 8192
+
+[models.fast.endpoints.capabilities]
+tools = true
+parallel_tools = true               # 待验证
+json_object = true
+json_schema = false
+usage_in_response = true
+merge_consecutive_user = false
+thinking_control = "deepseek"
+thinking_with_tools = false
+reasoning_field = "reasoning_content"
+reasoning_passback = "never"
+
+# 备用端点示例：同档内先 pro 后 flash 降级，取消注释即可
+# [[models.reasoning.endpoints]]
+# name = "deepseek-flash-fallback"
+# base_url = "https://api.deepseek.com"
+# model = "deepseek-flash"
+# api_key_env = "DEEPSEEK_API_KEY"
+# timeout_sec = 120
+# context_window = 1_000_000
+# max_output_tokens = 8192
+# [models.reasoning.endpoints.capabilities]
+# tools = true
+# json_object = true
+# usage_in_response = true
+# thinking_control = "deepseek"
+# thinking_with_tools = false
+
+
+# ------------------------------------------------------------------------------
+# 7. 模型网关：重试、熔断、并发、用量、结构化输出
+# ------------------------------------------------------------------------------
+[llm.retry]
+max_retries = 3                     # 单端点最大尝试次数
+backoff_factor = 2.0                # 指数退避倍数（秒）
+backoff_max_sec = 30
+jitter = 0.2                        # 在退避时间上加的随机比例
+honor_retry_after = true
+
+[llm.circuit]
+open_after = 2                      # 连续几次耗尽重试后熔断该端点
+open_sec = 60                       # 熔断持续时间；之后半开探测
+
+[llm.concurrency]
+per_endpoint = 4                    # 单端点并发上限；收到 429 后临时减半
+
+[llm.deadline]
+min_attempt_sec = 5                 # 剩余时间不足该值时不再发起新的尝试
+
+[llm.usage]
+estimate_when_missing = true        # 响应不带 usage 时用本地分词估算（保守取高）并标记
+estimate_safety_factor = 1.2
+
+[llm.structured]
+repair_retries = 1                  # 校验失败时带错误重试次数
+prefer_schema = true                # 端点支持 json_schema 时优先使用
+on_truncate_raise_max_tokens = true  # 输出被截断时，修复重试把输出上限加倍（不超过端点上限）
+
+
+# ------------------------------------------------------------------------------
+# 8. 上下文工程
+# ------------------------------------------------------------------------------
+[context.session]
+# 会话级：对话流水的水位线压缩
+token_limit = 32000                 # 活跃（未压缩）对话的 Token 预算
+high_watermark = 0.80               # 达到比例触发压缩
+compaction_ratio = 0.40             # 一次压到该比例（滞回，少次大批量）
+active_window_turns = 3             # 保底保留的最少原文轮数
+compaction_async = true             # 先提交任务终态，再异步压缩
+compaction_backoff_sec = [30, 120, 600]   # 压缩失败后的退避序列
+
+[context.task]
+# 任务级：任务内 messages 的折叠与压缩。窗口很大时比例阈值几乎不触发，所以同时有绝对上限。
+soft_ratio = 0.60
+hard_ratio = 0.80
+soft_tokens = 100000                # 实际触发线 = min(窗口 × 比例, 绝对 Token)
+hard_tokens = 160000
+fold_keep_recent_steps = 3          # 折叠时保持完整的最近步数
+compaction_enabled = false          # 任务内 LLM 压缩（级别 3）；先只做折叠，数据证明不够再开
+fold_exempt_tools = ["load_skill"]   # 永不折叠的工具（截断流程文档会让做法残缺）
+
+[context.observation]
+max_tokens = 1500                   # 超过则摘要加落盘
+head_lines = 20
+tail_lines = 30
+keyword_lines_limit = 30
+json_outline_max_depth = 3
+json_outline_array_items = 5
+scalar_preview_chars = 120
+exempt_tools = ["load_skill"]
+exempt_multiplier = 8               # 豁免工具的放宽倍数（仍有上限）
+
+[context.memory]
+max_facts = 50                      # 会话记忆事实上限；超出触发整合
+max_failed_attempts = 30
+max_pending_facts = 20              # “近期新增”上限；超出提前并入摘要
+summary_max_chars = 300
+persist_task_facts = true           # 任务收尾沉淀事实与失败尝试
+require_provenance = true           # 没有出处的事实丢弃
+
+[context.rules]
+allow_workspace = false             # 工作区规则文件（CLAUDE.md / AGENTS.md 等）。默认关闭，开启即视为用户授权
+max_chars = 8000
+candidates = ["CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".aegis/rules.md"]
+
+[context.prompt]
+memory_role = "user"                # 记忆段以哪种消息角色渲染: user | system；默认 user 侧（待验证）
+stage_instruction_position = "tail" # tail：阶段指令放请求尾部，利于前缀缓存
+
+
+# ------------------------------------------------------------------------------
+# 9. 工具
+# ------------------------------------------------------------------------------
+[tools.files]
+view_max_lines = 400                # 单次 view_file / read_artifact 返回行数上限
+view_max_file_mb = 10               # 全量读取的文件大小上限；超过只允许指定行范围
+write_max_bytes = 1_000_000
+write_atomic = true
+backup_overwritten = true           # 覆盖前在任务产物目录留副本
+grep_max_results = 200
+list_dir_max_entries = 200
+ignored_dirs = [".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache", "coverage", "htmlcov", ".cache"]
+
+[tools.dispatch]
+default_timeout_sec = 60
+
+
+# ------------------------------------------------------------------------------
+# 10. Sidecar 服务寻址与托管
+# ------------------------------------------------------------------------------
+[services]
+shell_url = "http://127.0.0.1:8002"
+web_url = "http://127.0.0.1:8003"
+timeout_sec = 60
+auto_start_sidecars = true          # 启动 Agent 时拉起并托管 sidecar；健康的外部实例会被复用
+startup_timeout_sec = 10
+stop_grace_sec = 3
+# 传给 sidecar 子进程的环境变量白名单。其余（尤其是各类 *_KEY / *_TOKEN）一律不传。
+sidecar_env_allowlist = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "PYTHONPATH", "PYTHONUNBUFFERED", "AEGIS_CONFIG", "AEGIS_HOME"]
+
+
+# ------------------------------------------------------------------------------
+# 11. bash_shell 沙箱（独立进程 :8002）
+# ------------------------------------------------------------------------------
+[bash_shell]
+host = "127.0.0.1"                  # 只允许回环
+port = 8002
+timeout_sec = 60                    # 单命令默认硬超时
+max_timeout_sec = 600               # 请求可覆盖的上限
+sigterm_grace_sec = 2
+rlimit_as_mb = 2048
+rlimit_fsize_mb = 50
+rlimit_cpu_sec = 300
+memory_pool_mb = 8192
+max_concurrent = 4
+artifacts_dir = "artifacts"
+stream_chunk_bytes = 65536
+distill_head_lines = 20
+distill_tail_lines = 30
+distill_max_keyword_lines = 200
+structured_sniff_max_bytes = 262144
+# 命令子进程的最小环境（不继承 sidecar 的环境）
+child_env_allowlist = ["PATH", "LANG", "LC_ALL", "TERM", "TZ"]
+child_home = "task_scratch"         # 子进程 HOME 指向任务临时目录，不使用真实 HOME
+extra_deny_patterns = []            # 追加的命令黑名单正则
+
+
+# ------------------------------------------------------------------------------
+# 12. web_search（独立进程 :8003）
+# ------------------------------------------------------------------------------
+[web_search]
+host = "127.0.0.1"
+port = 8003
+provider = "ddg"
+max_results = 8
+fetch_concurrency = 5
+per_host_concurrency = 2
+request_timeout_sec = 10
+total_timeout_sec = 30
+max_content_tokens = 1500           # 正文超过则落盘，只回预览
+preview_chars = 200
+user_agent = "Mozilla/5.0 (compatible; AegisBot/0.1)"
+artifacts_dir = "artifacts"
+# 抓取安全（SSRF 防护）
+block_private_addresses = true      # 拒绝回环、私网、链路本地、元数据地址；每次请求与每次重定向都校验
+allowed_ports = [80, 443]
+max_redirects = 5
+max_download_bytes = 2_000_000
+allowed_content_types = ["text/html", "text/plain", "application/xhtml+xml"]
+domain_denylist = []                # 可选：域名黑名单
+domain_allowlist = []               # 可选：非空时只允许这些域名
+
+
+# ------------------------------------------------------------------------------
+# 13. 研究子智能体（外部不可信数据隔离区）
+# ------------------------------------------------------------------------------
+[research]
+enabled = true                      # 关闭后主 Agent 完全没有外部信息能力
+model_tier = "fast"
+max_rounds = 3
+max_sources = 5
+max_source_chars = 6000
+max_wall_time_sec = 45
+max_total_tokens = 20000
+max_calls_per_task = 3              # 每任务调用次数上限；消耗经预算账本计入父任务
+max_findings = 8
+max_answer_chars = 500
+max_code_examples = 5
+max_code_chars = 2000
+max_report_chars = 4000
+
+
+# ------------------------------------------------------------------------------
+# 14. 动态委派（能力衰减 + 预算切片）
+# ------------------------------------------------------------------------------
+[subagent]
+enabled = true
+model_tier = "fast"
+max_depth = 1
+max_steps = 8
+max_total_tokens = 30000            # 名义上限，实际受父级余额收窄
+min_token_budget = 2000
+max_wall_time_sec = 90
+max_spawns_per_task = 4
+max_assigned_tools = 6
+max_findings = 6
+max_observation_chars = 4000
+max_answer_chars = 400
+max_citations = 8
+max_report_chars = 3000
+denied_tools = ["spawn_subagent", "delegate_research"]
+
+
+# ------------------------------------------------------------------------------
+# 15. 技能
+# ------------------------------------------------------------------------------
+[skills]
+allow_builtin = true
+allow_global = true                 # ~/.aegis/skills
+allow_workspace = false             # <工作区>/.aegis/skills；默认拒绝（克隆恶意仓库即可注入）
+protect_trusted_names = true        # 低信任技能不得顶替同名的可信技能
+scan_untrusted_body = true          # 对不可信来源技能的正文也做注入样态扫描
+max_description_chars = 200
+max_triggers = 12
+high_privilege_tools = ["bash", "write_file", "edit_file"]
+
+
+# ------------------------------------------------------------------------------
+# 16. 三级权限分级
+# ------------------------------------------------------------------------------
+[permissions]
+default_level = "workspace_write"
+unknown_tool_level = "full_permissions"    # 未知工具（第三方 MCP）保守处理，需显式审批
+
+read_only_tools = [
+    "view_file",
+    "list_dir",
+    "grep",
+    "read_artifact",
+    "load_skill",
+    "delegate_research",
+    "spawn_subagent",       # 委派动作本身无副作用；子级每次调用按父级权限重新判定
+]
+workspace_write_tools = ["write_file", "edit_file"]
+full_permission_tools = []
+bash_tools = ["bash"]
+
+# 单引号字面量，反斜杠无需转义。分类基于命令文本，是“防误操作”的闸门，不是对抗恶意输入的边界。
+full_permission_patterns = [
+    '\bgit\s+push\b',
+    '\b(curl|wget)\b',
+    '\b(ssh|scp|rsync)\b',
+    '\bpip3?\s+install\b',
+    '\bnpm\s+(install|i|ci)\b',
+    '\b(yarn|pnpm)\s+(add|install)\b',
+    '\b(apt|apt-get|yum|dnf|apk)\s+(install|upgrade|remove)\b',
+    '\bsudo\b',
+    '\b(docker|docker-compose|kubectl|helm)\b',
+    '\|\s*(sh|bash|zsh)\b',                 # 管道到 shell
+]
+workspace_write_patterns = [
+    '>>?\s*\S',
+    '\b(rm|mv|cp|mkdir|rmdir|touch|ln)\b',
+    '\b(sed|perl)\s+-i\b',
+    '\b(chmod|chown)\b',
+    '\bgit\s+(add|commit|checkout|switch|merge|rebase|reset|stash|tag|clean)\b',
+    '\b(make|cmake|ninja)\b',
+    '\b(gcc|g\+\+|clang|clang\+\+|rustc|cargo|go\s+(build|test))\b',
+    '\b(pytest|python\s+-m\s+pytest)\b',
+    '\b(npm|yarn|pnpm)\s+(run|test)\b',
+    '\btee\b',
+]
+
+
+# ------------------------------------------------------------------------------
+# 17. MCP 外部工具服务器
+#     每个服务器默认关闭。stdio 服务器是在本机运行的第三方进程，等同任意代码执行。
+#     敏感值一律用 "env:VAR" 引用 .env，禁止明文。
+# ------------------------------------------------------------------------------
+[mcp]
+enabled = true                      # 总开关
+connection_timeout_sec = 30
+call_timeout_sec = 50               # 须小于 [tools.dispatch] default_timeout_sec，让管理器先咬合
+retry_backoff_sec = [30, 120, 600]  # 服务器连接失败后的重试退避
+max_description_chars = 1000
+reject_on_injection = true
+exposed_name_max_len = 64           # 暴露给模型的函数名长度上限；规范化为 [a-zA-Z0-9_-]
+refresh_tools_each_task = true      # 每个任务准备阶段重新 tools/list 并重新消毒
+rlimit_as_mb = 4096                 # Node 类服务器需要较大的虚拟地址空间
+rlimit_fsize_mb = 50
+rlimit_cpu_sec = 300
+
+[mcp.servers.filesystem]
+enabled = false
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem@<固定版本>", "<ABSOLUTE_WORKSPACE_PATH>"]
+env = {}
+allow_tools = []                    # 空表示该服务器通过消毒的全部工具；非空则只放行列出的名字
+idempotent_tools = []               # 用于崩溃恢复：可安全重试的工具
+
+[mcp.servers.github]
+enabled = false
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github@<固定版本>"]
+env = { GITHUB_PERSONAL_ACCESS_TOKEN = "env:GITHUB_TOKEN" }
+allow_tools = ["get_issue", "list_issues", "get_pull_request"]
+idempotent_tools = ["get_issue", "list_issues", "get_pull_request"]
+
+[mcp.servers.remote_doc]
+enabled = false
+transport = "sse"
+url = "http://127.0.0.1:8005/sse"
+env = {}
+
+
+# ------------------------------------------------------------------------------
+# 18. 可观测性：事件、追踪、脱敏
+# ------------------------------------------------------------------------------
+[events]
+persist = true
+llm_call_inline = false             # llm.call 事件不内联完整消息体，只带摘要和 blob 引用
+summary_clip_chars = 300            # 摘要类字段强制限长
+tool_result_clip_chars = 500
+
+[tracing]
+enabled = true
+local_spans = true                  # 写本地 .spans.jsonl
+export_content = false              # 提示词与载荷是否导出到外部（远程导出时务必谨慎）
+queue_size = 1000                   # 导出队列；满了丢弃最旧的并计数
+
+[tracing.otlp]
+enabled = false
+endpoint = "http://127.0.0.1:4318"
+headers_env = "OTLP_HEADERS"        # 引用环境变量，不存明文
+
+[tracing.langfuse]
+enabled = false                     # 需要安装可选依赖
+host = "http://localhost:3000"
+public_key_env = "LANGFUSE_PUBLIC_KEY"
+secret_key_env = "LANGFUSE_SECRET_KEY"
+
+[redaction]
+enabled = true
+key_patterns = ["key", "token", "secret", "password", "authorization", "cookie"]
+value_patterns = ['sk-[A-Za-z0-9]{16,}', 'ghp_[A-Za-z0-9]{20,}', 'AKIA[0-9A-Z]{16}', '-----BEGIN [A-Z ]*PRIVATE KEY-----']
+
+
+# ------------------------------------------------------------------------------
+# 19. 安全
+# ------------------------------------------------------------------------------
+[security]
+canary_salt_file = "canary_salt"    # 首次启动生成并保存（权限 0600），不再使用源码里的固定盐
+scan_untrusted_tool_output = true   # 对不可信工具的输出做注入样态扫描并标注（不拦截）
+canary_check_reasoning = true       # 金丝雀泄露检测覆盖思考内容
+
+
+# ------------------------------------------------------------------------------
+# 20. 评测（默认不运行，需显式触发）
+# ------------------------------------------------------------------------------
+[evaluation]
+enabled = false
+max_steps_per_case = 10
+max_tokens_per_case = 50000
+max_total_tokens = 1000000
+report_dir = "eval_reports"

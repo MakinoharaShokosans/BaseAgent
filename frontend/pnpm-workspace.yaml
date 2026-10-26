@@ -1,0 +1,4 @@
+# pnpm 默认不运行依赖的构建脚本。只放行确有需要的包，不全部放行。
+# esbuild 的安装脚本用于校验并链接当前平台的二进制。
+allowBuilds:
+  esbuild: true
