@@ -50,6 +50,7 @@ GET  /api/v1/health
 host = "127.0.0.1"
 port = 8003
 provider = "ddgs"
+allow_fake_ip = false         # 本机代理使用 fake-ip DNS（Clash 等）时设 true，放行 198.18.0.0/15
 max_results = 8
 fetch_concurrency = 5
 request_timeout_sec = 10

@@ -128,6 +128,28 @@ async def test_a_hostname_with_any_internal_resolution_is_rejected_as_a_whole() 
         await check_url("http://unresolvable.example/", allowed_ports={80}, resolver=resolver({}))
 
 
+@pytest.mark.security
+def test_fake_ip_range_is_rejected_by_default_and_only_that_range_is_opened() -> None:
+    assert not ip_is_public("198.18.0.67")
+    assert not ip_is_public("198.19.255.1")
+    assert ip_is_public("198.18.0.67", allow_fake_ip=True)
+    assert ip_is_public("198.19.255.1", allow_fake_ip=True)
+    # 开关只放行 fake-ip 网段，回环、私网、元数据地址仍然拒绝
+    for address in ("127.0.0.1", "10.0.0.5", "169.254.169.254", "::ffff:10.0.0.1"):
+        assert not ip_is_public(address, allow_fake_ip=True)
+
+
+@pytest.mark.security
+async def test_fake_ip_resolution_needs_the_explicit_switch() -> None:
+    table = {"site.example": ["198.18.0.67"]}
+    with pytest.raises(AddressRejected):
+        await check_url("https://site.example/", allowed_ports={443}, resolver=resolver(table))
+    target = await check_url(
+        "https://site.example/", allowed_ports={443}, resolver=resolver(table), allow_fake_ip=True
+    )
+    assert target.ip == "198.18.0.67"
+
+
 @pytest.mark.unit
 async def test_private_blocking_can_be_disabled_for_local_testing() -> None:
     target = await check_url(

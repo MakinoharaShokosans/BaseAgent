@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
             user_agent=cfg.user_agent,
             timeout_sec=float(cfg.request_timeout_sec),
             block_private=cfg.block_private_addresses,
+            allow_fake_ip=cfg.allow_fake_ip,
         ),
         artifacts_dir=loaded.paths.web_artifacts_dir,
     )

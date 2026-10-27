@@ -525,6 +525,7 @@ class WebSearchConfig(_Section):
     user_agent: str = "Mozilla/5.0 (compatible; BaseAgentBot/0.1)"
     artifacts_dir: str = "artifacts"
     block_private_addresses: bool = True
+    allow_fake_ip: bool = False
     allowed_ports: list[Port] = [80, 443]
     max_redirects: NonNegInt = 5
     max_download_bytes: PosInt = 2_000_000

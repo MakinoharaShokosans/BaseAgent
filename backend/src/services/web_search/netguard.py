@@ -32,13 +32,18 @@ async def system_resolver(host: str, port: int) -> list[str]:
     return list(dict.fromkeys(str(info[4][0]) for info in infos))
 
 
-def ip_is_public(address: str) -> bool:
+FAKE_IP_RANGE = ipaddress.ip_network("198.18.0.0/15")  # Clash 等代理的 fake-ip DNS 使用的保留网段
+
+
+def ip_is_public(address: str, *, allow_fake_ip: bool = False) -> bool:
     try:
         ip = ipaddress.ip_address(address.split("%", 1)[0])
     except ValueError:
         return False
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped  # ::ffff:127.0.0.1 之类的映射写法按 IPv4 判断
+    if allow_fake_ip and isinstance(ip, ipaddress.IPv4Address) and ip in FAKE_IP_RANGE:
+        return True  # 真实解析在代理端发生：只在用户明确声明使用 fake-ip 代理时放行
     return not (
         ip.is_private
         or ip.is_loopback
@@ -64,6 +69,7 @@ async def check_url(
     allowed_ports: Collection[int],
     resolver: Resolver,
     block_private: bool = True,
+    allow_fake_ip: bool = False,
 ) -> Target:
     parts = urlsplit(url)
     if parts.scheme not in {"http", "https"}:
@@ -89,7 +95,7 @@ async def check_url(
             raise AddressRejected("主机名无法解析") from exc
     if not addresses:
         raise AddressRejected("主机名没有解析结果")
-    if block_private and not all(ip_is_public(a) for a in addresses):
+    if block_private and not all(ip_is_public(a, allow_fake_ip=allow_fake_ip) for a in addresses):
         raise AddressRejected("目标地址不被允许")  # 任何一个解析结果是内网就整体拒绝
     return Target(url, host, port, addresses[0])
 
@@ -116,6 +122,7 @@ class SafeFetcher:
         timeout_sec: float,
         resolver: Resolver = system_resolver,
         block_private: bool = True,
+        allow_fake_ip: bool = False,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._ports = set(allowed_ports)
@@ -124,6 +131,7 @@ class SafeFetcher:
         self._types = {t.lower() for t in allowed_types}
         self._resolver = resolver
         self._block = block_private
+        self._fake_ip = allow_fake_ip
         self._headers = {"User-Agent": user_agent, "Accept": "text/html,text/plain;q=0.9,*/*;q=0.1"}
         self._client = httpx.AsyncClient(
             timeout=timeout_sec, transport=transport, follow_redirects=False, trust_env=False
@@ -141,6 +149,7 @@ class SafeFetcher:
                     allowed_ports=self._ports,
                     resolver=self._resolver,
                     block_private=self._block,
+                    allow_fake_ip=self._fake_ip,
                 )
             except AddressRejected as exc:
                 return Fetched("ERROR", current, error=f"目标地址不被允许：{exc}")
