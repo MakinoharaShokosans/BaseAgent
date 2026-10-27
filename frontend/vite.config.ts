@@ -20,7 +20,7 @@ function readApiToken(): string {
   }
 }
 
-const target = process.env.AEGIS_PROXY_TARGET ?? 'http://127.0.0.1:8000';
+const target = process.env.AEGIS_PROXY_TARGET ?? 'http://127.0.0.1:11328';
 
 // https://vite.dev/config/
 export default defineConfig({

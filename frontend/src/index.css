@@ -1,3 +1,290 @@
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import '@fontsource/instrument-serif/400.css';
+@import '@fontsource/instrument-serif/400-italic.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 主题令牌：RGB 三元组，见 docs/10_frontend/03_visual_design.md §3 */
+@layer base {
+  :root {
+    color-scheme: light;
+    --c-canvas: 247 246 243;
+    --c-side: 241 239 234;
+    --c-card: 255 255 255;
+    --c-raised: 255 255 255;
+    --c-line: 232 229 222;
+    --c-ink: 31 29 26;
+    --c-mute: 138 133 123;
+    --c-accent: 232 104 63;
+    --c-accent-soft: 252 234 226;
+    --c-accent-2: 124 108 240;
+    --c-ok: 52 160 100;
+    --c-warn: 200 138 22;
+    --c-bad: 222 64 58;
+    --c-code: 28 27 30;
+    --c-code-ink: 236 234 228;
+    --brand: linear-gradient(135deg, #f58529 0%, #dd2a7b 55%, #8134af 100%);
+    --shadow-card: 0 1px 2px rgb(40 32 20 / 0.03), 0 6px 24px -10px rgb(40 32 20 / 0.12);
+    --shadow-float: 0 24px 60px -18px rgb(40 32 20 / 0.24), 0 4px 14px -6px rgb(40 32 20 / 0.08);
+    --glow-a: 245 133 41;
+    --glow-b: 129 52 175;
+    --glow-strength: 0.06;
+  }
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --c-canvas: 15 15 17;
+    --c-side: 21 21 23;
+    --c-card: 28 28 31;
+    --c-raised: 36 36 40;
+    --c-line: 44 44 50;
+    --c-ink: 236 235 230;
+    --c-mute: 143 141 135;
+    --c-accent: 240 138 98;
+    --c-accent-soft: 58 36 28;
+    --c-accent-2: 154 140 255;
+    --c-ok: 95 191 136;
+    --c-warn: 227 168 58;
+    --c-bad: 240 106 94;
+    --c-code: 10 10 12;
+    --c-code-ink: 228 226 218;
+    --shadow-card: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 8px 24px -10px rgb(0 0 0 / 0.6);
+    --shadow-float: 0 28px 70px -18px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 255 255 / 0.04);
+    --glow-strength: 0.1;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-canvas font-sans text-[14px] leading-relaxed text-ink antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+  }
+  ::selection {
+    background: rgb(var(--c-accent) / 0.25);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--c-mute) / 0.3) transparent;
+  }
+  button,
+  select,
+  textarea,
+  input {
+    font-family: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent) / 0.6);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  summary {
+    list-style: none;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@layer components {
+  .nav-item {
+    @apply relative flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[13.5px] text-mute transition-colors duration-150 hover:bg-ink/[0.05] hover:text-ink;
+  }
+  .nav-item[aria-current='true'] {
+    @apply bg-ink/[0.07] font-semibold text-ink;
+  }
+  /* 无边框：层次靠底色与柔和阴影，见 03_visual_design.md §1 */
+  .soft-card {
+    @apply rounded-[18px] bg-card shadow-card;
+  }
+  .glass {
+    @apply bg-canvas/70 backdrop-blur-xl backdrop-saturate-150;
+  }
+  .field {
+    @apply w-full rounded-xl bg-ink/[0.045] px-3 py-2 text-sm text-ink outline-none transition-[background-color,box-shadow] placeholder:text-mute/60 focus:bg-card focus:shadow-[0_0_0_3px_rgb(var(--c-accent)/0.14)];
+  }
+  .bg-brand {
+    background-image: var(--brand);
+  }
+  .text-brand {
+    background-image: var(--brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* 隐藏滚动条但保留滚轮、触控板与键盘滚动 */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .eyebrow {
+    @apply text-2xs font-semibold uppercase tracking-[0.12em] text-mute/80;
+  }
+}
+
+/* L0 环境层：两团极淡的径向光晕 + 细噪点。运行中时缓慢呼吸。 */
+.ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.ambient::before,
+.ambient::after {
+  content: '';
+  position: absolute;
+  width: 62vmax;
+  height: 62vmax;
+  border-radius: 9999px;
+  filter: blur(40px);
+  opacity: 0.8;
+}
+.ambient::before {
+  top: -30vmax;
+  left: -18vmax;
+  background: radial-gradient(closest-side, rgb(var(--glow-a) / var(--glow-strength)), transparent);
+}
+.ambient::after {
+  bottom: -34vmax;
+  right: -20vmax;
+  background: radial-gradient(closest-side, rgb(var(--glow-b) / var(--glow-strength)), transparent);
+}
+.ambient[data-live='true']::before,
+.ambient[data-live='true']::after {
+  animation: breathe 8s ease-in-out infinite;
+}
+.ambient[data-live='true']::after {
+  animation-delay: -4s;
+}
+.grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+[data-theme='dark'] .grain {
+  mix-blend-mode: screen;
+  opacity: 0.025;
+}
+
+/* 代码高亮（rehype-highlight 的类名），跟随主题令牌 */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: rgb(var(--c-accent));
+}
+.hljs-string,
+.hljs-attr {
+  color: rgb(var(--c-ok));
+}
+.hljs-number,
+.hljs-literal {
+  color: rgb(var(--c-accent-2));
+}
+.hljs-comment {
+  color: rgb(var(--c-code-ink) / 0.45);
+  font-style: italic;
+}
+.hljs-title,
+.hljs-function {
+  color: rgb(var(--c-warn));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* 输入台运行中的流光边框 */
+@property --spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes spin-border {
+  to {
+    --spin: 360deg;
+  }
+}
+
+/* Markdown 排版：无边框、宽松行距，见 03_visual_design.md §6.3 */
+.prose-aegis {
+  @apply max-w-none break-words text-[15px] leading-[1.75] text-ink;
+}
+.prose-aegis > * + * {
+  @apply mt-4;
+}
+.prose-aegis h1 {
+  @apply mt-6 text-[24px] font-semibold leading-tight tracking-tight;
+}
+.prose-aegis h2 {
+  @apply mt-7 text-[19px] font-semibold leading-snug tracking-tight;
+}
+.prose-aegis h3 {
+  @apply mt-5 text-[16px] font-semibold;
+}
+.prose-aegis h4 {
+  @apply mt-4 text-[15px] font-semibold text-ink/80;
+}
+.prose-aegis strong {
+  @apply font-semibold;
+}
+.prose-aegis ul {
+  @apply list-disc pl-5 marker:text-mute/60;
+}
+.prose-aegis ol {
+  @apply list-decimal pl-5 marker:text-mute;
+}
+.prose-aegis li + li {
+  @apply mt-1.5;
+}
+.prose-aegis li > p {
+  @apply mt-0;
+}
+.prose-aegis blockquote {
+  @apply relative pl-4 text-ink/70;
+}
+.prose-aegis blockquote::before {
+  content: '';
+  @apply absolute inset-y-1 left-0 w-[3px] rounded-full bg-brand opacity-70;
+}
+.prose-aegis :not(pre) > code {
+  @apply rounded-md bg-ink/[0.06] px-1.5 py-0.5 font-mono text-[0.85em];
+}
+.prose-aegis pre {
+  @apply overflow-x-auto px-4 pb-4 pt-2 font-mono text-[12.5px] leading-relaxed no-scrollbar;
+}
+.prose-aegis pre code {
+  @apply bg-transparent p-0;
+}
+.prose-aegis table {
+  @apply w-full border-collapse overflow-hidden rounded-xl text-sm;
+}
+.prose-aegis thead {
+  @apply bg-ink/[0.04];
+}
+.prose-aegis th {
+  @apply px-3 py-2 text-left text-[13px] font-semibold;
+}
+.prose-aegis td {
+  @apply px-3 py-2 align-top;
+}
+.prose-aegis tbody tr + tr td {
+  @apply border-t border-ink/[0.06];
+}
+.prose-aegis hr {
+  @apply my-6 border-0 border-t border-ink/[0.08];
+}
