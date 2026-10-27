@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from agent_runtime.core import AegisTool, ToolResult
+from tools.builtin.diagnostics import check_syntax
 from tools.builtin.paths import PathEscapeError, int_arg, resolve_within_root, text_arg
 
 _SNIFF_BYTES: Final = 8192
@@ -200,7 +201,11 @@ class WriteFileTool(AegisTool):
         except OSError as exc:
             return ToolResult.failure(f"写入失败：{exc}")
         note = "，已备份原文件" if backed_up else ""
-        return ToolResult(ok=True, content=f"已写入 {rel}（{chars} 字符，{len(data)} 字节{note}）")
+        return ToolResult(
+            ok=True,
+            content=f"已写入 {rel}（{chars} 字符，{len(data)} 字节{note}）"
+            + _syntax_note(rel, data.decode("utf-8", errors="replace")),
+        )
 
     def _backup(self, path: Path, rel: str) -> bool:
         if self._backup_dir is None:
@@ -235,3 +240,118 @@ class WriteFileTool(AegisTool):
 
 class _BackupError(Exception):
     pass
+
+
+class EditFileTool(WriteFileTool):
+    name = "edit_file"
+    description = (
+        "对工作区内已有文本文件做精确的局部替换：old_string 必须在文件中恰好出现一次"
+        "（replace_all=true 时替换所有出现处）。比整文件覆盖省 Token，也不会碰到无关内容。"
+        "失败时会说明出现次数或给出最接近的片段，据此补充上下文再试。"
+    )
+    parameters: Mapping[str, Any] = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "相对工作区根的路径"},
+            "old_string": {"type": "string", "description": "要被替换的原文，需逐字一致"},
+            "new_string": {"type": "string", "description": "替换后的内容"},
+            "replace_all": {"type": "boolean", "description": "替换所有出现处，缺省 false"},
+        },
+        "required": ["path", "old_string", "new_string"],
+    }
+
+    async def invoke(self, args: Mapping[str, Any]) -> ToolResult:
+        raw = text_arg(args, "path")
+        old = text_arg(args, "old_string")
+        new = text_arg(args, "new_string")
+        if raw is None or old is None or new is None:
+            return ToolResult.failure("需要参数 path、old_string、new_string，且都是字符串")
+        if not old:
+            return ToolResult.failure("old_string 不能为空；新建文件请用 write_file")
+        if old == new:
+            return ToolResult.failure("old_string 与 new_string 相同，没有可做的修改")
+        replace_all = args.get("replace_all") is True
+        try:
+            path = resolve_within_root(self._root, raw)
+        except PathEscapeError as exc:
+            return ToolResult.failure(str(exc))
+        return await asyncio.to_thread(self._edit, path, old, new, replace_all)
+
+    def _edit(self, path: Path, old: str, new: str, replace_all: bool) -> ToolResult:
+        rel = _rel(self._root, path)
+        try:
+            if path.is_dir():
+                return ToolResult.failure(f"{rel} 是目录，不是文件")
+            original = path.read_bytes()
+            text = original.decode("utf-8")
+        except FileNotFoundError:
+            return ToolResult.failure(f"文件不存在：{rel}；新建文件请用 write_file")
+        except UnicodeDecodeError:
+            return ToolResult.failure(f"{rel} 不是 UTF-8 文本文件，不能做文本替换")
+        except OSError as exc:
+            return ToolResult.failure(f"读取失败：{exc}")
+
+        crlf = "\r\n" in text and text.count("\r\n") >= text.count("\n") / 2
+        if crlf and "\r\n" not in old:
+            old, new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")  # 保留文件的换行风格
+
+        count = text.count(old)
+        if count == 0:
+            return ToolResult.failure(_no_match(rel, text, old))
+        if count > 1 and not replace_all:
+            lines = _match_lines(text, old)
+            return ToolResult.failure(
+                f"old_string 在 {rel} 中出现了 {count} 次（第 {lines} 行），无法唯一定位；"
+                "请补充前后文使其唯一，或设置 replace_all=true"
+            )
+        updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+        data = updated.encode("utf-8")
+        if len(data) > self._limits.write_max_bytes:
+            return ToolResult.failure(f"修改后文件 {len(data)} 字节，超过上限")
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+            backed_up = self._backup(path, rel)
+            self._replace(path, data, mode)
+        except _BackupError as exc:
+            return ToolResult.failure(f"修改前备份失败，未写入：{exc}")
+        except OSError as exc:
+            return ToolResult.failure(f"写入失败：{exc}")
+        done = count if replace_all else 1
+        note = "，已备份原文件" if backed_up else ""
+        return ToolResult(
+            ok=True, content=f"已修改 {rel}：替换 {done} 处{note}" + _syntax_note(rel, updated)
+        )
+
+
+def _syntax_note(rel: str, content: str) -> str:
+    """写入后的即时语法诊断：改坏了就在这次的观察值里直接告诉模型，不必等到跑测试才发现。"""
+    problem = check_syntax(rel, content)
+    return f"\n[语法检查] {rel} 现在有语法错误（{problem}），请立即修复。" if problem else ""
+
+
+def _match_lines(text: str, needle: str) -> list[int]:
+    lines, start = [], 0
+    while (index := text.find(needle, start)) != -1 and len(lines) < 10:
+        lines.append(text.count("\n", 0, index) + 1)
+        start = index + len(needle)
+    return lines
+
+
+def _no_match(rel: str, text: str, old: str) -> str:
+    """零匹配：给出最接近的一行，帮助模型改正缩进、空白或拼写。"""
+    import difflib
+
+    first = old.strip().splitlines()[0].strip() if old.strip() else ""
+    candidates = [line for line in text.splitlines() if line.strip()]
+    close = difflib.get_close_matches(first, [c.strip() for c in candidates], n=1, cutoff=0.6)
+    hint = ""
+    if close:
+        line_no = next(i for i, c in enumerate(candidates, 1) if c.strip() == close[0])
+        shown = next(line for line in candidates if line.strip() == close[0])
+        hint = f"。最接近的一行（约第 {_true_line(text, shown, line_no)} 行）：{shown[:200]}"
+    return f"在 {rel} 中没有找到 old_string（需逐字一致，包括缩进与空白）{hint}"
+
+
+def _true_line(text: str, shown: str, fallback: int) -> int:
+    index = text.find(shown)
+    return text.count("\n", 0, index) + 1 if index != -1 else fallback

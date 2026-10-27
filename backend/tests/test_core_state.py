@@ -73,7 +73,9 @@ def test_new_state_defaults() -> None:
     assert state.pending_approval is None
     assert state.approval_decision is None
     assert state.dispatch_started == ()
-    assert state.schema_version == 1
+    assert state.schema_version == 2
+    assert (state.replan_needed, state.steps_since_plan, state.rejections) == (False, 0, 0)
+    assert (state.planner_degraded, state.verification) == (0, "none")
 
 
 @pytest.mark.unit

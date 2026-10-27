@@ -121,8 +121,10 @@ def test_executor_only_looks_at_the_last_message() -> None:
 
 
 @pytest.mark.unit
-def test_tool_runner_returns_to_planner() -> None:
-    assert next_phase("tool_runner", state_with()) == "planner"
+def test_tool_runner_continues_executing_unless_a_replan_was_requested() -> None:
+    assert next_phase("tool_runner", state_with()) == "budget_guard"
+    assert next_phase("tool_runner", state_with(replan_needed=True)) == "planner"
+    assert next_phase("tool_runner", state_with(should_terminate=True)) == DONE
 
 
 @pytest.mark.unit

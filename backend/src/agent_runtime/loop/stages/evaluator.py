@@ -22,8 +22,8 @@ from agent_runtime.loop.stages.common import (
     terminate,
 )
 from agent_runtime.loop.stages.contracts import EvaluatorVerdict
-from agent_runtime.loop.stages.planner import DIRECT_ANSWER_MILESTONE
-from agent_runtime.loop.stages.prompts import EVALUATOR_INSTRUCTION
+from agent_runtime.loop.stages.planner import BLOCKED_PREFIX, DIRECT_ANSWER_MILESTONE
+from agent_runtime.loop.stages.prompts import EVALUATOR_INSTRUCTION, verification_evidence
 
 #: 打回消息的前缀；同时是“已打回几次”的计数依据，不入状态也不增加字段
 REJECTION_MARK: Final = "【验收未通过】"
@@ -32,6 +32,10 @@ DEFAULT_MAX_REJECTIONS: Final = 3
 _DEFAULT_FEEDBACK: Final = "当前目标尚未达成，请继续推进，并给出可验证的证据。"
 _UNREADABLE_FEEDBACK: Final = "验收结论无法解析，按未达成处理。请继续推进，并给出可验证的证据。"
 _DEFAULT_DELIVERY: Final = "验收完成。"
+_FAILED_CHECK_FEEDBACK: Final = (
+    "最后一次修改文件之后运行的命令失败了（退出码非零）。请先修复，或用证据说明这个失败与本次修改无关，"
+    "再重新给出结论。"
+)
 
 
 def make_evaluator_stage(
@@ -46,7 +50,7 @@ def make_evaluator_stage(
             deps,
             state,
             purpose="evaluator",
-            instruction=EVALUATOR_INSTRUCTION,
+            instruction=f"{EVALUATOR_INSTRUCTION}\n{verification_evidence(state.verification)}",
             model=EvaluatorVerdict,
         )
         if isinstance(result, Stop):
@@ -62,24 +66,30 @@ def make_evaluator_stage(
         else:
             verdict = result.value
 
-        if verdict is not None and verdict.milestone_ok:
+        if verdict is not None and verdict.blocked and not verdict.milestone_ok:
+            # 做不到不是没做好：带着已确认的部分结束，而不是一轮轮打回直到上限
+            return terminate(
+                f"{BLOCKED_PREFIX}{verdict.blocked_reason or verdict.feedback or '无法继续推进'}",
+                total_tokens=tokens,
+                confirmed_facts=_merge(state.confirmed_facts, verdict.confirmed_facts),
+                failed_attempts=_merge_attempts(state, verdict),
+                **({"rolling_summary": verdict.summary} if verdict.summary else {}),
+            )
+        # 代码侧的硬证据压过模型的判断：改完文件后最近一条命令失败，不能放行
+        failed_check = state.verification == "failed"
+        if verdict is not None and verdict.milestone_ok and not failed_check:
             return _accept(state, verdict, tokens)
 
-        rejections = _count_rejections(state) + 1
+        rejections = state.rejections + 1
         if rejections > max_rejections:
             return terminate(
-                f"验收连续 {rejections} 次未通过，已超过上限 {max_rejections}",
+                f"验收累计 {rejections} 次未通过，已超过上限 {max_rejections}",
                 total_tokens=tokens,
+                rejections=rejections,
             )
-        return _reject(state, verdict, tokens)
+        return _reject(state, verdict, tokens, forced=failed_check)
 
     return evaluator
-
-
-def _count_rejections(state: AgentState) -> int:
-    return sum(
-        1 for m in state.messages if m.role == "user" and m.content.startswith(REJECTION_MARK)
-    )
 
 
 def _accept(state: AgentState, verdict: EvaluatorVerdict, tokens: int) -> dict[str, object]:
@@ -110,8 +120,12 @@ def _accept(state: AgentState, verdict: EvaluatorVerdict, tokens: int) -> dict[s
     return update
 
 
-def _reject(state: AgentState, verdict: EvaluatorVerdict | None, tokens: int) -> dict[str, object]:
-    if verdict is None:
+def _reject(
+    state: AgentState, verdict: EvaluatorVerdict | None, tokens: int, *, forced: bool = False
+) -> dict[str, object]:
+    if forced:
+        feedback = _FAILED_CHECK_FEEDBACK
+    elif verdict is None:
         feedback = _UNREADABLE_FEEDBACK
     else:
         feedback = verdict.feedback or verdict.summary or _DEFAULT_FEEDBACK
@@ -121,6 +135,9 @@ def _reject(state: AgentState, verdict: EvaluatorVerdict | None, tokens: int) ->
         "milestones": _set_status(state.milestones, state.current_milestone_idx, "in_progress"),
         "messages": [Message(role="user", content=f"{REJECTION_MARK}{feedback}")],
         "total_tokens": tokens,
+        "rejections": state.rejections + 1,
+        # 硬证据只拦一次：之后要么修复并重新运行（会更新它），要么由模型结合说明再判断
+        **({"verification": "unchecked"} if forced else {}),
     }
     if verdict is not None:
         if verdict.summary:

@@ -157,3 +157,13 @@ def test_blank_facts_are_dropped() -> None:
 def test_failed_attempts_need_all_three_parts() -> None:
     with pytest.raises(ValidationError):
         evaluator(failed_attempts=[{"action": "a"}])
+
+
+@pytest.mark.unit
+def test_blocked_defaults_to_false_and_the_reason_is_clipped() -> None:
+    from agent_runtime.loop.stages.contracts import EvaluatorVerdict, PlannerVerdict
+
+    assert PlannerVerdict(thought="x").blocked is False
+    assert EvaluatorVerdict(milestone_ok=True).blocked is False
+    long = PlannerVerdict(thought="x", blocked=True, blocked_reason="好" * 2000)
+    assert len(long.blocked_reason) == 500

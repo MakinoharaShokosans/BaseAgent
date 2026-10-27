@@ -18,6 +18,9 @@ PLANNER_INSTRUCTION: Final = """\
 - 已经动手做过的任务：确认所有里程碑都有证据支持后才能把 all_completed 设为 true，
   并在 direct_response 里写交付说明；还有事没做完就不要宣布完成。
 - 看到“验收未通过”的反馈时，针对反馈补足缺口，不要重复同样的做法。
+- 目标客观上无法继续时（关键操作被人工拒绝、缺少只有用户知道的信息、环境不允许），
+  把 blocked 设为 true，并在 blocked_reason 里说清卡在哪、需要用户做什么。
+  不要换着花样绕过被拒绝的操作，也不要凭空编造缺失的信息。
 """
 
 EVALUATOR_INSTRUCTION: Final = """\
@@ -29,7 +32,29 @@ EVALUATOR_INSTRUCTION: Final = """\
 - confirmed_facts：本轮被证据确认的事实（只记确认过的，每条一句话）。
 - failed_attempts：本轮暴露出的失败做法，写明做法、失败原因与结论，避免日后重蹈覆辙。
 - 宁严勿松：拿不准时判未达成。
+- 例外：执行者已经说明受阻，且原因成立（关键操作被人工拒绝、缺少只有用户知道的信息、
+  环境不允许）时，不要反复打回，把 blocked 设为 true 并在 blocked_reason 里写清原因。
+  “做不到”和“没做好”不同：前者结束任务，后者才打回。
 """
+
+_VERIFICATION_EVIDENCE: Final = {
+    "none": "代码侧证据：本任务没有修改过文件。",
+    "unchecked": (
+        "代码侧证据：最后一次修改文件之后，没有运行过任何命令（测试、构建、检查）。"
+        "如果这个工程有测试或构建命令，这算证据不足。"
+    ),
+    "failed": (
+        "代码侧证据：最后一次修改文件之后运行的命令失败了（退出码非零）。"
+        "在修复或明确说明这个失败无关之前，不得判定通过。"
+    ),
+    "passed": "代码侧证据：最后一次修改文件之后运行的命令成功了。",
+}
+
+
+def verification_evidence(verification: str) -> str:
+    """由代码（不是模型）从工具结果里得出的事实，附在验收指令后面。"""
+    return _VERIFICATION_EVIDENCE.get(verification, "")
+
 
 EXECUTOR_INSTRUCTION: Final = """\
 你是执行者。根据规划者最新的指令，决定本轮要调用的工具与参数。

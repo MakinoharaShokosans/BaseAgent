@@ -6,12 +6,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
 from agent_runtime.core import AegisTool
 from tools.builtin.artifacts import ReadArtifactTool, TaskArtifacts
-from tools.builtin.files import FileLimits, ViewFileTool, WriteFileTool
+from tools.builtin.files import EditFileTool, FileLimits, ViewFileTool, WriteFileTool
+from tools.builtin.search import GrepTool, ListDirTool
 from tools.builtin.shell import BashTool
 from tools.builtin.skills import LoadSkillTool, SkillCatalog
 from tools.core import SidecarClient
@@ -39,10 +41,20 @@ def build_builtin_tools(
     backup_dir: Path | None = None,
     shell: ShellBinding | None = None,
     skills: SkillCatalog | None = None,
+    ignored_dirs: Collection[str] = (),
+    list_dir_max_entries: int = 200,
 ) -> list[AegisTool]:
     tools: list[AegisTool] = [
         ViewFileTool(workspace_root, files),
         WriteFileTool(workspace_root, files, backup_dir=backup_dir),
+        EditFileTool(workspace_root, files, backup_dir=backup_dir),
+        ListDirTool(workspace_root, ignored_dirs=ignored_dirs, max_entries=list_dir_max_entries),
+        GrepTool(
+            workspace_root,
+            ignored_dirs=ignored_dirs,
+            max_results=grep_max_results,
+            max_file_bytes=files.view_max_file_bytes,
+        ),
     ]
     if shell is not None:
         tools.append(

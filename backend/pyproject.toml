@@ -29,6 +29,11 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.scripts]
+aegis = "agent_runtime.cli:main"
+aegis-server = "agent_runtime.server:main"
+aegis-bench = "evaluation.agent_bench.cli:main"
+
 [project.optional-dependencies]
 # web_search sidecar 所需。搜索提供者的包待技术验证后补充（见 05_tech_stack §9 第 3 项）。
 web-search = [

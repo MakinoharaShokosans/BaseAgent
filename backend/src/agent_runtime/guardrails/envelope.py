@@ -14,6 +14,7 @@ ENVELOPE_TAGS: Final = (
     "tool_observation",
     "external_content",
     "subagent_result",
+    "web_page",
     "skill_sop",
     "available_skills",
     "project_rules",

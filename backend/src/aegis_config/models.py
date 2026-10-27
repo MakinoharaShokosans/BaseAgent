@@ -124,7 +124,7 @@ class WorkspaceConfig(_Section):
 
 class ServerConfig(_Section):
     host: str = "127.0.0.1"
-    port: Port = 8000
+    port: Port = 11328
     max_concurrent_tasks: PosInt = 1
     cors_allow_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     allowed_hosts: list[str] = []
@@ -168,6 +168,21 @@ class GuardrailsConfig(_Section):
     identical_fingerprint_limit: PosInt = 3
 
 
+class LoopConfig(_Section):
+    """主循环的形状。``replan_interval = 0`` 是每个工具批次都回 planner 的旧行为。"""
+
+    #: 连续执行几个工具批次后回 planner 复核；连续失败、循环、越权被拒时不等它，立即回
+    replan_interval: NonNegInt = 6
+    #: 验收累计打回超过它就终止任务（带着已完成的部分交付）
+    max_rejections: PosInt = 3
+    #: planner 连续降级（没拿到可用结构化结论）超过它就终止任务
+    max_planner_degradations: PosInt = 3
+    #: 摆动（ABAB…）检测的周期数；0 关闭
+    alternation_cycles: NonNegInt = 3
+    #: 在 planner / executor / evaluator 的指令尾部告诉模型已用步数与 Token
+    progress_hint: bool = True
+
+
 class CheckpointConfig(_Section):
     dispatch_marker: bool = True
     recover_on_start: bool = True
@@ -181,6 +196,7 @@ class ApprovalConfig(_Section):
 
 class RuntimeConfig(_Section):
     guardrails: GuardrailsConfig = GuardrailsConfig()
+    loop: LoopConfig = LoopConfig()
     checkpoint: CheckpointConfig = CheckpointConfig()
     approval: ApprovalConfig = ApprovalConfig()
 
@@ -631,7 +647,12 @@ class McpServerConfig(_Section):
     url: str = ""
     env: dict[str, str] = {}
     allow_tools: list[str] = []
+    #: 可安全重试的工具（支持 ``*`` 通配）：崩溃恢复据此决定重试还是标记“结果未知”
     idempotent_tools: list[str] = []
+    #: 覆盖 [mcp] 的全局资源上限；0 表示沿用全局值
+    rlimit_as_mb: NonNegInt = 0
+    rlimit_fsize_mb: NonNegInt = 0
+    rlimit_cpu_sec: NonNegInt = 0
 
     @model_validator(mode="after")
     def _transport_fields(self) -> Self:

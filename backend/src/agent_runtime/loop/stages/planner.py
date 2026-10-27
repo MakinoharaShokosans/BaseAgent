@@ -24,13 +24,17 @@ from agent_runtime.loop.stages.common import (
 from agent_runtime.loop.stages.contracts import MAX_MILESTONES, PlannerVerdict
 from agent_runtime.loop.stages.prompts import PLANNER_INSTRUCTION
 
+#: 受阻而结束的终止原因前缀（planner 与 evaluator 共用）
+BLOCKED_PREFIX: Final = "受阻："
 GENERIC_DIRECTIVE: Final = "继续推进当前里程碑。"
 DIRECT_ANSWER_MILESTONE: Final = "响应用户咨询与交付任务"
 _FALLBACK_DELIVERY: Final = "任务已达成。"
 _RAW_DIRECTIVE_LIMIT: Final = 4000
 
 
-def make_planner_stage(deps: ModelStageDeps) -> Stage:
+def make_planner_stage(deps: ModelStageDeps, *, max_degradations: int = 3) -> Stage:
+    """``max_degradations``：planner 连续降级超过它就终止任务，不让空转一直烧到预算用完。"""
+
     async def planner(state: AgentState) -> Mapping[str, object]:
         result = await ask(
             deps,
@@ -50,9 +54,22 @@ def make_planner_stage(deps: ModelStageDeps) -> Stage:
             await report_degraded(deps, "planner", result)
             if result.reason == "content_filter":
                 return terminate("模型输出被内容过滤拦截", total_tokens=tokens)
+            streak = state.planner_degraded + 1
+            if streak > max_degradations:
+                return terminate(
+                    f"规划连续 {streak} 次没有得到可用的结论，已超过上限 {max_degradations}",
+                    total_tokens=tokens,
+                    planner_degraded=streak,
+                )
             # 继续推进比卡住更有价值；里程碑保持不变，也绝不据此宣布完成
             message = Message(role="assistant", content=_degraded_directive(result))
-            return {"messages": [message], "total_tokens": tokens}
+            return {
+                "messages": [message],
+                "total_tokens": tokens,
+                "planner_degraded": streak,
+                "replan_needed": False,
+                "steps_since_plan": 0,
+            }
 
         return plan_update(state, result.value, tokens)
 
@@ -62,6 +79,17 @@ def make_planner_stage(deps: ModelStageDeps) -> Stage:
 def plan_update(state: AgentState, verdict: PlannerVerdict, tokens: int) -> dict[str, object]:
     """把一份通过校验的规划结论折成状态增量（纯函数）。"""
     milestones = _apply_milestones(state.milestones, verdict)
+    if verdict.blocked:
+        reason = verdict.blocked_reason or verdict.thought or "无法继续推进"
+        return {
+            "milestones": milestones,
+            "total_tokens": tokens,
+            "should_terminate": True,
+            "termination_reason": f"{BLOCKED_PREFIX}{reason}",
+            "replan_needed": False,
+            "steps_since_plan": 0,
+            "planner_degraded": 0,
+        }
     next_step = verdict.next_step.strip()
     delivery = verdict.direct_response.strip()
 
@@ -89,6 +117,9 @@ def plan_update(state: AgentState, verdict: PlannerVerdict, tokens: int) -> dict
         "messages": [Message(role="assistant", content=content)],
         "milestones": milestones,
         "total_tokens": tokens,
+        "replan_needed": False,
+        "steps_since_plan": 0,
+        "planner_degraded": 0,
     }
 
 

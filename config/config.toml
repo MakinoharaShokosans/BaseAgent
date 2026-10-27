@@ -60,7 +60,7 @@ artifacts_max_mb = 4096
 # ------------------------------------------------------------------------------
 [server]
 host = "127.0.0.1"                  # 安全红线：只允许回环地址 (127.0.0.1 / localhost / ::1)，其他值拒绝启动
-port = 8000
+port = 11328
 max_concurrent_tasks = 1            # 单机串行化；超出返回 429
 cors_allow_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 allowed_hosts = []                  # 回环名始终允许；经反代或自定义本地域名访问时补充
@@ -102,6 +102,13 @@ warning_ratio = 0.9                 # 达到上限的该比例时注入软告警
 consecutive_errors_limit = 3        # 连续工具失败达到次数触发重规划通知
 identical_fingerprint_limit = 3     # 相同（工具，参数）连续出现次数，达到则整批拦截
 
+[runtime.loop]
+replan_interval = 6                 # 连续执行几个工具批次后回 planner 复核；0 = 每批都回（旧行为）。连续失败、循环、越权被拒时立即回
+max_rejections = 3                  # 验收累计打回超过次数就终止任务，并带着已完成的部分交付
+max_planner_degradations = 3        # planner 连续降级超过次数就终止任务
+alternation_cycles = 3              # 摆动（A、B、A、B…）检测的周期数；0 关闭
+progress_hint = true                # 在指令尾部告诉模型已用步数与 Token（不进前缀，不影响缓存）
+
 [runtime.checkpoint]
 dispatch_marker = true              # 派发前提交标记，用于崩溃后识别“结果可能未知”
 recover_on_start = true             # 启动时扫描未完成任务（标记失败待续跑 / 恢复为待审批）
@@ -122,7 +129,7 @@ temperature = 0.0                   # 思考模式下 DeepSeek 忽略该参数
 [[models.reasoning.endpoints]]
 name = "deepseek-pro"
 base_url = "https://api.deepseek.com"
-model = "deepseek-v4-pro"           # 待验证：以官方文档当前名称为准
+model = "deepseek-v4-flash"         # 待验证：以官方文档当前名称为准（两档当前都用 flash）
 api_key_env = "DEEPSEEK_API_KEY"
 timeout_sec = 180
 context_window = 1_000_000          # 该端点的上下文窗口（Token）
@@ -147,7 +154,7 @@ temperature = 0.2
 [[models.fast.endpoints]]
 name = "deepseek-flash"
 base_url = "https://api.deepseek.com"
-model = "deepseek-flash"            # 待验证
+model = "deepseek-v4-flash"         # 待验证：以官方文档当前名称为准
 api_key_env = "DEEPSEEK_API_KEY"
 timeout_sec = 90
 context_window = 1_000_000

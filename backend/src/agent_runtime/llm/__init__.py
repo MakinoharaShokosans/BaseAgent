@@ -12,6 +12,7 @@ from agent_runtime.llm.errors import (
     LLMUnavailableError,
 )
 from agent_runtime.llm.gateway import LLMGateway, api_key_for, default_client_factory
+from agent_runtime.llm.preferred import PreferredEndpoint
 from agent_runtime.llm.structured import (
     Degraded,
     Parsed,
@@ -42,6 +43,7 @@ __all__ = [
     "LLMResponse",
     "LLMUnavailableError",
     "Parsed",
+    "PreferredEndpoint",
     "StructuredRecord",
     "StructuredSpec",
     "TokenUsage",

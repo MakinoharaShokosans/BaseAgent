@@ -25,7 +25,12 @@ NextPhase = Literal["planner", "budget_guard", "executor", "tool_runner", "evalu
 PERMISSION_LEVELS: tuple[str, ...] = get_args(PermissionLevel)
 PHASES: tuple[str, ...] = (*get_args(Phase), DONE)
 
-CURRENT_SCHEMA_VERSION: Final = 1
+#: 最近一次修改文件之后的验证情况：none 没改过；unchecked 改了还没运行过命令；
+#: failed / passed 改后最近一条命令失败 / 成功
+Verification = Literal["none", "unchecked", "failed", "passed"]
+VERIFICATIONS: tuple[str, ...] = get_args(Verification)
+
+CURRENT_SCHEMA_VERSION: Final = 2
 
 
 class _Frozen(BaseModel):
@@ -98,6 +103,16 @@ class AgentState:
     # 防御
     consecutive_errors: int = 0
     fingerprint_history: tuple[str, ...] = ()
+    # 回路控制（schema v2）
+    #: 工具批次之后是否回到 planner 重规划；planner 运行时清零
+    replan_needed: bool = False
+    #: 自上次规划以来执行了几个工具批次
+    steps_since_plan: int = 0
+    #: 验收累计打回次数
+    rejections: int = 0
+    #: planner 连续降级（没拿到可用结构化结论）的次数
+    planner_degraded: int = 0
+    verification: Verification = "none"
     # 终止
     should_terminate: bool = False
     termination_reason: str = ""
@@ -202,6 +217,12 @@ def _phase(field: str, value: object) -> str:
     return cast(str, value)
 
 
+def _verification(field: str, value: object) -> str:
+    if value not in VERIFICATIONS:
+        raise _bad(field, f"未知验证状态 {value!r}")
+    return cast(str, value)
+
+
 def _artifacts(field: str, value: object) -> dict[str, str]:
     if not isinstance(value, Mapping):
         raise _bad(field, "必须是 字符串 -> 字符串 的映射")
@@ -239,6 +260,11 @@ VALIDATORS: Final[dict[str, _Check]] = {
     "total_tokens": _count,
     "consecutive_errors": _count,
     "fingerprint_history": _str_tuple,
+    "replan_needed": _flag,
+    "steps_since_plan": _count,
+    "rejections": _count,
+    "planner_degraded": _count,
+    "verification": _verification,
     "should_terminate": _flag,
     "termination_reason": _str,
     "phase": _phase,

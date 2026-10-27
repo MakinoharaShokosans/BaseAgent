@@ -79,7 +79,7 @@ def _fails(tmp_path: Path, body: str = MINIMAL, **kwargs: object) -> ConfigError
 @pytest.mark.unit
 def test_minimal_config_loads_with_code_defaults(tmp_path: Path, home: Path) -> None:
     loaded = _load(tmp_path)
-    assert loaded.settings.server.port == 8000  # 来自代码默认值
+    assert loaded.settings.server.port == 11328  # 来自代码默认值
     assert loaded.home == home
     assert loaded.warnings == ()
 
@@ -137,6 +137,14 @@ def test_discovery_prefers_cwd_config_over_home(tmp_path: Path, home: Path) -> N
 
 
 @pytest.mark.unit
+def test_the_repo_config_is_the_last_fallback(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = home.parent / "repo.toml"
+    repo.write_text(MINIMAL + "\n[server]\nport = 5555\n", encoding="utf-8")
+    monkeypatch.setattr("aegis_config.loader.REPO_CONFIG", repo)
+    assert load_settings().settings.server.port == 5555
+
+
+@pytest.mark.unit
 def test_discovery_falls_back_to_home(tmp_path: Path, home: Path) -> None:
     home.mkdir()
     (home / "config.toml").write_text(MINIMAL + "\n[server]\nport = 4444\n", encoding="utf-8")
@@ -153,7 +161,8 @@ def test_missing_explicit_config_is_an_error(
 
 
 @pytest.mark.unit
-def test_no_config_anywhere_is_an_error(home: Path) -> None:
+def test_no_config_anywhere_is_an_error(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aegis_config.loader.REPO_CONFIG", home / "no_repo_config.toml")
     with pytest.raises(ConfigError, match="未找到"):
         load_settings()
 

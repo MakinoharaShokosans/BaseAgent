@@ -289,7 +289,13 @@ async def test_deleting_a_session_removes_its_turns_and_memory(
     await store.update_memory(sid, lambda m: dataclasses.replace(m, summary="s"))
     await store.delete_session(sid)
     assert not await store.session_exists(sid)
-    assert await store.count_rows() == {"sessions": 0, "turns": 0, "memories": 0, "workspaces": 1}
+    assert await store.count_rows() == {
+        "sessions": 0,
+        "turns": 0,
+        "memories": 0,
+        "workspaces": 1,
+        "tasks": 0,
+    }
 
 
 @pytest.mark.unit
@@ -302,6 +308,12 @@ async def test_deleting_a_workspace_cascades_everything_beneath_it(
         await store.update_memory(sid, lambda m: dataclasses.replace(m, summary="s"))
     await store.set_workspace_memory("w1", WorkspaceMemory(profile=("p",)))
     await store.delete_workspace("w1")
-    assert await store.count_rows() == {"sessions": 0, "turns": 0, "memories": 0, "workspaces": 0}
+    assert await store.count_rows() == {
+        "sessions": 0,
+        "turns": 0,
+        "memories": 0,
+        "workspaces": 0,
+        "tasks": 0,
+    }
     with pytest.raises(WorkspaceNotFound):
         await store.get_workspace_memory("w1")

@@ -18,6 +18,7 @@ from agent_runtime.loop.stages.common import (
     CANARY_REASON,
     Assembler,
     Stop,
+    _with_hint,
     guarded,
     response_leaked,
     terminate,
@@ -42,13 +43,16 @@ class ExecutorDeps:
     #: 本任务的主工具集：会话内应保持固定（前缀缓存），按名称排序
     tools: Sequence[ToolSchema]
     deadline: Callable[[], float | None] = lambda: None
+    hint: Callable[[AgentState], str] = lambda state: ""
 
 
 def make_executor_stage(deps: ExecutorDeps) -> Stage:
     async def executor(state: AgentState) -> Mapping[str, object]:
         request = LLMRequest(
             tier="fast",
-            messages=tuple(deps.assemble(state, EXECUTOR_INSTRUCTION)),
+            messages=tuple(
+                deps.assemble(state, _with_hint(EXECUTOR_INSTRUCTION, deps.hint(state)))
+            ),
             tools=tuple(deps.tools) or None,
             purpose="executor",
             deadline=deps.deadline(),

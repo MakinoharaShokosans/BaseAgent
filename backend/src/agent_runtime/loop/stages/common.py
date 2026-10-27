@@ -49,6 +49,8 @@ class ModelStageDeps:
     deadline: Callable[[], float | None] = lambda: None
     emit: Emit | None = None
     reasoning_effort: Effort | None = None
+    #: 附在阶段指令尾部的进度提示（已用步数与 Token）。指令在上下文尾部，不影响前缀缓存
+    hint: Callable[[AgentState], str] = lambda state: ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,12 +87,16 @@ async def ask[T: BaseModel](
     """走推理档调用一次结构化输出。"""
     request = LLMRequest(
         tier="reasoning",
-        messages=tuple(deps.assemble(state, instruction)),
+        messages=tuple(deps.assemble(state, _with_hint(instruction, deps.hint(state)))),
         purpose=purpose,
         deadline=deps.deadline(),
         reasoning_effort=deps.reasoning_effort,
     )
     return await guarded(purpose, deps.gateway.invoke_structured(request, model))
+
+
+def _with_hint(instruction: str, hint: str) -> str:
+    return f"{instruction}\n{hint}" if hint else instruction
 
 
 def response_leaked(response: LLMResponse, token: str, *extra: str) -> bool:

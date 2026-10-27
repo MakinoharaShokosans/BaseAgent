@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from agent_runtime.guardrails import (
     build_replan_notice,
     compute_fingerprint,
+    is_alternating,
     is_fingerprint_loop,
     register_fingerprints,
     update_consecutive_errors,
@@ -111,3 +112,36 @@ def test_the_notice_explains_what_triggered_it() -> None:
     assert "完全相同" in both and "连续 4 次" in both
     assert "完全相同" not in errors
     assert "阈值" not in loop
+
+
+# ==============================================================================
+# 摆动（ABAB…）
+# ==============================================================================
+
+
+@pytest.mark.unit
+def test_an_alternating_pair_is_a_loop_after_three_cycles() -> None:
+    assert is_alternating(list("ABABAB")) is True
+    assert is_alternating(list("xxABABAB")) is True  # 只看最近的 6 条
+    assert is_alternating(list("BABABA"), cycles=3) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "history",
+    ["ABABA", "ABABAC", "AAAAAA", "ABCABC", "AABBAA", "ABABAB"[:4]],
+)
+def test_other_shapes_are_not_alternation(history: str) -> None:
+    assert is_alternating(list(history)) is False
+
+
+@pytest.mark.unit
+def test_alternation_can_be_switched_off_or_tightened() -> None:
+    assert is_alternating(list("ABABAB"), cycles=0) is False
+    assert is_alternating(list("ABAB"), cycles=2) is True
+
+
+@pytest.mark.unit
+@given(st.lists(st.text(min_size=1, max_size=3), max_size=20), st.integers(0, 5))
+def test_alternation_never_raises(history: list[str], cycles: int) -> None:
+    assert isinstance(is_alternating(history, cycles), bool)

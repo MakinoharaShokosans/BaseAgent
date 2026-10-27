@@ -73,6 +73,9 @@ class PlannerVerdict(BaseModel):
     all_completed: bool = False
     #: 面向用户的交付文本；宣布完成时使用
     direct_response: Annotated[str, _clip(_DELIVERY)] = ""
+    #: 客观上无法继续（操作被拒绝、缺少必要信息、环境限制）：体面地结束，不要反复绕
+    blocked: bool = False
+    blocked_reason: Annotated[str, _clip(_FEEDBACK)] = ""
 
 
 # ==============================================================================
@@ -99,3 +102,6 @@ class EvaluatorVerdict(BaseModel):
     failed_attempts: Annotated[
         list[FailedAttemptSpec], AfterValidator(lambda items: items[:MAX_FAILED_ATTEMPTS])
     ] = []
+    #: 执行者已说明受阻且原因成立（如操作被人工拒绝）：别再打回，体面地结束
+    blocked: bool = False
+    blocked_reason: Annotated[str, _clip(_FEEDBACK)] = ""

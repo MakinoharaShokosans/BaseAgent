@@ -211,7 +211,9 @@ async def test_repeated_rejections_end_the_task_instead_of_looping_or_waving_it_
 ) -> None:
     rejection = Message(role="user", content=f"{REJECTION_MARK}还不行")
     base = worked(make_state, m(1))
-    state = with_state(base, messages=(*base.messages, rejection, rejection, rejection))
+    state = with_state(
+        base, messages=(*base.messages, rejection, rejection, rejection), rejections=3
+    )
     _, after, _ = await run(state, parsed(verdict(milestone_ok=False)), max_rejections=3)
 
     assert after.should_terminate is True
@@ -223,12 +225,12 @@ async def test_repeated_rejections_end_the_task_instead_of_looping_or_waving_it_
 async def test_the_limit_counts_rejections_not_acceptances(make_state: MakeState) -> None:
     rejection = Message(role="user", content=f"{REJECTION_MARK}还不行")
     base = worked(make_state, m(1))
-    state = with_state(base, messages=(*base.messages, rejection, rejection))
+    state = with_state(base, messages=(*base.messages, rejection, rejection), rejections=2)
     _, after, _ = await run(state, parsed(verdict(milestone_ok=False)), max_rejections=3)
     assert after.should_terminate is False  # 第 3 次打回仍在允许范围内
 
     _, accepted, _ = await run(
-        with_state(base, messages=(*base.messages, rejection, rejection, rejection)),
+        with_state(base, messages=(*base.messages, rejection, rejection, rejection), rejections=3),
         parsed(verdict()),
         max_rejections=3,
     )
@@ -304,7 +306,7 @@ async def test_the_raw_text_of_a_degraded_verdict_is_never_trusted(
 async def test_degraded_verdicts_count_towards_the_rejection_limit(make_state: MakeState) -> None:
     rejection = Message(role="user", content=f"{REJECTION_MARK}x")
     base = worked(make_state, m(1))
-    state = with_state(base, messages=(*base.messages, rejection, rejection))
+    state = with_state(base, messages=(*base.messages, rejection, rejection), rejections=2)
     _, after, _ = await run(state, degraded("invalid", "乱"), max_rejections=2)
     assert after.should_terminate is True
 
@@ -343,3 +345,97 @@ async def test_a_canary_in_the_verdict_terminates_without_accepting(
     assert after.milestones == state.milestones
     assert after.rolling_summary == ""
     assert after.total_tokens == 60
+
+
+# ==============================================================================
+# 代码侧证据：改动之后的验证情况
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("verification", "needle"),
+    [
+        ("none", "没有修改过文件"),
+        ("unchecked", "没有运行过任何命令"),
+        ("failed", "命令失败了"),
+        ("passed", "命令成功了"),
+    ],
+)
+async def test_the_instruction_carries_the_code_side_evidence(
+    make_state: MakeState, verification: str, needle: str
+) -> None:
+    state = worked(make_state, m(1), verification=verification)
+    _, _, gateway = await run(state, parsed(verdict(milestone_ok=False)))
+    assert needle in gateway.requests[0][0].messages[0].content
+
+
+@pytest.mark.unit
+async def test_a_failed_check_after_the_last_edit_overrides_the_models_approval(
+    make_state: MakeState,
+) -> None:
+    state = worked(make_state, m(1), verification="failed")
+    update, after, _ = await run(state, parsed(verdict(milestone_ok=True, all_completed=True)))
+    assert after.milestones[0].status == "in_progress"
+    assert after.rejections == 1 and "命令失败" in after.messages[-1].content
+    assert after.verification == "unchecked"  # 只拦一次：之后由模型结合说明再判断
+    assert next_phase("evaluator", after) == "planner"
+    assert update["rejections"] == 1
+
+
+@pytest.mark.unit
+async def test_after_the_one_time_block_a_reasoned_approval_goes_through(
+    make_state: MakeState,
+) -> None:
+    state = worked(make_state, m(1), verification="unchecked", rejections=1)
+    _, after, _ = await run(state, parsed(verdict(milestone_ok=True, all_completed=True)))
+    assert after.milestones[0].status == "completed" and after.rejections == 1
+
+
+@pytest.mark.unit
+async def test_every_rejection_is_counted_in_state(make_state: MakeState) -> None:
+    state = worked(make_state, m(1), rejections=1)
+    _, after, _ = await run(state, parsed(verdict(milestone_ok=False, feedback="缺测试")))
+    assert after.rejections == 2 and after.messages[-1].content == f"{REJECTION_MARK}缺测试"
+
+
+@pytest.mark.unit
+async def test_the_progress_hint_reaches_the_evaluator_too(make_state: MakeState) -> None:
+    _, _, gateway = await run(
+        worked(make_state, m(1)), parsed(verdict()), hint=lambda state: "[进度] 提示"
+    )
+    assert gateway.requests[0][0].messages[0].content.endswith("[进度] 提示")
+
+
+@pytest.mark.unit
+async def test_a_blocked_verdict_ends_the_task_without_burning_rejections(
+    make_state: MakeState,
+) -> None:
+    state = worked(make_state, m(1), confirmed_facts=("目录可写",))
+    blocked = verdict(
+        milestone_ok=False,
+        blocked=True,
+        blocked_reason="写操作被人工拒绝",
+        summary="已确认目录可写，写入被拒",
+        confirmed_facts=["目录可写", "写入需要审批"],
+    )
+    _, after, _ = await run(state, parsed(blocked))
+    assert after.should_terminate is True and after.termination_reason == "受阻：写操作被人工拒绝"
+    assert after.rejections == 0 and next_phase("evaluator", after) == DONE
+    assert after.confirmed_facts == ("目录可写", "写入需要审批")
+    assert after.rolling_summary == "已确认目录可写，写入被拒"
+
+
+@pytest.mark.unit
+async def test_blocked_is_ignored_when_the_work_is_in_fact_accepted(make_state: MakeState) -> None:
+    state = worked(make_state, m(1))
+    _, after, _ = await run(
+        state, parsed(verdict(milestone_ok=True, all_completed=True, blocked=True))
+    )
+    assert after.should_terminate is False and after.milestones[0].status == "completed"
+
+
+@pytest.mark.unit
+async def test_the_evaluator_instruction_explains_the_blocked_exit(make_state: MakeState) -> None:
+    _, _, gateway = await run(worked(make_state, m(1)), parsed(verdict(milestone_ok=False)))
+    assert "blocked" in gateway.requests[0][0].messages[0].content

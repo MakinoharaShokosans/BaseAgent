@@ -15,10 +15,11 @@ from typing import Literal, Protocol
 from loguru import logger
 
 from agent_runtime.checkpoint import RecoveryReport, mark_cancelled
-from agent_runtime.core import AgentState, ApprovalDecision
+from agent_runtime.core import AgentState, ApprovalDecision, current_task_id
 from agent_runtime.loop import TaskOutcome, drive
 from agent_runtime.runtime.active import ActiveTasks
 from agent_runtime.runtime.errors import (
+    TaskAlreadyExistsError,
     TaskAlreadyRunningError,
     TaskNotFoundError,
     TaskQueueFullError,
@@ -93,6 +94,12 @@ class TaskRunner:
         )
         self._records: dict[str, _Record] = {}
 
+    def attach_observer(self, observer: TaskObserver) -> None:
+        """生命周期观察者依赖运行器本身（任务服务），所以允许装配后再接上，且只能接一次。"""
+        if self._observer is not None:
+            raise RuntimeError("观察者已经接上")
+        self._observer = observer
+
     # ------------------------------------------------------------------ 查询
 
     def snapshot(self, task_id: str) -> TaskSnapshot:
@@ -123,11 +130,19 @@ class TaskRunner:
 
     # ------------------------------------------------------------------ 提交与续跑
 
-    async def submit(self, request: TaskRequest) -> str:
-        """登记并在后台运行，立即返回 task_id。名额满则 :class:`TaskQueueFullError`，不留痕迹。"""
+    def new_task_id(self) -> str:
+        return self._new_id()
+
+    async def submit(self, request: TaskRequest, task_id: str | None = None) -> str:
+        """登记并在后台运行，立即返回 task_id。名额满则 :class:`TaskQueueFullError`，不留痕迹。
+
+        ``task_id`` 由调用方预先分配时（要先写元数据再运行），重复使用已登记的 id 会被拒绝。
+        """
         if self._running() >= self._max:
             raise TaskQueueFullError(f"并发任务已满（上限 {self._max}）")
-        task_id = self._new_id()
+        task_id = task_id or self._new_id()
+        if task_id in self._records:
+            raise TaskAlreadyExistsError(f"任务 {task_id} 已存在，不会覆盖")
         record = _Record("running")
         self._records[task_id] = record  # 与上面的检查之间没有 await，名额不会被并发提交抢占
         try:
@@ -175,6 +190,7 @@ class TaskRunner:
     # ------------------------------------------------------------------ 后台运行
 
     async def _run(self, task_id: str, record: _Record, state: AgentState) -> None:
+        current_task_id.set(task_id)  # 网关的调用记录等旁路据此知道属于哪个任务
         try:
             if self._observer is not None:
                 await _swallow(self._observer.task_started(task_id, state))
@@ -200,6 +216,9 @@ class TaskRunner:
                     "",
                     outcome.state,
                 )
+                hook = getattr(self._observer, "task_waiting", None)
+                if hook is not None:  # 可选通知：只有关心挂起的观察者实现它
+                    await _swallow(hook(task_id, outcome.state))
             case "terminated":
                 await self._finish(
                     task_id, record, "terminated", outcome.state.termination_reason, outcome.state
@@ -237,6 +256,16 @@ class TaskRunner:
             if final != stored:
                 await self._deps.checkpoints.commit(final)
         await self._finish(task_id, record, "cancelled", "用户取消", final)
+        return True
+
+    def discard(self, task_id: str) -> bool:
+        """忘掉一个已结束或挂起的任务（删除任务时用）。运行中的任务不能忘，返回 False。"""
+        record = self._records.get(task_id)
+        if record is None:
+            return True
+        if record.status == "running":
+            return False
+        del self._records[task_id]
         return True
 
     async def shutdown(self) -> None:

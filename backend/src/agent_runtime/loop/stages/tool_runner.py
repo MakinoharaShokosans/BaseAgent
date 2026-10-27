@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Final
@@ -19,15 +20,18 @@ from agent_runtime.core import (
     Message,
     PendingApproval,
     ToolCall,
+    Verification,
     apply_update,
 )
 from agent_runtime.guardrails import (
+    BudgetLedger,
     LoopLimits,
     PermissionDecision,
     PermissionPolicy,
     action_signature,
     build_replan_notice,
     check_permission,
+    is_alternating,
     is_fingerprint_loop,
     register_fingerprints,
     update_consecutive_errors,
@@ -73,10 +77,21 @@ class ToolRunnerDeps:
     #: 会话级“永久放行”签名集合（可变引用，由任务注册表持有，跨续跑存活，不入检查点）
     allowlist: set[str] = field(default_factory=set[str])
     emit: Emit | None = None
+    #: 子智能体的预算账本：派发前推送父任务用量，派发后把子级的增量消耗并入 ``total_tokens``
+    ledger: BudgetLedger | None = None
     dispatch_marker: bool = True
     envelope: Envelope | None = None
     #: 有调用要处理时，先把状态推给工具侧的任务绑定对象（如 ``read_artifact`` 能看见的产物表）
     bind: Callable[[AgentState], None] | None = None
+
+
+_HANDLE = re.compile(r"artifact://([A-Za-z0-9_.-]+)")
+
+
+def _artifact_of(content: str) -> str:
+    """观察值末尾登记的离线副本句柄；没有则为空。"""
+    found = _HANDLE.findall(content)
+    return found[-1] if found else ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +118,9 @@ def make_tool_runner_stage(deps: ToolRunnerDeps) -> Stage:
             [(c.name, c.args) for c in calls],
             deps.limits.window,
         )
-        loop = is_fingerprint_loop(history, deps.limits.identical_fingerprint_limit)
+        loop = is_fingerprint_loop(
+            history, deps.limits.identical_fingerprint_limit
+        ) or is_alternating(history, deps.limits.alternation_cycles)
         if loop:
             await _emit(deps, "guard.loop_blocked", {"call_ids": [c.id for c in calls]})
 
@@ -116,8 +133,16 @@ def make_tool_runner_stage(deps: ToolRunnerDeps) -> Stage:
             marked = apply_update(consumed, {"dispatch_started": tuple(c.id for c in dispatchable)})
             await deps.commit(marked)
 
-        # 5. 并发派发
+        # 5. 并发派发（账本：先推送父级用量，派发后只取本批的增量）
+        consumed_before = 0
+        if deps.ledger is not None:
+            deps.ledger.sync_parent_usage(state.total_tokens)
+            consumed_before = deps.ledger.consumed
         dispatched = await deps.dispatcher.dispatch([(c.id, c.name, c.args) for c in dispatchable])
+        child_tokens = 0
+        if deps.ledger is not None:
+            child_tokens = deps.ledger.consumed - consumed_before
+            deps.ledger.mark_merged(child_tokens)
         by_id = {item.tool_call_id: item for item in dispatched}
 
         # 6. 观察值治理与配对消息（每个调用都有，顺序与调用一致）
@@ -151,6 +176,11 @@ def make_tool_runner_stage(deps: ToolRunnerDeps) -> Stage:
                     # 信封在裁剪之后包：警示语不会被截掉
                     content = deps.envelope(call.name, item.trust, content)
             failures += failed
+            await _emit(
+                deps,
+                "tool.observed",
+                {"call_id": call.id, "ok": not failed, "artifact_id": _artifact_of(content)},
+            )
             messages.append(
                 Message(role="tool", content=content, tool_call_id=call.id, name=call.name)
             )
@@ -162,10 +192,28 @@ def make_tool_runner_stage(deps: ToolRunnerDeps) -> Stage:
             messages.append(Message(role="user", content=notice))
             await _emit(deps, "guard.replan_notice", {"consecutive_errors": errors, "loop": loop})
 
+        steps = state.steps_since_plan + 1
+        replan = (
+            bool(loop)
+            or bool(rejected)
+            or errors >= deps.limits.consecutive_errors_limit
+            or steps >= deps.limits.replan_interval  # 0：每个批次都回 planner
+        )
+        verification = _verification_after(
+            state.verification, calls, {c.id: by_id[c.id].result.failed for c in dispatchable}
+        )
+
+        usage: dict[str, object] = (
+            {"total_tokens": state.total_tokens + child_tokens} if child_tokens else {}
+        )
         return {
+            **usage,
             "messages": messages,
             "consecutive_errors": errors,
             "fingerprint_history": history,
+            "steps_since_plan": steps,
+            "replan_needed": replan,
+            "verification": verification,
             "artifacts": artifacts,
             "dispatch_started": (),
             "pending_approval": None,
@@ -173,6 +221,28 @@ def make_tool_runner_stage(deps: ToolRunnerDeps) -> Stage:
         }
 
     return tool_runner
+
+
+_EDIT_TOOLS: Final = frozenset({"write_file", "edit_file"})
+_COMMAND_TOOL: Final = "bash"
+
+
+def _verification_after(
+    current: Verification, calls: Iterable[ToolCall], failed: Mapping[str, bool]
+) -> Verification:
+    """按调用顺序更新“改动后验证了没有”：改文件成功 → 未验证；之后的命令按成败定 passed / failed。
+
+    没有改过文件时命令不影响它（读代码用的命令不算验证）；被拦截或拒绝的调用没有执行，不计。
+    """
+    state: Verification = current
+    for call in calls:
+        if call.id not in failed:
+            continue
+        if call.name in _EDIT_TOOLS and not failed[call.id]:
+            state = "unchecked"
+        elif call.name == _COMMAND_TOOL and state != "none":
+            state = "failed" if failed[call.id] else "passed"
+    return state
 
 
 def _unique_id(base: str, taken: Mapping[str, str]) -> str:

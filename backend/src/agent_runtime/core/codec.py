@@ -29,8 +29,33 @@ Migration = Callable[[dict[str, Any]], dict[str, Any]]
 
 #: 低于此版本的检查点不再支持加载
 MINIMUM_SCHEMA_VERSION: Final = 1
-#: 第 n 版升到第 n+1 版的迁移函数。第一版暂无迁移
-MIGRATIONS: Final[dict[int, Migration]] = {}
+_REJECTION_MARK: Final = "【验收未通过】"
+
+
+def _v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """v2 新增回路控制字段。旧任务里的验收打回次数从消息前缀数出来，保持上限的语义不变。"""
+    messages = data.get("messages")
+    rejections = 0
+    if isinstance(messages, list):
+        for item in cast("list[object]", messages):
+            if (
+                isinstance(item, dict)
+                and item.get("role") == "user"
+                and str(item.get("content", "")).startswith(_REJECTION_MARK)
+            ):
+                rejections += 1
+    return {
+        **data,
+        "replan_needed": False,
+        "steps_since_plan": 0,
+        "rejections": rejections,
+        "planner_degraded": 0,
+        "verification": "none",
+    }
+
+
+#: 第 n 版升到第 n+1 版的迁移函数
+MIGRATIONS: Final[dict[int, Migration]] = {1: _v1_to_v2}
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",

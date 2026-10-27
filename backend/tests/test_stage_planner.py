@@ -340,3 +340,88 @@ async def test_updates_that_complete_everything_without_acceptance_do_not_let_th
     _, after, _ = await run(state, parsed(plan))
     assert after.milestones[0].status == "in_progress"
     assert next_phase("planner", after) == "budget_guard"
+
+
+# ==============================================================================
+# 回路控制：重规划标记、连续降级、进度提示
+# ==============================================================================
+
+
+@pytest.mark.unit
+async def test_planning_clears_the_replan_flag_and_the_batch_counter(make_state: MakeState) -> None:
+    state = with_state(
+        make_state(), replan_needed=True, steps_since_plan=5, planner_degraded=2, step_count=2
+    )
+    _, after, _ = await run(state, parsed(verdict(next_step="继续")))
+    assert after.replan_needed is False
+    assert after.steps_since_plan == 0 and after.planner_degraded == 0
+
+
+@pytest.mark.unit
+async def test_a_degraded_plan_counts_up_and_lets_the_executor_carry_on(
+    make_state: MakeState,
+) -> None:
+    state = with_state(make_state(), replan_needed=True, steps_since_plan=4)
+    _, after, _ = await run(state, degraded("invalid", "{乱"))
+    assert after.planner_degraded == 1 and after.should_terminate is False
+    assert after.replan_needed is False and after.steps_since_plan == 0
+    assert next_phase("planner", after) == "budget_guard"
+
+
+@pytest.mark.unit
+async def test_too_many_consecutive_degradations_end_the_task_instead_of_idling(
+    make_state: MakeState,
+) -> None:
+    state = with_state(make_state(), planner_degraded=3)
+    gateway = FakeGateway(degraded("invalid", "{乱"))
+    update = dict(await make_planner_stage(deps(gateway), max_degradations=3)(state))
+    after = apply_update(state, update)
+    assert after.should_terminate is True and "规划" in after.termination_reason
+    assert after.planner_degraded == 4
+
+
+@pytest.mark.unit
+async def test_the_progress_hint_is_appended_to_the_instruction(make_state: MakeState) -> None:
+    _, _, gateway = await run(
+        make_state(),
+        parsed(verdict(next_step="做")),
+        hint=lambda state: f"[进度] {state.step_count} 步",
+    )
+    system = gateway.requests[0][0].messages[0].content
+    assert system.endswith("[进度] 0 步") and "里程碑" in system
+
+
+# ==============================================================================
+# 受阻：做不到就体面地结束
+# ==============================================================================
+
+
+@pytest.mark.unit
+async def test_a_blocked_plan_ends_the_task_with_the_reason_and_keeps_the_progress(
+    make_state: MakeState,
+) -> None:
+    state = with_state(
+        make_state(), milestones=(m(1, "completed"), m(2, "in_progress")), step_count=3
+    )
+    plan = verdict(
+        blocked=True,
+        blocked_reason="写入被人工拒绝，需要你批准后才能创建 a.txt",
+        milestone_updates=[{"id": 2, "status": "failed"}],
+    )
+    update, after, _ = await run(state, parsed(plan, total=70))
+    assert after.should_terminate is True and next_phase("planner", after) == DONE
+    assert after.termination_reason == "受阻：写入被人工拒绝，需要你批准后才能创建 a.txt"
+    assert [x.status for x in after.milestones] == ["completed", "failed"]
+    assert after.total_tokens == 70 and "messages" not in update
+
+
+@pytest.mark.unit
+async def test_blocked_beats_a_completion_claim_and_falls_back_to_the_thought(
+    make_state: MakeState,
+) -> None:
+    state = with_state(make_state(), step_count=2)
+    _, after, _ = await run(
+        state, parsed(verdict(thought="缺少 API 地址", blocked=True, all_completed=True))
+    )
+    assert after.should_terminate is True and after.termination_reason == "受阻：缺少 API 地址"
+    assert all(x.status != "completed" for x in after.milestones)

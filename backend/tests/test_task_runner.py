@@ -109,7 +109,12 @@ class World:
         async def tool_runner(state: AgentState) -> Mapping[str, object]:
             if self.needs_approval and state.approval_decision is None:
                 raise ApprovalRequired(pending_for(state))
-            return {"messages": [TOOL], "pending_approval": None, "approval_decision": None}
+            return {
+                "messages": [TOOL],
+                "pending_approval": None,
+                "approval_decision": None,
+                "replan_needed": True,
+            }
 
         async def noop(state: AgentState) -> Mapping[str, object]:
             return {}

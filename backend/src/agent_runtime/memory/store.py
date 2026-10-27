@@ -25,7 +25,14 @@ from agent_runtime.memory.errors import (
     WorkspaceNotFound,
     WorkspacePathConflict,
 )
-from agent_runtime.memory.models import SessionMemory, Turn, Workspace, WorkspaceMemory
+from agent_runtime.memory.models import (
+    SessionInfo,
+    SessionMemory,
+    TaskRecord,
+    Turn,
+    Workspace,
+    WorkspaceMemory,
+)
 
 _DB_MODE: Final = 0o600
 _ROLES: Final = ("user", "assistant")
@@ -64,6 +71,35 @@ _MIGRATIONS: Final[tuple[str, ...]] = (
         watermark  INTEGER NOT NULL,
         summary    TEXT NOT NULL,
         data_json  TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE tasks (
+        task_id            TEXT PRIMARY KEY,
+        session_id         TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+        workspace_id       TEXT NOT NULL,
+        task_goal          TEXT NOT NULL,
+        status             TEXT NOT NULL,
+        permission_level   TEXT NOT NULL,
+        termination_reason TEXT NOT NULL DEFAULT '',
+        parent_task_id     TEXT,
+        created_at         REAL NOT NULL,
+        started_at         REAL,
+        finished_at        REAL,
+        step_count         INTEGER NOT NULL DEFAULT 0,
+        total_tokens       INTEGER NOT NULL DEFAULT 0,
+        artifact_count     INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_tasks_session ON tasks(session_id, created_at);
+    """,
+    """
+    CREATE TABLE session_settings (
+        session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+        data_json  TEXT NOT NULL
+    );
+    CREATE TABLE app_settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
     );
     """,
 )
@@ -173,7 +209,7 @@ class MemoryStore:
     async def get_workspace(self, workspace_id: str) -> Workspace:
         row = await (
             await self._require().execute(
-                "SELECT workspace_id, name, root_path, description FROM workspaces "
+                "SELECT workspace_id, name, root_path, description, created_at FROM workspaces "
                 "WHERE workspace_id = ?",
                 (workspace_id,),
             )
@@ -181,6 +217,39 @@ class MemoryStore:
         if row is None:
             raise WorkspaceNotFound(f"工作区 {workspace_id} 不存在")
         return Workspace(*row)
+
+    async def list_workspaces(self) -> list[Workspace]:
+        rows = await (
+            await self._require().execute(
+                "SELECT workspace_id, name, root_path, description, created_at FROM workspaces "
+                "ORDER BY created_at, workspace_id"
+            )
+        ).fetchall()
+        return [Workspace(*row) for row in rows]
+
+    async def workspace_by_path(self, root_path: str) -> Workspace | None:
+        row = await (
+            await self._require().execute(
+                "SELECT workspace_id, name, root_path, description, created_at FROM workspaces "
+                "WHERE root_path = ?",
+                (str(Path(root_path).resolve()),),  # noqa: ASYNC240
+            )
+        ).fetchone()
+        return Workspace(*row) if row else None
+
+    async def update_workspace(
+        self, workspace_id: str, *, name: str | None = None, description: str | None = None
+    ) -> Workspace:
+        current = await self.get_workspace(workspace_id)
+        await self._write(
+            "UPDATE workspaces SET name = ?, description = ? WHERE workspace_id = ?",
+            (
+                current.name if name is None else name,
+                current.description if description is None else description,
+                workspace_id,
+            ),
+        )
+        return await self.get_workspace(workspace_id)
 
     async def delete_workspace(self, workspace_id: str) -> None:
         await self._write("DELETE FROM workspaces WHERE workspace_id = ?", (workspace_id,))
@@ -236,6 +305,41 @@ class MemoryStore:
         if row is None:
             raise SessionNotFound(f"会话 {session_id} 不存在")
         return str(row[0])
+
+    async def get_session(self, session_id: str) -> SessionInfo:
+        row = await (
+            await self._require().execute(
+                "SELECT session_id, workspace_id, created_at FROM sessions WHERE session_id = ?",
+                (session_id,),
+            )
+        ).fetchone()
+        if row is None:
+            raise SessionNotFound(f"会话 {session_id} 不存在")
+        return SessionInfo(*row)
+
+    async def list_sessions(self, workspace_id: str) -> list[SessionInfo]:
+        await self.get_workspace(workspace_id)
+        rows = await (
+            await self._require().execute(
+                "SELECT session_id, workspace_id, created_at FROM sessions "
+                "WHERE workspace_id = ? ORDER BY created_at DESC, session_id",
+                (workspace_id,),
+            )
+        ).fetchall()
+        return [SessionInfo(*row) for row in rows]
+
+    async def turns_page(
+        self, session_id: str, limit: int, before_id: int | None = None
+    ) -> list[Turn]:
+        """游标分页：返回 ``id < before_id`` 的最新 ``limit`` 条，按时间正序。"""
+        await self._need_session(session_id)
+        bound = before_id if before_id is not None else 2**62
+        turns = await self._turns(
+            "SELECT id, session_id, task_id, role, content, token_count, created_at "
+            "FROM session_turns WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
+            (session_id, bound, limit),
+        )
+        return list(reversed(turns))
 
     async def delete_session(self, session_id: str) -> None:
         await self._write("DELETE FROM sessions WHERE session_id = ?", (session_id,))
@@ -333,6 +437,140 @@ class MemoryStore:
             await conn.commit()
         return new
 
+    # ------------------------------------------------------------------ 任务元数据
+
+    _TASK_COLUMNS = (
+        "task_id, session_id, workspace_id, task_goal, status, permission_level, created_at, "
+        "termination_reason, parent_task_id, started_at, finished_at, step_count, total_tokens, "
+        "artifact_count"
+    )
+    _TASK_UPDATABLE = frozenset(
+        {
+            "status",
+            "termination_reason",
+            "started_at",
+            "finished_at",
+            "step_count",
+            "total_tokens",
+            "artifact_count",
+        }
+    )
+
+    async def record_task(self, record: TaskRecord) -> None:
+        await self._need_session(record.session_id)
+        await self._write(
+            f"INSERT INTO tasks ({self._TASK_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                record.task_id,
+                record.session_id,
+                record.workspace_id,
+                record.task_goal,
+                record.status,
+                record.permission_level,
+                record.created_at,
+                record.termination_reason,
+                record.parent_task_id,
+                record.started_at,
+                record.finished_at,
+                record.step_count,
+                record.total_tokens,
+                record.artifact_count,
+            ),
+        )
+
+    async def update_task(self, task_id: str, /, **fields: object) -> None:
+        unknown = set(fields) - self._TASK_UPDATABLE
+        if unknown:
+            raise MemoryError_(f"任务元数据不接受字段 {sorted(unknown)}")
+        if not fields:
+            return
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        await self._write(
+            f"UPDATE tasks SET {assignments} WHERE task_id = ?", (*fields.values(), task_id)
+        )
+
+    async def get_task(self, task_id: str) -> TaskRecord | None:
+        row = await (
+            await self._require().execute(
+                f"SELECT {self._TASK_COLUMNS} FROM tasks WHERE task_id = ?", (task_id,)
+            )
+        ).fetchone()
+        return TaskRecord(*row) if row else None
+
+    async def list_tasks(
+        self, session_id: str, limit: int = 50, before: float | None = None
+    ) -> list[TaskRecord]:
+        """最新的在前；``before`` 是上一页最后一条的 ``created_at``。"""
+        await self._need_session(session_id)
+        bound = before if before is not None else 1e18
+        rows = await (
+            await self._require().execute(
+                f"SELECT {self._TASK_COLUMNS} FROM tasks WHERE session_id = ? AND created_at < ? "
+                "ORDER BY created_at DESC, task_id LIMIT ?",
+                (session_id, bound, limit),
+            )
+        ).fetchall()
+        return [TaskRecord(*row) for row in rows]
+
+    async def delete_task(self, task_id: str) -> None:
+        await self._write("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+
+    async def task_ids_of_workspace(self, workspace_id: str) -> list[str]:
+        rows = await (
+            await self._require().execute(
+                "SELECT task_id FROM tasks WHERE workspace_id = ?", (workspace_id,)
+            )
+        ).fetchall()
+        return [str(r[0]) for r in rows]
+
+    async def task_ids_of_session(self, session_id: str) -> list[str]:
+        rows = await (
+            await self._require().execute(
+                "SELECT task_id FROM tasks WHERE session_id = ?", (session_id,)
+            )
+        ).fetchall()
+        return [str(r[0]) for r in rows]
+
+    # ------------------------------------------------------------------ 设置
+
+    async def get_session_settings(self, session_id: str) -> dict[str, object]:
+        """会话级设置（模型偏好、上下文上限等）。没有设置过返回空字典。"""
+        await self._need_session(session_id)
+        row = await (
+            await self._require().execute(
+                "SELECT data_json FROM session_settings WHERE session_id = ?", (session_id,)
+            )
+        ).fetchone()
+        data = json.loads(row[0]) if row else {}
+        return data if isinstance(data, dict) else {}
+
+    async def set_session_settings(self, session_id: str, data: dict[str, object]) -> None:
+        """整体替换；值为 ``None`` 的键不落盘（回到缺省）。"""
+        await self._need_session(session_id)
+        kept = {k: v for k, v in data.items() if v is not None}
+        await self._write(
+            "INSERT INTO session_settings VALUES (?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET data_json = excluded.data_json",
+            (session_id, json.dumps(kept, ensure_ascii=False)),
+        )
+
+    async def get_app_setting(self, key: str) -> str | None:
+        row = await (
+            await self._require().execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+        ).fetchone()
+        return str(row[0]) if row else None
+
+    async def set_app_setting(self, key: str, value: str | None) -> None:
+        """``None`` 删除该项（回到缺省）。"""
+        if value is None:
+            await self._write("DELETE FROM app_settings WHERE key = ?", (key,))
+        else:
+            await self._write(
+                "INSERT INTO app_settings VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+
     # ------------------------------------------------------------------ 辅助
 
     async def count_rows(self) -> dict[str, int]:
@@ -343,6 +581,7 @@ class MemoryStore:
             ("sessions", "sessions"),
             ("turns", "session_turns"),
             ("memories", "session_memories"),
+            ("tasks", "tasks"),
         ):
             row = await (await conn.execute(f"SELECT COUNT(*) FROM {table}")).fetchone()
             out[key] = int(row[0]) if row else 0

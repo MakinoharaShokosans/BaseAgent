@@ -175,7 +175,37 @@ def _valid() -> dict[str, Any]:
 
 @pytest.mark.unit
 def test_schema_version_is_recorded() -> None:
-    assert _valid()["schema_version"] == CURRENT_SCHEMA_VERSION == 1
+    assert _valid()["schema_version"] == CURRENT_SCHEMA_VERSION == 2
+
+
+@pytest.mark.unit
+def test_a_v1_checkpoint_is_upgraded_and_keeps_its_rejection_count() -> None:
+    data = _valid()
+    for name in (
+        "replan_needed",
+        "steps_since_plan",
+        "rejections",
+        "planner_degraded",
+        "verification",
+    ):
+        del data[name]
+    data["schema_version"] = 1
+    data["messages"] += [
+        {"role": "user", "content": "【验收未通过】缺测试"},
+        {"role": "user", "content": "【验收未通过】还是缺"},
+        {"role": "user", "content": "普通消息"},
+    ]
+    state = state_from_dict(data)
+    assert state.schema_version == 2 and state.rejections == 2
+    assert (state.replan_needed, state.steps_since_plan, state.verification) == (False, 0, "none")
+
+
+@pytest.mark.unit
+def test_unknown_verification_value_is_rejected() -> None:
+    data = _valid()
+    data["verification"] = "maybe"
+    with pytest.raises(StateDecodeError, match="verification"):
+        state_from_dict(data)
 
 
 @pytest.mark.unit

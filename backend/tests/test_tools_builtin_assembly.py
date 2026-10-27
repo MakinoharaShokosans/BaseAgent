@@ -43,8 +43,15 @@ def build(tmp_path: Path, *, shell: bool = False, skills: bool = False) -> list[
 
 
 @pytest.mark.unit
-def test_the_file_tools_and_read_artifact_are_always_there(tmp_path: Path) -> None:
-    assert sorted(build(tmp_path)) == ["read_artifact", "view_file", "write_file"]
+def test_the_file_search_tools_and_read_artifact_are_always_there(tmp_path: Path) -> None:
+    assert sorted(build(tmp_path)) == [
+        "edit_file",
+        "grep",
+        "list_dir",
+        "read_artifact",
+        "view_file",
+        "write_file",
+    ]
 
 
 @pytest.mark.unit

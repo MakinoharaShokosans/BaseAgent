@@ -139,7 +139,7 @@ def happy_script() -> Script:
     return Script(
         planner=[{"milestones": [Milestone(id=0, title="m")]}, {"milestones": [done()]}],
         executor=[{"messages": [ASSISTANT], "step_count": 1}],
-        tool_runner=[{"messages": [TOOL]}],
+        tool_runner=[{"messages": [TOOL], "replan_needed": True}],
     )
 
 
@@ -364,7 +364,12 @@ async def test_resume_after_approval_re_enters_the_same_stage_and_continues(
 
     async def consume(state: AgentState) -> Mapping[str, object]:
         assert state.approval_decision is not None  # 重新进入时决策已在状态里
-        return {"messages": [TOOL], "pending_approval": None, "approval_decision": None}
+        return {
+            "messages": [TOOL],
+            "pending_approval": None,
+            "approval_decision": None,
+            "replan_needed": True,
+        }
 
     script._steps["tool_runner"] = [consume]
     script._steps["planner"] = [{"milestones": [done()]}]

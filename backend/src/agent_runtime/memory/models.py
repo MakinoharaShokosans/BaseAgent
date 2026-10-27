@@ -130,3 +130,34 @@ class Workspace:
     name: str
     root_path: str
     description: str
+    created_at: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class SessionInfo:
+    session_id: str
+    workspace_id: str
+    created_at: float
+
+
+TaskStatusName = str
+
+
+@dataclass(frozen=True, slots=True)
+class TaskRecord:
+    """任务元数据：列表、刷新后找回、级联删除都靠它，不依赖进程内存。"""
+
+    task_id: str
+    session_id: str
+    workspace_id: str
+    task_goal: str
+    status: TaskStatusName
+    permission_level: str
+    created_at: float
+    termination_reason: str = ""
+    parent_task_id: str | None = None
+    started_at: float | None = None
+    finished_at: float | None = None
+    step_count: int = 0
+    total_tokens: int = 0
+    artifact_count: int = 0

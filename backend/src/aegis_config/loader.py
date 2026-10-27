@@ -97,11 +97,13 @@ def load_settings(
     overrides: Mapping[str, Any] | None = None,
     *,
     create_home: bool = True,
+    require_models: bool = True,
 ) -> LoadedSettings:
     """加载并校验配置。任何问题都抛 :class:`ConfigError`，调用方应据此拒绝启动。
 
     ``overrides`` 对应命令行参数，嵌套字典，优先级最高。``create_home`` 为假时不创建数据目录
-    （只读检查用）。
+    （只读检查用）。``require_models`` 为假时不要求模型端点有密钥——sidecar 按设计拿不到密钥，
+    只读自己那一节配置。
     """
     path = _find_config(config_path)
     file_data = _read_toml(path)
@@ -117,7 +119,7 @@ def load_settings(
     paths = _resolve_paths(settings, home, problems) if home else None
     if home and create_home:
         _ensure_home(home, problems)
-    endpoints, warnings = _usable_endpoints(settings, problems)
+    endpoints, warnings = _usable_endpoints(settings, problems if require_models else [])
     warnings += _trust_warnings(settings)
 
     if problems or home is None or paths is None:
@@ -137,6 +139,9 @@ def load_settings(
 # ==============================================================================
 
 
+REPO_CONFIG = Path(__file__).resolve().parents[3] / "config" / "config.toml"
+
+
 def _find_config(explicit: Path | None) -> Path:
     if explicit is not None:
         return _must_exist(explicit, "指定的配置文件")
@@ -146,7 +151,8 @@ def _find_config(explicit: Path | None) -> Path:
 
     home_env = os.environ.get("AEGIS_HOME")
     home = Path(home_env).expanduser() if home_env else Path("~/.local/share/aegis").expanduser()
-    candidates = [Path.cwd() / "config" / "config.toml", home / "config.toml"]
+    # 源码检出里，配置在仓库根的 config/：从 backend/ 目录启动时也要找得到
+    candidates = [Path.cwd() / "config" / "config.toml", home / "config.toml", REPO_CONFIG]
     for candidate in candidates:
         if candidate.is_file():
             return candidate

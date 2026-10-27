@@ -61,8 +61,8 @@ def _rejects(data: dict[str, Any], *, at: str, containing: str = "") -> None:
 @pytest.mark.unit
 def test_reference_config_is_valid(reference: dict[str, Any]) -> None:
     settings = Settings.model_validate(reference)
-    assert settings.server.port == 8000
-    assert settings.models.reasoning.endpoints[0].model == "deepseek-v4-pro"
+    assert settings.server.port == 11328
+    assert settings.models.reasoning.endpoints[0].model == "deepseek-v4-flash"
 
 
 @pytest.mark.unit

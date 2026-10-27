@@ -516,7 +516,7 @@ async def test_the_fingerprint_history_accumulates_and_slides(
 
     long_history = tuple(f"h{i}" for i in range(10))
     _, after = await rig.run(with_state(state, fingerprint_history=long_history))
-    assert len(after.fingerprint_history) == 5
+    assert len(after.fingerprint_history) == LIMITS.window
     assert after.fingerprint_history[-1] == compute_fingerprint("view_file", {"path": "a"})
 
 
@@ -854,3 +854,206 @@ async def test_a_tool_artifact_id_that_is_already_taken_gets_a_suffix_not_an_ove
     _, after = await rig.run(state)
     assert after.artifacts == {"step_2_bash": "/old.log", "step_2_bash_2": "/new.log"}
     assert "artifact://step_2_bash_2" in tool_messages(after)[0].content
+
+
+# ==============================================================================
+# 预算账本：子级消耗并入 total_tokens，且不被重复扣减
+# ==============================================================================
+
+
+class Spender(Fake):
+    """一个会经账本消耗额度的工具：预留、花掉、结算，和 delegate_research 的模式一致。"""
+
+    def __init__(self, ledger: Any, spend: int) -> None:
+        super().__init__("view_file", idempotent=True)
+        self._ledger, self._spend = ledger, spend
+
+    async def invoke(self, args: Mapping[str, Any]) -> ToolResult:
+        reservation, reason = self._ledger.reserve(5_000, "child")
+        if reservation is None:
+            return ToolResult.failure(f"预算不足：{reason}")
+        try:
+            return ToolResult(ok=True, content="done")
+        finally:
+            self._ledger.settle(reservation, self._spend)
+
+
+@pytest.mark.unit
+async def test_child_consumption_is_merged_into_total_tokens_once_per_batch(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    from agent_runtime.guardrails import BudgetLedger
+
+    ledger = BudgetLedger(max_total_tokens=20_000, min_grant_tokens=1_000)
+    rig = Rig(tmp_path, tools=[Spender(ledger, 3_000)], ledger=ledger)
+    state = batch(make_state, ("c1", "view_file", {"path": "a"}), total_tokens=10_000)
+    update, after = await rig.run(state)
+    assert update["total_tokens"] == 13_000 and after.total_tokens == 13_000
+    assert ledger.available == 20_000 - 10_000 - 3_000  # 子级的 3000 只算一次
+
+    # 第二次派发（下一批，路径不同以避开重复指纹）：已并入的部分不会再被扣一遍
+    second = with_state(
+        after,
+        phase="tool_runner",
+        messages=(
+            *after.messages,
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=(ToolCall(id="c2", name="view_file", args={"path": "b"}),),
+            ),
+        ),
+    )
+    update2, _ = await rig.run(second)
+    assert update2["total_tokens"] == 16_000
+    assert ledger.available == 20_000 - 10_000 - 6_000
+    assert ledger.consumed == 6_000
+
+
+@pytest.mark.unit
+async def test_total_tokens_is_untouched_when_nothing_was_spent(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    from agent_runtime.guardrails import BudgetLedger
+
+    ledger = BudgetLedger(max_total_tokens=20_000)
+    rig = Rig(tmp_path, ledger=ledger)
+    update, _ = await rig.run(batch(make_state, ("c1", "view_file", {"path": "a"})))
+    assert "total_tokens" not in update
+
+
+# ==============================================================================
+# 回路控制：何时回 planner（replan_needed）与“改动后验证了没有”（verification）
+# ==============================================================================
+
+FAIL = ToolResult(ok=False, content="", error="exit 1", exit_code=1)
+
+
+def interval(n: int) -> LoopLimits:
+    return LoopLimits(consecutive_errors_limit=3, identical_fingerprint_limit=3, replan_interval=n)
+
+
+@pytest.mark.unit
+async def test_a_healthy_batch_goes_straight_back_to_the_executor(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    rig = Rig(tmp_path, limits=interval(3))
+    update, after = await rig.run(batch(make_state, ("c1", "view_file", {"path": "a"})))
+    assert update["replan_needed"] is False and update["steps_since_plan"] == 1
+    assert next_phase("tool_runner", after) == "budget_guard"
+
+
+@pytest.mark.unit
+async def test_the_planner_is_consulted_again_once_the_interval_is_reached(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    rig = Rig(tmp_path, limits=interval(3))
+    state = batch(make_state, ("c1", "view_file", {"path": "a"}), steps_since_plan=2)
+    _, after = await rig.run(state)
+    assert after.replan_needed is True and after.steps_since_plan == 3
+    assert next_phase("tool_runner", after) == "planner"
+
+
+@pytest.mark.unit
+async def test_interval_zero_keeps_the_old_replan_after_every_batch(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    rig = Rig(tmp_path, limits=interval(0))
+    _, after = await rig.run(batch(make_state, ("c1", "view_file", {"path": "a"})))
+    assert after.replan_needed is True
+
+
+@pytest.mark.unit
+async def test_consecutive_failures_replan_immediately_whatever_the_interval(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    rig = Rig(tmp_path, tools=[Fake("bash", result=FAIL)], limits=interval(99))
+    state = batch(make_state, ("c1", "bash", {"command": "pytest"}), consecutive_errors=2)
+    _, after = await rig.run(state)
+    assert after.consecutive_errors == 3 and after.replan_needed is True
+
+
+@pytest.mark.unit
+async def test_a_blocked_loop_replans_immediately(make_state: MakeState, tmp_path: Path) -> None:
+    rig = Rig(tmp_path, limits=interval(99))
+    same = compute_fingerprint("view_file", {"path": "a"})
+    state = batch(
+        make_state,
+        ("c1", "view_file", {"path": "a"}),
+        fingerprint_history=(same, same),
+    )
+    _, after = await rig.run(state)
+    assert after.replan_needed is True
+
+
+@pytest.mark.unit
+async def test_an_alternating_pattern_is_caught_as_a_loop(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    rig = Rig(tmp_path, limits=interval(99))
+    a = compute_fingerprint("view_file", {"path": "a"})
+    b = compute_fingerprint("view_file", {"path": "b"})
+    state = batch(
+        make_state, ("c1", "view_file", {"path": "a"}), fingerprint_history=(b, a, b, a, b)
+    )
+    update, after = await rig.run(state)
+    assert after.replan_needed is True
+    assert "已拦截" in tool_messages(after)[-1].content
+    assert update["steps_since_plan"] == 1
+
+
+@pytest.mark.unit
+async def test_a_human_rejection_replans_immediately(make_state: MakeState, tmp_path: Path) -> None:
+    rig = Rig(tmp_path, limits=interval(99))
+    _, pending = await suspend(rig, batch(make_state, CURL, permission_level="workspace_write"))
+    _, after = await rig.run(approved(pending, approved=False, reason="不允许联网"))
+    assert after.replan_needed is True and next_phase("tool_runner", after) == "planner"
+
+
+@pytest.mark.unit
+async def test_verification_follows_edits_and_the_commands_run_after_them(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    rig = Rig(tmp_path, limits=interval(99))
+    _, after = await rig.run(batch(make_state, ("c1", "bash", {"command": "pytest"})))
+    assert after.verification == "none"  # 没改过文件：读代码用的命令不算验证
+
+    _, edited = await rig.run(batch(make_state, ("c1", "write_file", {"path": "a.py"})))
+    assert edited.verification == "unchecked"
+
+    _, passed = await rig.run(
+        batch(make_state, ("c2", "bash", {"command": "pytest"}), verification="unchecked")
+    )
+    assert passed.verification == "passed"
+
+    failing = Rig(tmp_path, tools=[Fake("bash", result=FAIL)], limits=interval(99))
+    _, failed = await failing.run(
+        batch(make_state, ("c3", "bash", {"command": "pytest"}), verification="unchecked")
+    )
+    assert failed.verification == "failed"
+
+
+@pytest.mark.unit
+async def test_a_new_edit_after_a_failed_check_makes_it_unchecked_again(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    rig = Rig(tmp_path, limits=interval(99))
+    _, after = await rig.run(
+        batch(
+            make_state,
+            ("c1", "write_file", {"path": "a.py"}),
+            ("c2", "bash", {"command": "pytest"}),
+            ("c3", "write_file", {"path": "b.py"}),
+            verification="failed",
+        )
+    )
+    assert after.verification == "unchecked"  # 按调用顺序：最后一次是改文件
+
+
+@pytest.mark.unit
+async def test_a_failed_edit_or_a_blocked_command_does_not_change_verification(
+    make_state: MakeState, tmp_path: Path
+) -> None:
+    rig = Rig(tmp_path, tools=[Fake("write_file", result=FAIL), Fake("bash")], limits=interval(99))
+    _, after = await rig.run(batch(make_state, ("c1", "write_file", {"path": "a.py"})))
+    assert after.verification == "none"

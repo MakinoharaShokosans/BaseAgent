@@ -16,7 +16,7 @@ from agent_runtime.context import (
     RulesCache,
     RulesResult,
 )
-from agent_runtime.core import PermissionLevel
+from agent_runtime.core import AgentState, PermissionLevel
 from agent_runtime.core.state import PERMISSION_LEVELS
 from agent_runtime.guardrails import BudgetLimits, LoopLimits, PermissionPolicy
 from agent_runtime.loop.stages import ApprovalHooks
@@ -62,10 +62,29 @@ def permission_policy_from_settings(settings: Settings) -> PermissionPolicy:
 
 def loop_limits_from_settings(settings: Settings) -> LoopLimits:
     g = settings.runtime.guardrails
+    loop = settings.runtime.loop
     return LoopLimits(
         consecutive_errors_limit=g.consecutive_errors_limit,
         identical_fingerprint_limit=g.identical_fingerprint_limit,
+        alternation_cycles=loop.alternation_cycles,
+        replan_interval=loop.replan_interval,
     )
+
+
+def progress_hint_from_settings(settings: Settings) -> Callable[[AgentState], str]:
+    """附在阶段指令尾部的进度提示。关闭时返回恒空的函数。"""
+    if not settings.runtime.loop.progress_hint:
+        return lambda state: ""
+    g = settings.runtime.guardrails
+
+    def hint(state: AgentState) -> str:
+        used = min(100, round(100 * state.total_tokens / g.max_total_tokens))
+        return (
+            f"[进度] 已执行 {state.step_count}/{g.max_steps} 步，已用 Token {used}%。"
+            "接近上限时，优先把已有成果整理交付，不要开启新的大动作。"
+        )
+
+    return hint
 
 
 def observation_limits_from_settings(settings: Settings) -> ObservationLimits:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -17,10 +18,11 @@ from loguru import logger
 
 from agent_runtime.memory.merge import Extraction, MergeLimits, merge_extraction
 from agent_runtime.memory.models import SessionMemory, Turn
+from agent_runtime.memory.preferences import SessionPreferences
 from agent_runtime.memory.slicing import split_for_compaction
 from agent_runtime.memory.store import MemoryStore
 
-Status = Literal["below_threshold", "backing_off", "compacted", "failed"]
+Status = Literal["below_threshold", "backing_off", "compacted", "failed", "nothing_to_compact"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +53,8 @@ class CompactionResult:
     cut_id: int = 0
     restored: tuple[str, ...] = ()
     dropped: tuple[tuple[str, str], ...] = ()
+    #: 本次并入摘要的轮次数
+    turns: int = 0
 
 
 class SessionCompactor:
@@ -72,21 +76,36 @@ class SessionCompactor:
         """``force``：近期新增超限时提前并入，即使活跃轮次没到水位。"""
         lock = self._locks.setdefault(session_id, asyncio.Lock())
         async with lock:  # 同一会话同一时刻只有一次压缩；后到的重新判断，通常已不需要
-            return await self._run(session_id, force)
+            return await self._run(session_id, force, manual=False)
 
-    async def _run(self, session_id: str, force: bool) -> CompactionResult:
+    async def compact_now(self, session_id: str) -> CompactionResult:
+        """用户手动触发：不看水位线与退避，除最近 ``keep_recent_turns`` 条外全部并入摘要。
+
+        没有可并入的轮次、也没有待合并的近期新增时直接返回 ``nothing_to_compact``，不调用提炼器。
+        """
+        lock = self._locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            return await self._run(session_id, True, manual=True)
+
+    async def _run(self, session_id: str, force: bool, *, manual: bool) -> CompactionResult:
         cfg = self._cfg
         snapshot = await self._store.load_memory(session_id)
         now = self._clock()
-        if now < snapshot.retry_after:
+        if now < snapshot.retry_after and not manual:  # 手动是用户明确的意图，不受退避约束
             return CompactionResult("backing_off")
         active = await self._store.turns_after(session_id, snapshot.watermark)
         total = sum(t.token_count for t in active)
-        if total < cfg.token_limit * cfg.high_watermark and not force:
+        # 会话可以覆盖上下文上限（设置面板的滑动条）；没有覆盖时用配置值
+        prefs = SessionPreferences.from_mapping(await self._store.get_session_settings(session_id))
+        limit = prefs.context_token_limit or cfg.token_limit
+        if total < limit * cfg.high_watermark and not force:
             return CompactionResult("below_threshold")
 
-        target = int(cfg.token_limit * cfg.compaction_ratio)
+        # 手动：目标取到够不着，切片退到“允许范围内最后一个 assistant 节点”，即尽可能多地压
+        target = sys.maxsize if manual else int(limit * cfg.compaction_ratio)
         head, _ = split_for_compaction(active, target, cfg.keep_recent_turns)
+        if manual and not head and not (snapshot.pending_facts or snapshot.pending_failures):
+            return CompactionResult("nothing_to_compact")
         request = ExtractionRequest(snapshot, tuple(head), cfg.limits)
         try:
             extraction = await self._extract(request)
@@ -120,7 +139,7 @@ class SessionCompactor:
             )
 
         await self._store.update_memory(session_id, apply)
-        return CompactionResult("compacted", cut, merged.restored, merged.dropped)
+        return CompactionResult("compacted", cut, merged.restored, merged.dropped, len(head))
 
     async def _record_failure(self, session_id: str, now: float) -> None:
         backoff = self._cfg.backoff_sec

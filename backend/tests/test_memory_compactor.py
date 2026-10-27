@@ -230,6 +230,58 @@ async def test_forcing_merges_pending_even_below_the_threshold_without_moving_th
 
 
 @pytest.mark.unit
+async def test_manual_compaction_ignores_the_watermark_and_keeps_only_the_recent_turns(
+    store: MemoryStore,
+) -> None:
+    await fill(store, 3)  # 60 < 80：自动压缩不会动
+    ex = Extractor()
+    res = await compactor(store, ex).compact_now("s")
+    m = await store.load_memory("s")
+    assert res.status == "compacted" and res.turns == 4  # 6 条里留最近 2 条（一问一答）
+    assert [t.content for t in await store.turns_after("s", m.watermark)] == ["q2", "a2"]
+    assert [t.content for t in ex.requests[0].turns] == ["q0", "a0", "q1", "a1"]
+    assert m.summary == "新摘要" and len(await store.recent_turns("s", 99)) == 6  # 原文不删
+
+
+@pytest.mark.unit
+async def test_manual_compaction_overrides_the_backoff(store: MemoryStore) -> None:
+    await fill(store, 3)
+    clock = Clock()
+    failing = Extractor(RuntimeError("boom"))
+    c = compactor(store, failing, clock)
+    assert (await c.compact_now("s")).status == "failed"
+    assert (await c.maybe_compact("s", force=True)).status == "backing_off"
+    good = Extractor()
+    res = await compactor(store, good, clock).compact_now("s")
+    assert res.status == "compacted" and (await store.load_memory("s")).compaction_failures == 0
+
+
+@pytest.mark.unit
+async def test_manual_compaction_with_nothing_to_do_does_not_call_the_model(
+    store: MemoryStore,
+) -> None:
+    await fill(store, 1)  # 只有最近一问一答
+    ex = Extractor()
+    res = await compactor(store, ex).compact_now("s")
+    assert res.status == "nothing_to_compact" and res.turns == 0 and ex.requests == []
+    assert await store.load_memory("s") == SessionMemory()
+
+
+@pytest.mark.unit
+async def test_manual_compaction_still_merges_pending_when_there_is_nothing_to_cut(
+    store: MemoryStore,
+) -> None:
+    await fill(store, 1)
+    pending = Fact("P", "t0", "trusted", "task", 1.0)
+    await store.update_memory("s", lambda m: dataclasses.replace(m, pending_facts=(pending,)))
+    ex = Extractor(Extraction("合并后", (ExtractedFact("P", "t0"),), (), ()))
+    res = await compactor(store, ex).compact_now("s")
+    m = await store.load_memory("s")
+    assert res.status == "compacted" and res.turns == 0 and m.watermark == 0
+    assert m.pending_facts == () and [f.text for f in m.facts] == ["P"]
+
+
+@pytest.mark.unit
 async def test_something_deposited_while_the_model_was_thinking_is_not_lost(
     store: MemoryStore,
 ) -> None:

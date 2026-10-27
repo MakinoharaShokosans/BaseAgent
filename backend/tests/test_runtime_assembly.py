@@ -143,7 +143,10 @@ def test_loop_limits_follow_the_reference_config(raw: dict[str, Any]) -> None:
     from agent_runtime.runtime import loop_limits_from_settings
 
     assert loop_limits_from_settings(Settings.model_validate(raw)) == LoopLimits(
-        consecutive_errors_limit=3, identical_fingerprint_limit=3
+        consecutive_errors_limit=3,
+        identical_fingerprint_limit=3,
+        alternation_cycles=3,
+        replan_interval=6,
     )
 
 

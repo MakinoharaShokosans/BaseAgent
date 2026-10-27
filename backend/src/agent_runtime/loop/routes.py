@@ -17,7 +17,7 @@ ALLOWED_TRANSITIONS: Final[Mapping[Phase, frozenset[NextPhase]]] = {
     "planner": frozenset({"budget_guard", "evaluator", DONE}),
     "budget_guard": frozenset({"executor", DONE}),
     "executor": frozenset({"tool_runner", "evaluator", DONE}),
-    "tool_runner": frozenset({"planner", DONE}),
+    "tool_runner": frozenset({"planner", "budget_guard", DONE}),
     "evaluator": frozenset({"planner", DONE}),
 }
 
@@ -50,7 +50,10 @@ def route_after_executor(state: AgentState) -> NextPhase:
 
 
 def route_after_tool_runner(state: AgentState) -> NextPhase:
-    return DONE if state.should_terminate else "planner"
+    """默认直接继续执行；tool_runner 标记了需要重规划才回 planner。"""
+    if state.should_terminate:
+        return DONE
+    return "planner" if state.replan_needed else "budget_guard"
 
 
 def route_after_evaluator(state: AgentState) -> NextPhase:

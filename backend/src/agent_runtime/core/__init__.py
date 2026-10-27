@@ -31,11 +31,13 @@ from agent_runtime.core.state import (
     PendingApproval,
     PermissionLevel,
     Phase,
+    Verification,
     apply_update,
     check_invariants,
     new_state,
 )
 from agent_runtime.core.suspend import ApprovalRequired
+from agent_runtime.core.taskctx import current_task_id
 from agent_runtime.core.tools import AegisTool, ToolResult, ToolSchema, Trust
 
 __all__ = [
@@ -65,9 +67,11 @@ __all__ = [
     "ToolResult",
     "ToolSchema",
     "Trust",
+    "Verification",
     "apply_update",
     "assert_atomic_pairs",
     "check_invariants",
+    "current_task_id",
     "dumps_state",
     "loads_state",
     "new_state",

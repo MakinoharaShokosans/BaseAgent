@@ -21,10 +21,12 @@ from agent_runtime.guardrails.envelope import (
     wrap,
 )
 from agent_runtime.guardrails.injection import MAX_HITS, InjectionHit, scan_injection
+from agent_runtime.guardrails.ledger import BudgetLedger, ChildBudget, Reservation
 from agent_runtime.guardrails.loops import (
     LoopLimits,
     build_replan_notice,
     compute_fingerprint,
+    is_alternating,
     is_fingerprint_loop,
     register_fingerprints,
     update_consecutive_errors,
@@ -40,14 +42,17 @@ __all__ = [
     "ENVELOPE_TAGS",
     "MAX_HITS",
     "UNTRUSTED_WARNING",
+    "BudgetLedger",
     "BudgetLimits",
     "BudgetVerdict",
+    "ChildBudget",
     "Dimension",
     "InjectionHit",
     "LoopLimits",
     "PermissionDecision",
     "PermissionPolicy",
     "PhysicalBudgetGuard",
+    "Reservation",
     "Usage",
     "action_signature",
     "build_replan_notice",
@@ -57,6 +62,7 @@ __all__ = [
     "detect_canary_leak",
     "escape_attr",
     "evaluate_budget",
+    "is_alternating",
     "is_fingerprint_loop",
     "observation_envelope",
     "register_fingerprints",

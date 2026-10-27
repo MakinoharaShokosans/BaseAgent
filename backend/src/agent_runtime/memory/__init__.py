@@ -30,15 +30,24 @@ from agent_runtime.memory.merge import (
 from agent_runtime.memory.models import (
     Fact,
     Failure,
+    SessionInfo,
     SessionMemory,
+    TaskRecord,
     Turn,
     Workspace,
     WorkspaceMemory,
+)
+from agent_runtime.memory.preferences import (
+    MIN_CONTEXT_TOKEN_LIMIT,
+    SYSTEM_PROMPT_KEY,
+    SessionPreferences,
 )
 from agent_runtime.memory.slicing import split_for_compaction
 from agent_runtime.memory.store import MemoryStore
 
 __all__ = [
+    "MIN_CONTEXT_TOKEN_LIMIT",
+    "SYSTEM_PROMPT_KEY",
     "CompactionConfig",
     "CompactionResult",
     "DepositResult",
@@ -55,9 +64,12 @@ __all__ = [
     "MergeResult",
     "Outcome",
     "SessionCompactor",
+    "SessionInfo",
     "SessionMemory",
     "SessionNotFound",
+    "SessionPreferences",
     "Superseded",
+    "TaskRecord",
     "Turn",
     "WatermarkRegressionError",
     "Workspace",

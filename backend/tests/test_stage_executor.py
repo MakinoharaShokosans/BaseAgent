@@ -185,3 +185,20 @@ async def test_a_canary_in_the_reply_or_in_tool_arguments_ends_the_task_and_drop
     assert after.messages == state.messages  # 带金丝雀的工具调用不得进入状态，更不会被执行
     assert after.total_tokens == 50
     assert "canary-abc" not in repr(update)
+
+
+@pytest.mark.unit
+async def test_the_progress_hint_is_appended_to_the_executor_instruction(
+    make_state: MakeState,
+) -> None:
+    gateway = FakeLLM(call_response("好"))
+    stage = make_executor_stage(
+        ExecutorDeps(
+            gateway=gateway,
+            assemble=assemble,
+            tools=(),
+            hint=lambda state: "[进度] 已执行 0 步",
+        )
+    )
+    await stage(make_state())
+    assert gateway.requests[0].messages[0].content.endswith("[进度] 已执行 0 步")

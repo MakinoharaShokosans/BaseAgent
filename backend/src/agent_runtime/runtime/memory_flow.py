@@ -16,6 +16,7 @@ from loguru import logger
 from agent_runtime.context import MemoryEntry, PromptAssets
 from agent_runtime.core import AgentState, FailedAttempt, Message
 from agent_runtime.memory import (
+    CompactionResult,
     MemoryStore,
     Outcome,
     SessionCompactor,
@@ -147,6 +148,10 @@ class MemoryFlow:
             failed_attempts=tuple(f.attempt for f in (*memory.failures, *memory.pending_failures)),
             assets=assets,
         )
+
+    async def compact(self, session_id: str) -> CompactionResult:
+        """手动压缩（用户点按钮）；与收尾自动压缩共用同一把会话锁。"""
+        return await self._compactor.compact_now(session_id)
 
     async def _workspace_of(self, session_id: str) -> str:
         return await self._store.workspace_id_of(session_id)

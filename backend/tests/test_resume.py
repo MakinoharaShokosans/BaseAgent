@@ -240,7 +240,12 @@ async def test_a_valid_decision_is_consumed_by_the_re_entered_stage(
     async def consume(state: AgentState) -> Mapping[str, object]:
         assert state.approval_decision is not None
         assert state.approval_decision.approved is True
-        return {"messages": [TOOL], "pending_approval": None, "approval_decision": None}
+        return {
+            "messages": [TOOL],
+            "pending_approval": None,
+            "approval_decision": None,
+            "replan_needed": True,
+        }
 
     harness = Harness(store, tool_runner=consume, planner={"milestones": [DONE_MS]})
     outcome = await resume_task(harness.deps, "t1", approve())
@@ -261,7 +266,12 @@ async def test_a_rejection_is_delivered_the_same_way(
     async def consume(state: AgentState) -> Mapping[str, object]:
         assert state.approval_decision is not None
         seen.append(state.approval_decision)
-        return {"messages": [TOOL], "pending_approval": None, "approval_decision": None}
+        return {
+            "messages": [TOOL],
+            "pending_approval": None,
+            "approval_decision": None,
+            "replan_needed": True,
+        }
 
     harness = Harness(store, tool_runner=consume, planner={"milestones": [DONE_MS]})
     await resume_task(harness.deps, "t1", approve(False, reason="不允许联网"))
@@ -285,7 +295,12 @@ async def test_the_decision_is_persisted_before_the_stage_runs(
     assert stored.approval_decision is not None
 
     # 再次续跑不必（也不能）重新给决策
-    consumed = {"messages": [TOOL], "pending_approval": None, "approval_decision": None}
+    consumed = {
+        "messages": [TOOL],
+        "pending_approval": None,
+        "approval_decision": None,
+        "replan_needed": True,
+    }
     again = Harness(store, tool_runner=consumed, planner={"milestones": [DONE_MS]})
     outcome = await resume_task(again.deps, "t1")
     assert outcome.status == "succeeded"
@@ -370,7 +385,8 @@ async def test_idempotent_dispatch_is_simply_retried(
     harness = Harness(
         store,
         tool_runner={
-            "messages": [Message(role="tool", content="data", tool_call_id="c1", name="view_file")]
+            "messages": [Message(role="tool", content="data", tool_call_id="c1", name="view_file")],
+            "replan_needed": True,
         },
         planner={"milestones": [DONE_MS]},
     )
