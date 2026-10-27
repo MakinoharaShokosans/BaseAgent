@@ -25,7 +25,7 @@ from baseagent_config.models import WebSearchConfig
 from services.common import LoopbackGuard
 from services.web_search.extract import extract_text, title_of
 from services.web_search.netguard import SafeFetcher
-from services.web_search.providers import SearchHit, SearchProvider
+from services.web_search.providers import SearchBlocked, SearchHit, SearchProvider
 
 PREFIX = "/api/v1"
 _TASK_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -162,6 +162,8 @@ def create_app(services: WebServices) -> FastAPI:
             raise HTTPException(
                 504, {"code": "TOTAL_TIMEOUT", "reason": "检索加抓取超过总超时"}
             ) from exc
+        except SearchBlocked as exc:  # 被反爬或限流：和“没有结果”区分开，模型才知道换不了措辞
+            return {"query": body.query, "results": [], "error": f"搜索被拦截：{exc}"}
         except Exception as exc:  # 搜索提供者挂了：以状态表达，不抛业务异常
             return {"query": body.query, "results": [], "error": f"搜索失败：{type(exc).__name__}"}
         merged = _merge_same_content(list(results))

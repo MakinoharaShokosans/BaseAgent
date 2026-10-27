@@ -5,10 +5,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import httpx
@@ -27,6 +28,10 @@ class SearchProvider(Protocol):
     may_return_private_links: bool
 
     async def search(self, query: str, limit: int) -> list[SearchHit]: ...
+
+
+class SearchBlocked(RuntimeError):
+    """搜索源拒绝了请求（反爬、限流）。与“搜到 0 条”不同，必须让调用方看见。"""
 
 
 class _DuckParser(HTMLParser):
@@ -89,6 +94,9 @@ class DuckDuckGoProvider:
     async def search(self, query: str, limit: int) -> list[SearchHit]:
         response = await self._client.post("https://html.duckduckgo.com/html/", data={"q": query})
         response.raise_for_status()
+        if response.status_code != 200 or "result__a" not in response.text:
+            # 202 是反爬验证页：必须当作失败上报，不能当成“没有结果”
+            raise SearchBlocked(f"DuckDuckGo 拒绝了请求（HTTP {response.status_code}）")
         parser = _DuckParser()
         parser.feed(response.text)
         hits = [
@@ -97,3 +105,40 @@ class DuckDuckGoProvider:
             if url.startswith(("http://", "https://"))
         ]
         return hits[:limit]
+
+
+class DdgsProvider:
+    """``ddgs`` 库：多引擎（Bing、Google、Yahoo 等）轮换，一个被拦还有下一个。"""
+
+    name = "ddgs"
+    needs_key = False
+    may_return_private_links = True
+
+    def __init__(self, *, timeout_sec: float, backend: str = "auto") -> None:
+        self._timeout = int(timeout_sec)
+        self._backend = backend
+
+    async def search(self, query: str, limit: int) -> list[SearchHit]:
+        return await asyncio.to_thread(self._search, query, limit)
+
+    def _search(self, query: str, limit: int) -> list[SearchHit]:
+        from ddgs import DDGS  # 仅此提供者需要，延迟导入
+        from ddgs.exceptions import DDGSException
+
+        try:
+            rows: list[dict[str, Any]] = DDGS(timeout=self._timeout).text(
+                query, max_results=limit, backend=self._backend
+            )
+        except DDGSException as exc:
+            if "No results found" in str(exc):
+                return []
+            raise SearchBlocked(f"所有搜索后端都失败：{exc}") from exc
+        return [
+            SearchHit(
+                re.sub(r"\s+", " ", str(row.get("title", ""))).strip(),
+                str(row.get("href", "")),
+                re.sub(r"\s+", " ", str(row.get("body", ""))).strip(),
+            )
+            for row in rows
+            if str(row.get("href", "")).startswith(("http://", "https://"))
+        ][:limit]

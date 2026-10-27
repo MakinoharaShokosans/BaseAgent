@@ -27,6 +27,7 @@ dependencies = [
     "tiktoken>=0.7",
     # 技能元数据
     "pyyaml>=6.0",
+    "ddgs>=9",
 ]
 
 [project.scripts]

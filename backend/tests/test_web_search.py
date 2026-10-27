@@ -21,7 +21,7 @@ from services.web_search.netguard import (
     check_url,
     ip_is_public,
 )
-from services.web_search.providers import DuckDuckGoProvider, SearchHit
+from services.web_search.providers import DdgsProvider, DuckDuckGoProvider, SearchBlocked, SearchHit
 
 PUBLIC = "93.184.216.34"
 PUBLIC_B = "151.101.1.69"
@@ -330,6 +330,50 @@ async def test_duckduckgo_results_are_parsed_and_redirect_links_unwrapped() -> N
     assert [h.url for h in hits] == ["https://docs.python.org/3/", "https://example.com/x"]
     assert hits[0].title == "Python Docs" and hits[0].snippet == "The official docs"
     assert (await provider.search("python", 1))[0].url == "https://docs.python.org/3/"
+
+
+@pytest.mark.unit
+async def test_duckduckgo_challenge_page_is_a_block_not_an_empty_result() -> None:
+    provider = DuckDuckGoProvider(
+        user_agent="t",
+        timeout_sec=5,
+        transport=httpx.MockTransport(lambda r: httpx.Response(202, text="<html>anomaly</html>")),
+    )
+    with pytest.raises(SearchBlocked):
+        await provider.search("python", 5)
+
+
+@pytest.mark.unit
+async def test_ddgs_provider_maps_rows_and_distinguishes_empty_from_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ddgs.exceptions import DDGSException
+
+    outcomes: list[Any] = [
+        [
+            {"title": " A  b ", "href": "https://a.example/x", "body": "s  1"},
+            {"title": "bad", "href": "javascript:1", "body": ""},
+        ],
+        DDGSException("No results found."),
+        DDGSException("Timeout"),
+    ]
+
+    class FakeDDGS:
+        def __init__(self, **_: Any) -> None: ...
+
+        def text(self, query: str, **_: Any) -> list[dict[str, str]]:
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    monkeypatch.setattr("ddgs.DDGS", FakeDDGS)
+    provider = DdgsProvider(timeout_sec=5)
+    hits = await provider.search("q", 5)
+    assert hits == [SearchHit("A b", "https://a.example/x", "s 1")]
+    assert await provider.search("q", 5) == []
+    with pytest.raises(SearchBlocked):
+        await provider.search("q", 5)
 
 
 # ==============================================================================

@@ -328,7 +328,7 @@ extra_deny_patterns = []            # 追加的命令黑名单正则
 [web_search]
 host = "127.0.0.1"
 port = 8003
-provider = "ddg"
+provider = "ddgs"                   # ddgs：ddgs 库多引擎轮换（默认）；ddg：直接抓 DuckDuckGo 网页，常被反爬拦截
 max_results = 8
 fetch_concurrency = 5
 per_host_concurrency = 2

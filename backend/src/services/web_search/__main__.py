@@ -11,7 +11,7 @@ import uvicorn
 from baseagent_config import ConfigError, load_settings
 from services.web_search.app import WebServices, create_app
 from services.web_search.netguard import SafeFetcher
-from services.web_search.providers import DuckDuckGoProvider
+from services.web_search.providers import DdgsProvider, DuckDuckGoProvider, SearchProvider
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,14 +24,19 @@ def main(argv: list[str] | None = None) -> int:
         print(exc, file=sys.stderr)
         return 2
     cfg = loaded.settings.web_search
-    if cfg.provider != "ddg":
-        print(f"未知的搜索提供者 {cfg.provider!r}（目前只有 ddg）", file=sys.stderr)
+    provider: SearchProvider
+    if cfg.provider == "ddgs":
+        provider = DdgsProvider(timeout_sec=float(cfg.request_timeout_sec))
+    elif cfg.provider == "ddg":
+        provider = DuckDuckGoProvider(
+            user_agent=cfg.user_agent, timeout_sec=float(cfg.request_timeout_sec)
+        )
+    else:
+        print(f"未知的搜索提供者 {cfg.provider!r}（可选 ddgs、ddg）", file=sys.stderr)
         return 2
     services = WebServices(
         config=cfg,
-        provider=DuckDuckGoProvider(
-            user_agent=cfg.user_agent, timeout_sec=float(cfg.request_timeout_sec)
-        ),
+        provider=provider,
         fetcher=SafeFetcher(
             allowed_ports=cfg.allowed_ports,
             max_redirects=cfg.max_redirects,

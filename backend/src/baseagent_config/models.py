@@ -514,7 +514,7 @@ class BashShellConfig(_Section):
 class WebSearchConfig(_Section):
     host: str = "127.0.0.1"
     port: Port = 8003
-    provider: str = "ddg"
+    provider: str = "ddgs"
     max_results: PosInt = 8
     fetch_concurrency: PosInt = 5
     per_host_concurrency: PosInt = 2
