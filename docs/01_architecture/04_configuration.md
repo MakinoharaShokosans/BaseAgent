@@ -147,7 +147,7 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 | 新增 | `services.sidecar_env_allowlist`、`bash_shell.child_env_allowlist` 与 `child_home`：子进程最小环境 |
 | 新增 | `web_search` 的 SSRF 防护与下载上限 |
 | 新增 | `mcp.retry_backoff_sec`、`exposed_name_max_len`、`refresh_tools_each_task`，服务器级 `allow_tools` 与 `idempotent_tools` |
-| 新增 | `[events]` `[tracing.*]` `[redaction]` `[security]` `[evaluation]` |
+| 新增 | `[events]` `[tracing.*]` `[redaction]` `[security]`（含 `canary_scope = installation \| session`，默认安装级以保持系统层全局静态）`[evaluation]` |
 | 调整 | `mcp.rlimit_as_mb` 默认由 1024 提高到 4096，Node 类服务器需要较大的虚拟地址空间 |
 | 调整 | 模型段换成 DeepSeek，并显式声明能力 |
 | 调整 | 技能默认新增 `protect_trusted_names`、`scan_untrusted_body`；`high_privilege_tools` 加入 `edit_file` |
