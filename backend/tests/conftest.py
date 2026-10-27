@@ -5,7 +5,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,15 @@ from agent_runtime.core import AgentState, new_state
 
 #: 仓库根目录（backend 的上一级）
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _restore_environment() -> Iterator[None]:
+    """CLI 入口会读取仓库根真实的 .env 并写进进程环境；每个测试结束后还原，免得污染后面的测试。"""
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
 
 
 @pytest.fixture(scope="session")

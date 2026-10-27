@@ -9,7 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from agent_runtime.cli import Service, build_services, dashboard, filtered_env, main, stop_all
+from agent_runtime.cli import (
+    Service,
+    build_services,
+    config_overrides,
+    dashboard,
+    filtered_env,
+    main,
+    stop_all,
+)
 from api_support import REPO_ROOT
 from baseagent_config import load_settings
 
@@ -38,6 +46,27 @@ def test_sidecars_never_inherit_secrets(loaded) -> None:  # type: ignore[no-unty
     assert "DEEPSEEK_API_KEY" not in shell and "GITHUB_TOKEN" not in shell
     assert shell["PATH"] == "/usr/bin" and shell["BASEAGENT_HOME"] == str(loaded.home)
     assert services["backend"].env["DEEPSEEK_API_KEY"] == "sk-secret"  # 后端要调用模型
+
+
+@pytest.mark.security
+def test_sidecars_get_config_overrides_but_not_the_api_token(loaded) -> None:  # type: ignore[no-untyped-def]
+    env = {
+        "BASEAGENT_WEB_SEARCH__ALLOW_FAKE_IP": "true",
+        "AEGIS_BASH_SHELL__PORT": "9002",
+        "BASEAGENT_API_TOKEN": "tok",
+        "BASEAGENT_PROXY_TARGET": "http://x",
+        "DEEPSEEK_API_KEY": "sk-secret",
+    }
+    assert config_overrides(env) == {
+        "BASEAGENT_WEB_SEARCH__ALLOW_FAKE_IP": "true",
+        "AEGIS_BASH_SHELL__PORT": "9002",
+    }
+    services = {
+        s.name: s for s in build_services(loaded, config=None, with_frontend=False, environ=env)
+    }
+    sidecar = services["web_search"].env
+    assert sidecar["BASEAGENT_WEB_SEARCH__ALLOW_FAKE_IP"] == "true"
+    assert "BASEAGENT_API_TOKEN" not in sidecar and "DEEPSEEK_API_KEY" not in sidecar
 
 
 @pytest.mark.unit
