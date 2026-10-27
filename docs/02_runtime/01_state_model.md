@@ -57,7 +57,11 @@ class Message:
 | **控制（新增）** | `pending_approval` | 待审批请求，`None` 表示未挂起 | tool_runner 抛出，主循环写入 |
 | **控制（新增）** | `approval_decision` | 已到达、尚未被消费的审批决策 | 续跑入口写入，tool_runner 消费后清空 |
 | **控制（新增）** | `dispatch_started` | 本批已开始派发的 `tool_call` id 列表，派发前提交，批次完成后清空，用于崩溃后识别"可能已部分执行"，见 [检查点](03_checkpoint_and_resume.md) §5 | tool_runner |
-| **控制（新增）** | `schema_version` | 状态序列化版本 | 序列化层 |
+| **控制（新增）** | `replan_needed` `steps_since_plan` | 工具批次后是否回 planner；自上次规划以来的批次数（schema v2） | tool_runner 置位；planner 清零 |
+| **控制（新增）** | `rejections` | 验收累计打回次数（原先从消息前缀数，现为显式字段；v1→v2 迁移时按前缀补数） | evaluator |
+| **控制（新增）** | `planner_degraded` | planner 连续降级次数，超过上限终止任务 | planner |
+| **控制（新增）** | `verification` | `none`/`unchecked`/`failed`/`passed`：最近一次修改文件之后命令的验证情况，来自工具结果而不是模型自述 | tool_runner |
+| **控制（新增）** | `schema_version` | 状态序列化版本（当前 2） | 序列化层 |
 
 两个设计取舍：
 

@@ -33,7 +33,8 @@ stateDiagram-v2
     executor --> tool_runner: 有工具调用
     executor --> evaluator: 无工具调用
     executor --> DONE: 硬终止
-    tool_runner --> planner: 正常
+    tool_runner --> budget_guard: 默认：继续执行
+    tool_runner --> planner: 需要重规划
     tool_runner --> DONE: 硬终止
     evaluator --> planner: 尚未收敛
     evaluator --> DONE: 验收通过或硬终止
@@ -47,7 +48,7 @@ ROUTES: Mapping[Phase, Router] = {
     "planner":      route_after_planner,       # budget_guard | evaluator | DONE
     "budget_guard": route_after_budget_guard,  # executor | DONE
     "executor":     route_after_executor,      # tool_runner | evaluator | DONE
-    "tool_runner":  route_after_tool_runner,   # planner | DONE
+    "tool_runner":  route_after_tool_runner,   # budget_guard | planner | DONE
     "evaluator":    route_after_evaluator,     # planner | DONE
 }
 ```
@@ -58,6 +59,12 @@ ROUTES: Mapping[Phase, Router] = {
 - **`step_count == 0` 且里程碑全部完成** 表示 planner 已直接答复，无需复核，直接交付。
 - **executor 没有产生工具调用** 说明它给出了自然语言结论，转 evaluator 验收，而不是回 planner。
 - 任一阶段置位 `should_terminate`，下一跳一律是 `DONE`。
+- **工具批次之后默认直接继续执行**（`budget_guard → executor`），不回 planner。`tool_runner` 在状态里置 `replan_needed` 才回 planner：
+  - 连续执行满 `[runtime.loop] replan_interval` 个批次（默认 6；0 表示每批都回，即旧行为）；
+  - 连续失败达到阈值、指纹循环或摆动（ABAB…）被拦截；
+  - 有调用被人工拒绝。
+
+  planner 运行时清零 `replan_needed` 与 `steps_since_plan`。这样每个工具步不再多付一次推理档的结构化调用，规划只发生在开头、遇阻和定期复核时。executor 给出自然语言结论仍转 evaluator 验收。
 
 ## 3. 循环骨架
 
@@ -127,7 +134,9 @@ planner 与 evaluator 遇到模型不可用、截止时间不足、请求被拒�
 |---|---|---|
 | 物理预算 | `budget_guard` 阶段 | 步数、Token、挂钟三项硬熔断；达到 90% 注入软告警消息 |
 | 重复指纹 | `tool_runner` 内 | 对（工具名，参数）取哈希，连续相同达阈值则拦截整批并注入重规划通知 |
-| 连续错误 | `tool_runner` 内 | 失败累加、成功清零；达阈值注入重规划通知 |
+| 连续错误 | `tool_runner` 内 | 失败累加、成功清零；达阈值注入重规划通知并置 `replan_needed` |
+| 摆动 | `tool_runner` 内 | 最近的指纹在两个取值间来回交替（`alternation_cycles` 个周期，默认 3）视同循环，拦截整批 |
+| 终止时的交付 | 事件与会话记忆 | 被终止的任务（预算、验收上限、规划失效、循环）由代码根据状态生成部分交付：已完成/未完成的里程碑、已修改的文件、已确认的事实、最近进展；安全类终止不展开内容 |
 | 权限闸门 | `tool_runner` 内，派发之前 | 越级则请求挂起 |
 | 子智能体预算账本 | `tool_runner` 内 | 派发前同步父级用量并串行准入；派发后把子智能体的实际消耗以增量并入 `total_tokens` |
 | 观察值裁剪 | `tool_runner` 内 | 超限输出头尾截断，全文落盘为产物 |

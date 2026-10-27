@@ -118,3 +118,12 @@ planner → evaluator → planner 这条回路**不经过 budget_guard**（步�
 - 轨迹记录（`TrajectoryRecorder`）与 `llm.call` 事件：等观测层。
 - 研究、子智能体的契约（`ResearchRaw`、`SubagentRaw`）与压缩器的 `CompactionResult`。
 - 对真实模型的验证：指令是否真能让模型遵守“拿不准就判未达成”、`all_completed` 与 `next_step` 的搭配，需要接真实端点后看格式失败率与打回率。
+
+## 6. 回路改动（实现状态补充）
+
+- **planner 不再每步都跑。** 见 [主循环 §2](02_main_loop.md)：默认由 executor 连续执行，planner 只在首次规划、定期复核（`replan_interval`）、连续失败/循环/被拒时运行。planner 连续降级超过 `max_planner_degradations`（默认 3）终止任务，不让空转烧到预算用完；一次成功的规划清零计数。
+- **指令尾部带进度提示**（`progress_hint`）：已执行步数与 Token 百分比，三个阶段都有。它在上下文尾部，不影响前缀缓存。
+- **evaluator 拿到代码侧证据。** 指令里附一句由 `state.verification` 得出的事实（没改过文件 / 改后没运行过命令 / 最近命令失败 / 最近命令成功）。**硬证据压过模型的判断**：改完文件后最近一条命令失败时，即使模型判通过也按未达成处理（反馈里说明原因）。这条硬拦只触发一次，之后要么修复并重跑（会更新 `verification`），要么由模型结合说明再判，免得无关的非零退出码把任务卡死。
+- **“做不到”有出口：`blocked`。** planner 与 evaluator 的输出都带 `blocked` / `blocked_reason`：关键操作被人工拒绝、缺少只有用户知道的信息、环境不允许时，不再一轮轮打回直到验收上限，而是带着已完成的部分结束（`termination_reason` 以“受阻：”开头，交付见 [主循环 §5](02_main_loop.md) 的部分交付）。指令明确要求不要换着花样绕过被拒绝的操作，也不要编造缺失的信息。evaluator 在模型同时判了通过时忽略 `blocked`。依据：基线评测里“只读权限下写文件”这个用例，模型已经正确停手，却因为没有这个出口被打回 4 次、白烧 5.3 万 Token。
+- **打回次数是显式状态 `rejections`**，上限 `max_rejections`（默认 3）。到上限终止，并带着已完成的部分交付，而不是留一条内部指令当交付。
+

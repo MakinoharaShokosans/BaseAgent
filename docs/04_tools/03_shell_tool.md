@@ -139,7 +139,7 @@ bash(command, timeout_sec?)
 
 ## 8. 实现状态
 
-`BashTool` 与 `SidecarClient` 已实现（sidecar 服务本身未做，目前只有客户端与契约）。与上文的差异与细节：
+`BashTool` 与 `SidecarClient` 已实现。与上文的差异与细节：
 
 - **响应契约**：`ShellResponse` 对多余字段与未知 `status` 直接报错，转成“sidecar 返回了无法识别的响应”，不信任漂移的契约。
 - **超时**：`timeout_sec` 超过 `max_timeout_sec` 时夹到上限；非数字、非正数、布尔值回退默认（不报错，模型多半只是写错类型）。工具自己的硬超时取 `max_timeout_sec + 15 秒`，否则派发器会抢在 sidecar 之前把命令判成超时。
@@ -149,5 +149,5 @@ bash(command, timeout_sec?)
 - **产物**：`artifact_id` 取日志文件名去扩展名（`step_3_bash`），`tool_runner` 把它登记进 `state.artifacts`（见 [内置工具 §11](02_builtin_tools.md)），摘要里带句柄，全文可用 `read_artifact` 取回（§5 第 4 条成立）。
 - **输出拼接**：stdout 在前，stderr 以 `[stderr]` 标题随后；都为空是“（无输出）”。
 
-**未做**：环境自检（§4）、`shell_best_practices` 内置技能（§3）、sidecar 服务端。
+sidecar 服务端已实现（见 [沙箱 §10](../05_security/02_shell_sandbox.md)）。**未做**：环境自检（§4）、`shell_best_practices` 内置技能（§3）。
 

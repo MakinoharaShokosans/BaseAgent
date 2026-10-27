@@ -132,7 +132,7 @@ edit_file(path, old_string, new_string, replace_all=false)
 
 ## 11. 实现状态
 
-已实现：`view_file`、`write_file`、`read_artifact`、`load_skill`、`bash`（见 [Shell 工具 §8](03_shell_tool.md)、[Skills §14](05_skills.md)）。**未做**：`edit_file`、`list_dir`、`grep`。
+已实现：`view_file`、`write_file`、`read_artifact`、`load_skill`、`bash`（见 [Shell 工具 §8](03_shell_tool.md)、[Skills §14](05_skills.md)）。`edit_file`、`list_dir`、`grep` 也已实现（见 §13）。
 
 相对上文的差异与补强：
 
@@ -149,4 +149,16 @@ edit_file(path, old_string, new_string, replace_all=false)
 1. `view_file` 在大文件上为了数总行数仍会扫到文件末尾（流式、不占内存，但耗时与文件大小成正比）。
 2. `read_artifact` 的 `grep` 是 Python 正则，没有单次匹配的时间上限；整个调用靠派发器的 15 秒硬超时兜底，线程里的匹配被取消后仍会跑完。
 3. `write_file` 的备份目录没有清理策略，依赖产物目录的整体保留期。
+
+
+## 13. edit_file、list_dir、grep 的实现
+
+- **`edit_file`**：`old_string` 必须恰好出现一次，否则失败并说明出现次数与行号；`replace_all` 替换全部。零匹配时给出最接近的一行与行号。文件是 CRLF 而 `old_string` 不是时，按文件的换行风格转换后再匹配。原子写、保留权限位、覆盖前备份（备份失败则不写）。修改后超过 `write_max_bytes` 失败。
+- **`list_dir`**：目录在前、深度 1-6（缺省 2）、条数上限取配置；忽略 `tools.files.ignored_dirs` 与隐藏项；指向工作区外的符号链接不展示。
+- **`grep`**：纯 Python 正则（不依赖 `rg`，行为确定），支持 `glob`、`context`（0-5）、`ignore_case`、`fixed`；跳过噪音目录、二进制文件与超过 `view_max_file_mb` 的文件；命中数与 10 秒预算双重上限，截断时提示；不跟随指向工作区外的链接。输出 `路径:行号:内容`，上下文行用 `-` 分隔。
+- 三者的权限判定都是确定的（`list_dir`、`grep` 是只读，`edit_file` 是工作区写入），不依赖对命令文本的分类。
+
+## 14. 写入后的即时语法诊断
+
+`write_file` 与 `edit_file` 成功写入后，对 `.py`/`.pyi`、`.json`、`.toml` 做进程内解析（`ast` / `json` / `tomllib`，不启动子进程、不执行内容），有语法错误就在**这次的观察值末尾**追加一行 `[语法检查] 路径 现在有语法错误（第 N 行：…），请立即修复。` 写入照常完成（结果仍是成功，文件已落盘），模型不必等到跑测试才发现改坏了。没有对应解析器的扩展名不诊断，不代表没问题；超过 20 万字符的内容不检查。实现：`tools/builtin/diagnostics.py`。
 

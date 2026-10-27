@@ -217,3 +217,16 @@ env = {
 - 是否在 sidecar 中使用网络命名空间或 `unshare` 断网，从根上解决外联。
 - 读取越界是否纳入越界校验（对 `cat`、`head`、`grep` 等常见只读命令的路径参数做检查），以及这会带来多少误杀。
 - 沙箱是否升级为容器或 `bubblewrap` 一类的真正隔离，以及触发这一升级的条件。
+
+## 10. 实现状态
+
+代码在 `backend/src/services/bash_shell/`（`audit`、`paths`、`quota`、`distill`、`runner`、`app`），`python -m services.bash_shell` 启动，或由 `aegis start` 拉起。与上文的差异与补充：
+
+- **审计逐段分词**（按 `;`、`&&`、`||`、`|`、`&`、换行切段，`shlex` 分词，去掉前导的环境赋值和 `sudo/env/nohup` 等包装）再判断，所以引号、反斜杠、分隔符前后空白不改变结果；`echo 'rm -rf /'` 不会误判。规则：`RM_RF_ROOT`、`MKFS`、`DD_TO_DEVICE`、`POWER_CONTROL`、`FORK_BOMB`、`SENSITIVE_SYSTEM_WRITE`、`RECURSIVE_ROOT_PERMISSION`、`CUSTOM_DENY`、`EMPTY_COMMAND`。
+- **写入目标越界**：重定向、`tee`、`dd of=` 加请求里的 `write_paths`；`resolve()` 后必须在工作区内，符号链接指向外面的也拒绝。
+- **配额**：`GlobalMemoryBudget`，端点用 0 等待探测，池满立即返回 `QUEUED` 与预估等待；释放放在 `finally`，多放一次不会让池超过总量。
+- **执行**：`start_new_session` 建进程组，`preexec_fn` 设 `RLIMIT_AS/FSIZE/CPU`，`stdin` 接 `/dev/null`，超时先 SIGTERM 整组、宽限期后 SIGKILL，主进程退出后也补一次整组 SIGKILL 清孤儿。
+- **环境（§5.1 已修）**：子进程只拿 `child_env_allowlist` 里的变量，`HOME` 指向任务的临时目录；`aegis start` 另外只给 sidecar 传 `sidecar_env_allowlist`，不继承 API 密钥——两道防线都在。sidecar 因此也不要求模型端点有密钥（`load_settings(require_models=False)`）。
+- **原因到达模型（§5.2 已修）**：403/422 的 `detail` 带 `code`、`rule`、`reason`、`matched`，`BashTool` 把它们写进失败观察值。
+- **蒸馏**：每流一个 `StreamDistiller`（头部行、尾部双端队列、关键字行、受 `structured_sniff_max_bytes` 限制的嗅探缓冲）；完整 JSON/YAML 映射或序列原样返回；超大输出丢弃嗅探缓冲。**注意**：形如 `key: value` 逐行出现的纯文本恰好是合法的 YAML 映射，会被原样返回（不截断）——编译器输出一般含多个冒号，不受影响。
+- **防护**：`task_id` 必须是单层安全目录名；请求体校验失败是 400；只接受回环 `Host` 且拒绝带 `Origin` 的写请求。

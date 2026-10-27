@@ -69,7 +69,7 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 | 事件 | 载荷 |
 |---|---|
 | `plan` | `thought`、`directive`、`milestones[]`、`step` |
-| `node.finished` | `node`、`seq`（阶段序号）、`input_summary`、`output_summary`、`decision`、`step_count`、`total_tokens`、`should_terminate`，规划/评估时有 `milestones[]`，直接答复时有 `content` |
+| `node.finished` | `node`、`stage`（阶段序号，不是信封的 `seq`）、`input_summary`、`output_summary`、`decision`、`step_count`、`total_tokens`、`should_terminate`，规划/评估时有 `milestones[]`，直接答复时有 `content` |
 
 `node.finished.decision` 取值：`pass`、`call_tools`、`executed`、`reply`、`accepted`、`continue` 以及规划阶段的指令文本。
 
@@ -171,3 +171,17 @@ task.finished (succeeded)
 - 契约：每种事件的必需字段；`v` 缺省为 1；新增字段不破坏旧客户端（用旧版事件快照回放）。
 - 脱敏：`tool.call` 的 `args` 里没有疑似密钥。
 - 客户端（前端测试）：断线重连、不连续检测、乱序容忍。
+
+## 12. 实现状态
+
+事件由 `agent_runtime.observability.EventHub` 分配序号、持久化并分发，由 `agent_runtime.runtime.events.TaskEvents` 把循环翻译成本文的事件。与上文的差异：
+
+- **`node.finished` 的阶段序号叫 `stage`**，不是 `seq`：信封的 `seq` 是事件序号，同名的载荷字段会被信封覆盖。客户端用 `stage` 显示进度。
+- **`stream.dropped` 之后服务端关闭该订阅**：慢消费者读完已有事件后收到它，然后流结束；客户端带着游标重连，重放从事件库补齐，不会丢。
+- **游标缺口**有三种：早于可重放的最旧事件、事件库已按保留策略清理了中间一段、游标超前于服务端已知的最新序号；都以一条 `task.error`（`code=STREAM_GAP`）结束流。
+- **挂起不结束流；`task.finished` 结束流**，但已结束的任务可能被续跑，所以从头订阅会越过中间的终态事件，只在“终态就是最后一个事件”时才关。
+- **`task.error`** 在不可恢复异常时发（`code=TASK_FAILED`），随后总有一条 `task.finished`。
+- **`tool.result`** 带 `call_id`、`ok`、`artifact_id`；`ok` 来自 tool_runner 经内部的 `tool.observed` 递来的结果，该信号本身不对外发布，随阶段提交后的 `tool.result` 一起发出。
+- **`tool.call` 的 `args`、`tool.result` 的 `result`、审批的 `command` 与 `reason`** 都过统一脱敏，金丝雀由 `TaskEvents` 自己并入；审批的 `command` 不截断，`reason` 等摘要类字段限长 300。
+- **`llm.call`** 由网关的调用记录经 `LlmCallEvents` 发出（每次尝试一条，含重试与降级）：`node`（purpose）、`tier`、`endpoint`、`model`、`attempts`、`outcome`、`duration_ms`、`tokens`、`finish_reason`、`error?`，以及服务商给了才有的用量拆分：`prompt_tokens`、`completion_tokens`、`reasoning_tokens`、`cache_hit_tokens`、`cache_miss_tokens`（缓存命中率与各阶段开销由它们算出，评测框架读取）。记录本身不含消息正文，所以事件只有摘要，也没有 `blob_ref`；完整提示词的外置与按需拉取尚未做。任务收尾前会等在途的 `llm.call` 发完，`task.finished` 仍是最后一个事件。
+- 尚未发出：研究与子智能体事件。

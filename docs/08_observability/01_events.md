@@ -155,3 +155,10 @@ CREATE TABLE task_events (
 - 是否在服务端对 `llm.call` 做采样（只保留每 N 次或失败的完整内容），以降低存储。
 - 事件表是否放入与检查点相同的 SQLite 文件。放在一起便于一致性，但写入频率差异大，会让检查点库变忙；倾向单独的文件。
 - 是否提供 WebSocket 以支持前端向服务端发控制消息。目前审批与取消都走普通 HTTP，SSE 已足够。
+
+## 13. 实现状态
+
+- **脱敏**（`observability.Redactor`）：键名含 `key/token/secret/password/authorization/cookie`（配置可改）的值、已知密钥形态、命令里的凭据片段（`Authorization:` 头、`--password`/`--token` 等选项、`FOO_TOKEN=` 赋值、URL 里的 `user:pass@`）、不含斜杠的高熵长串（≥32 字符且熵 ≥4.3、至少两类字符；纯十六进制哈希不会被误伤）、以及精确的金丝雀。**局限**：`-p <值>` 这类歧义写法没有处理（`mkdir -p` 会被误伤），属已知取舍。
+- **事件库**（`EventStore`）：单独的 SQLite 文件，WAL，0600；`prune(older_than, keep_tasks)` 按任务整体清理。清理策略的**定时执行**尚未接上。
+- **事件中心**（`EventHub`）：见 [事件契约 §12](../09_api/02_events_contract.md)。热缓存按任务数与条数双重有界，有订阅者的任务不会被淘汰；序号接着事件库里的最大值走，续跑与重启都不重置。
+- **`llm.call`**：网关的调用记录是同步回调，`LlmCallEvents` 用当前任务的上下文变量（`core.current_task_id`，由任务运行器设置）认出任务并后台发出；`drain` 在收尾前等它们发完。**未做**：外置完整提示词与响应（调用记录里没有正文）、研究与子智能体事件、保留策略的定时清理。

@@ -170,3 +170,9 @@ Loguru，**双 sink**：
 - 轨迹是否迁移到 SQLite 以便查询。JSONL 对追加和评测友好，对"找出所有被拒绝的命令"这类查询不友好。折中：保留 JSONL 为真源，另外异步导入一张索引表。
 - 是否对轨迹做签名或哈希链，防止事后篡改。单用户本机场景下优先级低。
 - 日志是否需要远程汇聚。目前明确不做。
+
+## 7. 实现状态
+
+- **轨迹**（`observability.TrajectoryRecorder`）：作为事件中心的旁路 sink，每个事件发布后同步追加一行到 `{traces_dir}/{task_id}.jsonl`（0600，立即 flush）。记录由事件推出，所以事件、轨迹用的是**同一次脱敏**（§1.2 第 1 项已修：`tool_args` 存在，`tool_args_redacted` 标明是否发生过替换）。类型 `node | tool | guard | llm | subagent | final`，带 `v=2`。读取按行分页，强杀留下的撕裂最后一行被跳过；`task_id` 只接受 `[A-Za-z0-9_-]{1,64}`，读取不能逃出根目录；随任务删除一起删。`GET /tasks/{id}/trace` 优先下载这个文件。
+- **日志**（`observability.setup_logging`）：控制台与 JSONL 文件双 sink，`enqueue=True`、`diagnose=False`、轮转与保留份数取自配置，目录 0700、文件 0600；`patcher` 把当前任务的 `task_id` 自动注入每条日志（§2.2 第 1 项），并对消息和额外字段过统一脱敏（额外字段按键名，如 `password=`）；`setup_logging` 幂等。
+- **未做**：`span_id` / `parent_span_id`（追踪，见 [追踪](03_tracing.md)）、日志与 sidecar 的 `X-Request-ID` 关联（§2.2 第 2 项）、轨迹的大小上限与保留清理（§1.2 第 6 项）、`agent_bench` 评测对轨迹的消费。

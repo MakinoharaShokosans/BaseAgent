@@ -170,3 +170,7 @@ high_privilege_tools = ["bash", "write_file"]
 
 **未做**：把清单接进提示词装配器（装配器未做）、内置技能包本身（`src/skills/` 目前为空）、前端展示、“脚本使用约定”、同名冲突在清单里的显式展示（只在 `registry.rejected` 里）。
 
+
+## 15. 实现状态：内置技能包
+
+`backend/src/skills/` 随发行版带 5 个内置技能（来源 `builtin`，可信）：`shell_best_practices`（非交互、控制输出、避免被拦或被审批）、`workspace_explorer`（先宏观后局部的勘测）、`bugfix_workflow`（复现、定位、先写失败的测试、最小修复、回归验证）、`safe_refactoring`（先固定行为、小步前进）、`code_review`（先意图后细节、按严重度给结论）。测试保证它们都能被注册表扫描、元数据在限制之内、没有注入样态告警、清单里写明不构成权限授权。`workspace_explorer` 的搜索步骤已对齐到 `list_dir` 与 `grep`。

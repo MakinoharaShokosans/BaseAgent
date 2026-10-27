@@ -4,7 +4,7 @@
 
 自研 Agent Runtime：**不依赖 LangGraph / LangChain，不含 RAG**。
 
-> **当前状态：骨架阶段。** 设计文档已完成并有 5 条已采纳的决策；目录结构、依赖声明、依赖方向检查、参考配置已就位；业务代码尚未开始。
+> **当前状态：核心可用。** 自研运行时（主循环、检查点与审批、上下文与记忆）、内置工具、`bash` 沙箱 sidecar、HTTP API 与 SSE 事件流、前端控制台、统一入口 `aegis` 已实现并有测试覆盖；联网研究（`web_search` 服务与隔离的研究子智能体）也已实现；动态委派、MCP 外部工具接入、内置技能包也已实现，详见 [`docs/01_architecture/03_code_layout_and_roadmap.md`](docs/01_architecture/03_code_layout_and_roadmap.md)。
 
 ## 文档
 
@@ -39,6 +39,23 @@ make check               # lint + 类型检查 + 离线测试
 ```
 
 `make help` 列出全部任务。
+
+启动（沙箱 sidecar、后端、前端一起拉起，Ctrl+C 一起收掉）：
+
+```bash
+cd backend && uv run aegis start      # 控制台在 http://127.0.0.1:5173
+uv run aegis token                     # 显示访问令牌文件的路径（令牌不会被打印）
+```
+
+前端通过同源代理访问 API，令牌由代理在服务端侧注入，浏览器代码里没有它。
+
+评测（会花 Token，默认不运行；服务需要已启动）：
+
+```bash
+cd backend && uv run aegis-bench --list              # 内置用例
+uv run aegis-bench --repeat 3 --label baseline       # 跑并生成 eval_reports/*.md|json
+uv run aegis-bench --compare eval_reports/a.json eval_reports/b.json
+```
 
 ## 安全提示
 

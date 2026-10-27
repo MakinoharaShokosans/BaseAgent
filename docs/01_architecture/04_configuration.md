@@ -84,7 +84,7 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 |---|---|---|
 | `[app]` `[logging]` `[storage]` | 数据目录、日志、存储路径与保留策略 | [系统总览](01_system_overview.md)、[轨迹与日志](../08_observability/02_trajectory_and_logs.md) |
 | `[server]` `[server.auth]` `[server.filesystem]` `[server.workspace]` | API、令牌、文件系统浏览边界、工作区路径校验 | [API 接入控制](../09_api/03_access_and_errors.md) |
-| `[runtime.guardrails]` `[runtime.checkpoint]` `[runtime.approval]` | 预算、死循环、检查点、审批 | [主循环](../02_runtime/02_main_loop.md)、[检查点](../02_runtime/03_checkpoint_and_resume.md)、[审批](../02_runtime/04_approval.md) |
+| `[runtime.guardrails]` `[runtime.loop]` `[runtime.checkpoint]` `[runtime.approval]` | 预算、死循环、回路形状（重规划间隔、打回与降级上限、摆动检测、进度提示）、检查点、审批 | [主循环](../02_runtime/02_main_loop.md)、[检查点](../02_runtime/03_checkpoint_and_resume.md)、[审批](../02_runtime/04_approval.md) |
 | `[models.*]` | 两档模型、端点、能力声明 | [网关](../07_llm_gateway/01_gateway.md)、[DeepSeek](../07_llm_gateway/04_deepseek.md) |
 | `[llm.*]` | 重试、熔断、并发、截止时间、用量估算、结构化输出 | [网关](../07_llm_gateway/01_gateway.md)、[结构化输出](../07_llm_gateway/02_structured_output.md) |
 | `[context.*]` | 会话与任务级窗口、观察值裁剪、记忆、项目规则、提示词装配 | [03_context](../03_context/) |

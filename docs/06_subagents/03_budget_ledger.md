@@ -142,3 +142,12 @@ ledger.sync_parent_usage(state_total_tokens - ledger.merged_into_state)
 - 子级用量的计量精度：当前以模型端点返回的 `total_tokens` 为准，若端点不返回用量，需要退回本地分词估算，口径会偏差。
 - 预算耗尽时对在途子智能体的处理：当前由子级自己的预算先咬合再收尾。是否需要父级强制取消。
 - 是否给每次派发加成本归因（哪个角色花了多少），用于调优 `max_spawns` 和默认额度。
+
+## 12. 实现状态
+
+`BudgetLedger`、`ChildBudget`、`Reservation` 在 `agent_runtime.guardrails.ledger`（纯算术）；`ToolRunnerDeps.ledger` 接上后，`tool_runner` 在派发前 `sync_parent_usage(state.total_tokens)`、派发后把本批的增量并入 `total_tokens` 并 `mark_merged`。
+
+- **§7 第 2 项（重复扣减）已修**，用的是 §7.1 的第一种方案：`parent_used = 状态里的 total_tokens − 已并入的子级消耗`，三项互斥；有回归测试（两次连续派发后 `available` 不被重复扣减）。
+- **第 1 项（研究绕过账本）已修**，见 [研究隔离区 §12](01_research_isolation.md)。
+- **守恒式**有 Hypothesis 性质测试；预留无 `await`；结算幂等；负数用量不会反向「充值」；实际超出预留时按实际记账并告警。
+- **第 3、4 项未做**：账本不入检查点，续跑后重建（`spawn_count` 重置）。

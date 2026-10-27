@@ -8,6 +8,7 @@
 |---|---|---|
 | [01_architecture.md](01_architecture.md) | 技术栈、目录、布局、数据流、与后端契约的对照、新版设计要点 | 已写初稿 |
 | [02_approval_and_safety_ux.md](02_approval_and_safety_ux.md) | 审批卡片、权限基线选择、信任可视化、渲染不可信内容、破坏性操作确认 | 已写初稿 |
+| [03_visual_design.md](03_visual_design.md) | 视觉语言：无边框浅色风格、字体与色彩、侧栏与设置、自定义下拉与滑动条、模型选择、对话节点、右侧卡片、上下文占比、动效与图标 | 已实现 |
 
 ## 前端承担的安全职责
 
