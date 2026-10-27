@@ -318,8 +318,8 @@ async def test_submit_returns_202_and_a_full_task_snapshot(rig: ApiRig) -> None:
     rig.world.gate.set()
     await settle(rig, task["task_id"])
     done = (await rig.client.get(f"{V1}/tasks/{task['task_id']}", headers=HEADERS)).json()
-    assert done["status"] == "succeeded" and done["step_count"] == 1
-    assert done["milestones"][0]["status"] == "completed"
+    assert done["status"] == "succeeded" and done["step_count"] == 2  # 回合数
+    assert done["milestones"] == []  # 没有写过计划（update_plan）
 
 
 @pytest.mark.unit
@@ -425,14 +425,12 @@ async def test_list_tasks_of_a_session_newest_first(rig: ApiRig) -> None:
 
 @pytest.mark.unit
 async def test_resume_cancel_delete_flow(rig: ApiRig) -> None:
-    rig.world.terminate = True
+    rig.world.fail_model = RuntimeError("402 insufficient balance")
     task = await rig.submit()
     tid = task["task_id"]
     await settle(rig, tid)
-    assert (await rig.client.get(f"{V1}/tasks/{tid}", headers=HEADERS)).json()[
-        "status"
-    ] == "terminated"
-    rig.world.terminate = False
+    assert (await rig.client.get(f"{V1}/tasks/{tid}", headers=HEADERS)).json()["status"] == "failed"
+    rig.world.fail_model = None
     resumed = await rig.client.post(f"{V1}/tasks/{tid}/resume", headers=HEADERS)
     assert resumed.status_code == 202
     await settle(rig, tid)
@@ -444,13 +442,26 @@ async def test_resume_cancel_delete_flow(rig: ApiRig) -> None:
     assert (await rig.client.get(f"{V1}/tasks/{tid}", headers=HEADERS)).status_code == 404
 
 
+@pytest.mark.security
+@pytest.mark.unit
+async def test_a_security_terminated_task_cannot_be_resumed(rig: ApiRig) -> None:
+    rig.world.leak = True
+    tid = (await rig.submit())["task_id"]
+    await settle(rig, tid)
+    view = (await rig.client.get(f"{V1}/tasks/{tid}", headers=HEADERS)).json()
+    assert view["status"] == "terminated" and view["should_terminate"] is True
+    rig.world.leak = False
+    again = await rig.client.post(f"{V1}/tasks/{tid}/resume", headers=HEADERS)
+    assert again.status_code == 409 and err(again)["code"] == "TASK_STATE_CONFLICT"
+
+
 # ==============================================================================
 # 审批
 # ==============================================================================
 
 
 async def waiting(rig: ApiRig) -> dict[str, Any]:
-    rig.world.approval = True
+    rig.world.needs_approval = True
     task = await rig.submit()
     await settle(rig, task["task_id"])
     return dict((await rig.client.get(f"{V1}/tasks/{task['task_id']}", headers=HEADERS)).json())
@@ -463,7 +474,7 @@ async def test_waiting_task_snapshot_carries_the_request_and_approval_completes_
     task = await waiting(rig)
     assert task["status"] == "waiting_for_approval"
     request = task["approval_request"]
-    assert request["approval_id"] == compute_approval_id(task["task_id"], 1, ("c1",))
+    assert request["approval_id"] == compute_approval_id(task["task_id"], 2, ("c1",))
     assert request["action_type"] == "network_egress" and request["command"] == "curl x"
     r = await rig.client.post(
         f"{V1}/tasks/{task['task_id']}/approve",

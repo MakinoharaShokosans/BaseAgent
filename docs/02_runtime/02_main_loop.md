@@ -154,4 +154,13 @@ async def resume_task(deps, task_id, decision=None)       # 续跑 / 提交审�
 
 ## 12. 实现状态
 
-**设计已定，代码未迁移。** 代码里仍是旧的五阶段实现，迁移清单见 [0006](../12_decisions/0006-pure-agent-loop.md)。
+**已实施。** 代码在 `agent_runtime.loop`：`kernel.py`（`run`、`TaskRuntime`、`TaskOutcome`）、`model.py`（模型接缝）、`tools.py`（工具包装层与后处理）、`scratch.py`（`update_plan`、`note`）、`proxy.py`（`mcp_call` 解析）、`errors.py`（`LoopAborted`、`CanaryLeak`、`LLMCallTimeout`）。旧的 `drive`、路由表、五个阶段与预算守卫、账本已删除。
+
+与设计的偏差：
+
+- **金丝雀检测在模型接缝（`loop/model.py`），不在网关**：命中抛 `CanaryLeak`，内核返回 `terminated`，该回复不进状态。`LLMRequest.canary` 没有加。
+- **单次调用超时**在模型接缝用 `asyncio.timeout` 实现（`runtime.loop.call_timeout_sec`，默认 300），超时抛 `LLMCallTimeout`，与其他模型错误同一路径。
+- **没有独立的 Recorder 组件**：回合提交由内核直接调 `CheckpointStore.commit`，事件由 `TaskEvents`（`EventSink`）在提交之后发出，轨迹仍由事件派生。
+- **终态由检查点的 `outcome` 列表达**（`succeeded` / `cancelled` / `terminated`），由任务运行器在收尾时写；状态里没有终止标志。
+- **`LoopAborted` 的检查在内核**：工具包装层在状态里累计 `consecutive_blocks`，内核在回合提交之后比较 `max_consecutive_blocks`，所以导致中止的那一批结果已经落盘。
+- 模型档由 `runtime.loop.model_tier` 指定（默认 `reasoning`），主循环只有一种请求形状。

@@ -224,7 +224,7 @@ usage, duration_ms, finish_reason, error_class
 
 ## 12.1 金丝雀检测
 
-网关在返回响应之前扫描模型的原始输出：正文、全部工具调用的参数（递归扫字符串、字典键与值、列表）、明文思考内容。命中就抛 `CanaryLeak`，**该条响应不返回给调用方**，因此其中的工具调用不会被执行、不会进入 transcript。金丝雀 token 由调用方在请求上带入（`LLMRequest.canary`），为空永不命中。检测函数是 `guardrails.detect_canary_leak`。
+（**实现位置：目前检测在循环的模型接缝 `loop/model.py`，网关与 `LLMRequest.canary` 尚未做，行为一致。**）网关在返回响应之前扫描模型的原始输出：正文、全部工具调用的参数（递归扫字符串、字典键与值、列表）、明文思考内容。命中就抛 `CanaryLeak`，**该条响应不返回给调用方**，因此其中的工具调用不会被执行、不会进入 transcript。金丝雀 token 由调用方在请求上带入（`LLMRequest.canary`），为空永不命中。检测函数是 `guardrails.detect_canary_leak`。
 
 ## 13. 错误
 

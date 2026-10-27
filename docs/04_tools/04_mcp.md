@@ -233,5 +233,7 @@ allow_tools = ["create_issue", "get_issue"]   # 空表示全部
 - **供应链**：启用的 `npx`/`uvx` 等启动方式若包名没有固定版本，启动时告警。
 - **装配**：`Application` 在 `[mcp].enabled` 时创建管理器，任务构建时取工具（任何故障只是少几个工具，不让任务起不来），应用关闭时先回收全部子进程；前端右侧栏有只读的“MCP 服务器”卡片。
 
-**未做**：`exposure`、`mcp_describe`、`mcp_call` 与索引（[0007](../12_decisions/0007-capability-mounting.md)，目前所有通过消毒的工具直接进 `tools`）；SSE 传输只有连接代码，没有对应的端到端测试，也没有鉴权与 TLS 校验要求（§13）；`listChanged` 订阅（用“每任务重新列出”代替）；资源、提示词、采样能力。
+**0007 已实施**：`exposure`（全局默认加按服务器覆盖）、`mcp_describe` / `mcp_call`（`mcps/index.py`）、索引（`render_index`）、`ToolRegistry(hidden=…)`（延迟工具可派发但不进 `tools`）；管理器保留各服务器最近一次成功的消毒列表（`ServerState.known`），服务器暂时断开不改变工具集与索引，调用时返回"当前不可用"。包装层的代理解析在 `loop/proxy.py`，前置条件"本任务取过 Schema"按 transcript 里 `mcp_describe` 结果的 `<mcp_tool name=…>` 标记判断。子智能体被授予的 MCP 工具直接进它自己的 `tools`（父工具表里的延迟工具实例本身可被分配）。
+
+**未做**：SSE 传输只有连接代码，没有对应的端到端测试，也没有鉴权与 TLS 校验要求（§13）；`listChanged` 订阅（用“每任务重新列出”代替）；资源、提示词、采样能力。
 

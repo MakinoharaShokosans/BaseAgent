@@ -106,4 +106,4 @@ note(kind="failed_attempt", action, failure_reason, conclusion)
 
 ## 9. 实现状态
 
-**设计已定，代码未迁移。** 现有代码中的 `planner`、`evaluator`、里程碑、`rejections` 等将被删除，`verification` 与 `FailedAttempt` 保留。
+**已实施。** `loop/scratch.py` 提供 `update_plan`、`note` 与纯函数 `apply_scratch`；它们在工具包装层就地处理（改状态，不经派发器），注册表里的 `UpdatePlanTool`、`NoteTool` 只提供 Schema。上限在写入时强制（`check_invariants` 在提交时再断言一次）。回显由 `PromptAssembler._scratch` 渲染（`prompt.goal_echo_chars` 控制目标行长度）。`verification` 由包装层更新，回显里的"最近一条命令失败"不带退出码（状态里没有它）。`plan.updated` 事件已发，同时仍发旧的 `plan` 事件。笔记沉淀到会话记忆走原有的 `deposit`（失败任务的事实不沉淀）。

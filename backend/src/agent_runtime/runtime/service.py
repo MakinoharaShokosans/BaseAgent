@@ -25,13 +25,19 @@ from agent_runtime.runtime.errors import (
     TaskNotFoundError,
     TaskNotResumableError,
 )
-from agent_runtime.runtime.events import LifecycleEvents, approval_payload, delivery_of
+from agent_runtime.runtime.events import (
+    LifecycleEvents,
+    approval_payload,
+    delivery_of,
+    plan_as_milestones,
+    turns_of,
+)
 from agent_runtime.runtime.memory_flow import MemoryFlow
 from agent_runtime.runtime.run import TaskRequest
 from agent_runtime.runtime.runner import TaskRunner, TaskSnapshot
 
 _TERMINAL: Final = frozenset({"succeeded", "failed", "cancelled", "terminated"})
-_RESUMABLE: Final = frozenset({"failed", "terminated"})
+_RESUMABLE: Final = frozenset({"failed"})
 
 
 class TaskGoalError(CoreError, ValueError):
@@ -92,6 +98,7 @@ class TaskService:
         traces_root: Path | None = None,
         trajectory: TrajectoryRecorder | None = None,
         clock: Callable[[], float] = time.time,
+        usage: Callable[[str], int] = lambda task_id: 0,
     ) -> None:
         self.runner = runner
         self._memory = memory
@@ -105,6 +112,7 @@ class TaskService:
         self._traces_root = traces_root
         self._trajectory = trajectory
         self._clock = clock
+        self._usage = usage
         self._decided: dict[str, tuple[str, bool]] = {}
 
     def observer(self, drain: Callable[[], Awaitable[None]] | None = None) -> TaskObserverImpl:
@@ -140,9 +148,6 @@ class TaskService:
             goal=text,
             permission_level=level,
             history=context.history if context else (),
-            rolling_summary=context.rolling_summary if context else "",
-            confirmed_facts=context.confirmed_facts if context else (),
-            failed_attempts=context.failed_attempts if context else (),
         )
         task_id = self.runner.new_task_id()
         # 元数据先于运行写入：任务一开始跑，观察者就要更新这一行
@@ -195,11 +200,11 @@ class TaskService:
             permission_level=record.permission_level,
             approval_request=approval_payload(pending, self._redactor) if pending else None,
             milestones=_milestones(state),
-            current_milestone_idx=state.current_milestone_idx if state else 0,
-            step_count=state.step_count if state else record.step_count,
-            total_tokens=state.total_tokens if state else record.total_tokens,
+            current_milestone_idx=_current_index(state),
+            step_count=turns_of(state) if state else record.step_count,
+            total_tokens=self._usage(record.task_id) or record.total_tokens,
             consecutive_errors=state.consecutive_errors if state else 0,
-            should_terminate=state.should_terminate if state else False,
+            should_terminate=status in ("terminated", "cancelled"),
             termination_reason=self._redactor.text(
                 snapshot.reason if snapshot and snapshot.reason else record.termination_reason
             ),
@@ -398,8 +403,8 @@ class TaskService:
             status=snapshot.status,
             termination_reason=snapshot.reason,
             finished_at=self._clock(),
-            step_count=state.step_count if state else 0,
-            total_tokens=state.total_tokens if state else 0,
+            step_count=turns_of(state),
+            total_tokens=self._usage(snapshot.task_id),
             artifact_count=len(state.artifacts) if state else 0,
         )
         if (
@@ -411,7 +416,13 @@ class TaskService:
                 "terminated",
             )
         ):
-            report = await self._flow.finish(state.session_id, state, delivery=delivery_of(state))
+            report = await self._flow.finish(
+                state.session_id,
+                state,
+                delivery=delivery_of(state, snapshot.status, snapshot.reason),
+                status=snapshot.status,
+                reason=snapshot.reason,
+            )
             if report.error:
                 logger.warning("任务 {} 的记忆收尾有问题：{}", snapshot.task_id, report.error)
 
@@ -431,6 +442,7 @@ class TaskObserverImpl:
             service._redactor,  # pyright: ignore[reportPrivateUsage]
             service._checkpoints.load,  # pyright: ignore[reportPrivateUsage]
             drain=drain,
+            usage=service._usage,  # pyright: ignore[reportPrivateUsage]
         )
 
     async def task_started(self, task_id: str, state: AgentState) -> None:
@@ -458,12 +470,17 @@ async def _each(*steps: Awaitable[None]) -> None:
 
 
 def _milestones(state: AgentState | None) -> list[dict[str, object]]:
+    return plan_as_milestones(state) if state is not None else []
+
+
+def _current_index(state: AgentState | None) -> int:
+    """第一条未完成的计划条目的下标；计划为空或全部完成时为 0 / 条数。"""
     if state is None:
-        return []
-    return [
-        {"id": m.id, "title": m.title, "description": m.description, "status": m.status}
-        for m in state.milestones
-    ]
+        return 0
+    for index, item in enumerate(state.plan):
+        if item.status != "completed":
+            return index
+    return len(state.plan)
 
 
 def _safe_name(name: str) -> str:

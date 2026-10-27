@@ -136,4 +136,4 @@ async def resume_task(deps, task_id, decision=None):
 
 ## 9. 实现状态
 
-`CheckpointStore`、启动扫描、`resume_task` 的决策绑定与占位已按旧设计落地；表结构（`phase` → `status`）、三个提交点、`repair_tail` 为**目标设计，代码未迁移**。
+**已实施。** `CheckpointStore.commit(state, *, outcome="", reason="")` 单事务 UPSERT；`outcome` 非空时 `status = 'finished'`，否则按是否挂起写 `waiting` / `running`。与 §2 表结构的差异：多了 `outcome`、`reason` 两列（终态怎么结束的、为什么），读取用 `load_status`；旧的 `phase` 表原样改名留存为 `task_checkpoints_legacy`（只读保留，v1、v2 状态不再解码）。`repair_tail` 在 `checkpoint/recovery.py`，`mcp_call` 按目标工具判断幂等。`resume_task` 对 `finished` 的任务按 `outcome` 报 `TaskNotResumableError`。

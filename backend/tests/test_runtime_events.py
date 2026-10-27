@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 
 from agent_runtime.core import (
     AgentState,
-    ApprovalRequired,
     Message,
-    Milestone,
     PendingApproval,
+    PlanItem,
     ToolCall,
-    apply_update,
 )
-from agent_runtime.loop import Stage, TaskRuntime, drive
+from agent_runtime.loop import TaskRuntime, run
 from agent_runtime.observability import Event, EventHub, Redactor
 from agent_runtime.runtime import (
     LifecycleEvents,
@@ -26,6 +24,7 @@ from agent_runtime.runtime import (
     approval_payload,
     delivery_of,
 )
+from loop_support import ASSISTANT, FINAL, ScriptedWorld
 
 MakeState = Callable[..., AgentState]
 REDACTOR = Redactor(["key", "token", "secret", "password"], [r"sk-[A-Za-z0-9]{16,}"])
@@ -34,7 +33,7 @@ CALL = ToolCall(id="c1", name="bash", args={"command": "ls", "api_key": "hunter2
 
 @pytest.fixture
 def make_state(make_state: MakeState) -> MakeState:
-    """在基础状态上覆盖任意 AgentState 字段（包括阶段、计数）。"""
+    """在基础状态上覆盖任意 AgentState 字段。"""
 
     def build(**fields: Any) -> AgentState:
         return dataclasses.replace(make_state(), **fields)
@@ -50,153 +49,111 @@ async def history(hub: EventHub, task: str = "t1") -> list[Event]:
     return await hub.history(task)
 
 
-def events_for(hub: EventHub) -> TaskEvents:
-    return TaskEvents(hub, "t1", REDACTOR, canary="canary-abc")
+def events_for(hub: EventHub, **kw: Any) -> TaskEvents:
+    return TaskEvents(hub, "t1", REDACTOR, canary="canary-abc", **kw)
+
+
+# ------------------------------------------------------------------ 回合事件
 
 
 @pytest.mark.unit
-async def test_planner_commit_emits_plan_then_node_finished(make_state: MakeState) -> None:
-    hub = EventHub()
-    state = make_state(
-        milestones=(Milestone(id=0, title="读代码", status="in_progress"),),
-        phase="budget_guard",
-        messages=(Message(role="user", content="g"), Message(role="assistant", content="先读代码")),
-    )
-    await events_for(hub).stage_committed(
-        "planner", {"messages": [Message(role="assistant", content="先读代码")]}, state
-    )
-    got = await history(hub)
-    assert names(got) == ["plan", "node.finished"]
-    plan, node = got
-    assert plan.data["directive"] == "先读代码" and plan.data["milestones"][0]["title"] == "读代码"  # type: ignore[index]
-    assert node.data["node"] == "planner" and node.data["decision"] == "先读代码"
-    assert node.data["stage"] == 1 and node.data["milestones"] == plan.data["milestones"]
-
-
-@pytest.mark.unit
-async def test_stage_ordinals_are_monotonic_and_can_continue_after_a_resume(
-    make_state: MakeState,
-) -> None:
-    hub = EventHub()
-    ev = TaskEvents(hub, "t1", REDACTOR, stage_offset=7)
-    state = make_state(phase="executor")
-    await ev.stage_committed("budget_guard", {}, state)
-    await ev.stage_committed("budget_guard", {}, state)
-    assert [e.data["stage"] for e in await history(hub)] == [8, 9]
-
-
-@pytest.mark.unit
-async def test_direct_answer_by_planner_is_a_reply_with_content(make_state: MakeState) -> None:
-    hub = EventHub()
-    state = make_state(phase="done", messages=(Message(role="assistant", content="答案是 4"),))
-    await events_for(hub).stage_committed(
-        "planner", {"messages": [Message(role="assistant", content="答案是 4")]}, state
-    )
-    node = (await history(hub))[-1]
-    assert node.data["decision"] == "reply" and node.data["content"] == "答案是 4"
-
-
-@pytest.mark.unit
-async def test_executor_emits_one_tool_call_per_call_with_redacted_args(
+async def test_a_model_reply_with_tool_calls_emits_the_reply_and_one_tool_call_each(
     make_state: MakeState,
 ) -> None:
     hub = EventHub()
     msg = Message(
         role="assistant",
-        content="",
+        content="先看看",
         tool_calls=(CALL, ToolCall(id="c2", name="view_file", args={"path": "a.py"})),
+        reasoning="想一想" * 400,
     )
-    state = make_state(step_count=3, phase="tool_runner", messages=(msg,))
-    await events_for(hub).stage_committed("executor", {"messages": [msg]}, state)
+    await events_for(hub).model_replied(msg, make_state(messages=(msg,)))
     got = await history(hub)
-    assert names(got) == ["tool.call", "tool.call", "node.finished"]
-    first = got[0].data
-    assert first["tool"] == "bash" and first["step"] == 3
+    assert names(got) == ["model.reply", "tool.call", "tool.call"]
+    reply = got[0].data
+    assert reply["turn"] == 1 and reply["content"] == "先看看"
+    assert reply["tool_calls"] == [{"id": "c1", "name": "bash"}, {"id": "c2", "name": "view_file"}]
+    assert len(str(reply["reasoning"])) <= 500  # 思考内容只发截断后的摘要
+    first = got[1].data
+    assert first["tool"] == "bash" and first["step"] == 1
     assert first["args"] == {"command": "ls", "api_key": "[REDACTED]"}
-    assert got[-1].data["decision"] == "call_tools"
 
 
 @pytest.mark.unit
-async def test_executor_without_calls_is_a_reply_and_emits_no_tool_call(
+async def test_a_final_reply_also_emits_the_legacy_node_finished_with_content(
     make_state: MakeState,
 ) -> None:
     hub = EventHub()
-    msg = Message(role="assistant", content="已完成")
-    await events_for(hub).stage_committed(
-        "executor", {"messages": [msg]}, make_state(phase="evaluator", messages=(msg,))
-    )
+    msg = Message(role="assistant", content="答案是 4")
+    await events_for(hub).model_replied(msg, make_state(messages=(msg,)))
     got = await history(hub)
-    assert names(got) == ["node.finished"] and got[0].data["decision"] == "reply"
+    assert names(got) == ["model.reply", "node.finished"]
+    node = got[1].data
+    assert node["decision"] == "reply" and node["content"] == "答案是 4"
+    assert node["should_terminate"] is False
 
 
 @pytest.mark.unit
-async def test_tool_result_carries_ok_artifact_and_clipped_redacted_text(
-    make_state: MakeState,
-) -> None:
+async def test_turn_finished_emits_results_then_turn_and_legacy_node(make_state: MakeState) -> None:
     hub = EventHub()
     ev = events_for(hub)
     await ev.emit("tool.observed", {"call_id": "c1", "ok": False, "artifact_id": "obs_1"})
     body = "boom canary-abc sk-abcdefghijklmnop1234 " + "x" * 800
     tool = Message(role="tool", content=body, tool_call_id="c1", name="bash")
     ok_tool = Message(role="tool", content="fine", tool_call_id="c2", name="view_file")
-    await ev.stage_committed(
-        "tool_runner", {"messages": [tool, ok_tool]}, make_state(step_count=2, phase="planner")
-    )
+    await ev.turn_finished({"messages": [tool, ok_tool]}, make_state())
     got = await history(hub)
-    assert names(got) == ["tool.result", "tool.result", "node.finished"]
+    assert names(got) == ["tool.result", "tool.result", "turn.finished", "node.finished"]
     bad, good = got[0].data, got[1].data
     assert bad["ok"] is False and bad["artifact_id"] == "obs_1" and bad["call_id"] == "c1"
     assert len(bad["result"]) <= 500 and "canary-abc" not in bad["result"]  # type: ignore[operator]
     assert "sk-abcdefghijklmnop1234" not in bad["result"]  # type: ignore[operator]
     assert good["ok"] is True and good["artifact_id"] == ""
+    turn = got[2].data
+    assert (turn["turn"], turn["tool_count"], turn["failed_count"]) == (1, 2, 1)
+    assert got[3].data["node"] == "tool_runner" and got[3].data["decision"] == "executed"
 
 
 @pytest.mark.unit
-async def test_observed_marker_is_not_published_as_an_event(make_state: MakeState) -> None:
+async def test_turn_ordinals_are_monotonic_and_continue_after_a_resume(
+    make_state: MakeState,
+) -> None:
+    hub = EventHub()
+    ev = events_for(hub, turn_offset=7)
+    await ev.turn_finished({"messages": []}, make_state())
+    await ev.turn_finished({"messages": []}, make_state())
+    assert [e.data["turn"] for e in await history(hub) if e.name == "turn.finished"] == [8, 9]
+
+
+@pytest.mark.unit
+async def test_a_plan_update_emits_plan_updated_and_the_legacy_plan(make_state: MakeState) -> None:
+    hub = EventHub()
+    plan = (PlanItem(id=1, title="读代码", status="in_progress"),)
+    await events_for(hub).turn_finished({"messages": [], "plan": plan}, make_state(plan=plan))
+    got = {e.name: e for e in await history(hub)}
+    assert got["plan.updated"].data["plan"] == [
+        {"id": 1, "title": "读代码", "status": "in_progress"}
+    ]
+    legacy = got["plan"].data["milestones"][0]  # type: ignore[index]
+    assert legacy["title"] == "读代码" and legacy["status"] == "in_progress"
+
+
+@pytest.mark.unit
+async def test_observed_marker_is_not_published_as_an_event() -> None:
     hub = EventHub()
     await events_for(hub).emit("tool.observed", {"call_id": "c1", "ok": True})
     assert await history(hub) == []
 
 
 @pytest.mark.unit
-async def test_other_stage_emits_pass_through_scrubbed(make_state: MakeState) -> None:
+async def test_other_wrapper_emits_pass_through_scrubbed() -> None:
     hub = EventHub()
-    await events_for(hub).emit("guard.replan_notice", {"consecutive_errors": 3, "token": "zzz"})
+    await events_for(hub).emit("guard.error_notice", {"consecutive_errors": 3, "token": "zzz"})
     (ev,) = await history(hub)
-    assert ev.name == "guard.replan_notice" and ev.data["token"] == "[REDACTED]"
-
-
-@pytest.mark.unit
-async def test_evaluator_decision_accepted_or_continue(make_state: MakeState) -> None:
-    hub = EventHub()
-    ev = events_for(hub)
-    done = make_state(phase="done")
-    more = make_state(phase="planner")
-    await ev.stage_committed("evaluator", {"milestones": ()}, done)
-    await ev.stage_committed("evaluator", {"milestones": ()}, more)
-    assert [e.data["decision"] for e in await history(hub) if e.name == "node.finished"] == [
-        "accepted",
-        "continue",
-    ]
-
-
-@pytest.mark.unit
-async def test_budget_guard_decision(make_state: MakeState) -> None:
-    hub = EventHub()
-    ev = events_for(hub)
-    await ev.stage_committed("budget_guard", {}, make_state(phase="executor"))
-    await ev.stage_committed(
-        "budget_guard",
-        {},
-        make_state(phase="done", should_terminate=True, termination_reason="步数上限"),
-    )
-    got = [e for e in await history(hub) if e.name == "node.finished"]
-    assert [e.data["decision"] for e in got] == ["pass", "terminate"]
-    assert got[1].data["should_terminate"] is True
+    assert ev.name == "guard.error_notice" and ev.data["token"] == "[REDACTED]"
 
 
 # ------------------------------------------------------------------ 审批
-
 
 PENDING = PendingApproval(
     approval_id="appr_1",
@@ -252,16 +209,15 @@ async def no_state(_: str) -> AgentState | None:
 
 
 @pytest.mark.unit
-async def test_started_and_finished_carry_status_counts_and_delivery(
+async def test_started_and_finished_carry_status_turns_usage_and_delivery(
     make_state: MakeState,
 ) -> None:
     hub = EventHub()
-    life = LifecycleEvents(hub, REDACTOR, no_state)
+    life = LifecycleEvents(hub, REDACTOR, no_state, usage=lambda task_id: 900)
     state = make_state(
-        step_count=4,
-        total_tokens=900,
         messages=(
             Message(role="assistant", content="调用中", tool_calls=(CALL,)),
+            Message(role="tool", content="ok", tool_call_id="c1", name="bash"),
             Message(role="assistant", content="结论：canary-abc 不应出现"),
         ),
     )
@@ -270,8 +226,8 @@ async def test_started_and_finished_carry_status_counts_and_delivery(
     started, done = await history(hub)
     assert started.name == "task.started" and started.data["task_goal"] == "fix the bug"
     assert done.name == "task.finished"
-    assert done.data["status"] == "succeeded" and done.data["step_count"] == 4
-    assert done.data["total_tokens"] == 900
+    assert done.data["status"] == "succeeded" and done.data["turns"] == 2
+    assert done.data["total_tokens"] == 900  # 统计值
     assert done.data["delivery"] == "结论：[REDACTED] 不应出现"
 
 
@@ -280,19 +236,19 @@ async def test_failed_task_emits_error_before_the_final_event(make_state: MakeSt
     hub = EventHub()
 
     async def load(_: str) -> AgentState | None:
-        return make_state(step_count=2)
+        return make_state(messages=(Message(role="assistant", content="x"),))
 
     await LifecycleEvents(hub, REDACTOR, load).task_finished(
         finished(None, "failed", "RuntimeError: boom")
     )
     error, done = await history(hub)
     assert (error.name, error.data["code"]) == ("task.error", "TASK_FAILED")
-    assert done.name == "task.finished" and done.data["step_count"] == 2
+    assert done.name == "task.finished" and done.data["turns"] == 1
     assert done.seq > error.seq
 
 
 @pytest.mark.unit
-async def test_delivery_is_the_last_plain_assistant_message() -> None:
+async def test_delivery_without_state_is_empty() -> None:
     assert delivery_of(None) == ""
 
 
@@ -311,21 +267,17 @@ async def test_a_finished_task_delivers_its_last_plain_assistant_message(
 
 
 @pytest.mark.unit
-async def test_a_terminated_task_delivers_what_was_achieved_not_an_internal_directive(
-    make_state: MakeState,
+@pytest.mark.parametrize("status", ["terminated", "cancelled"])
+async def test_an_unfinished_task_delivers_what_was_achieved_not_an_internal_directive(
+    make_state: MakeState, status: str
 ) -> None:
-    from agent_runtime.core import Milestone
-
     edit = ToolCall(id="c2", name="edit_file", args={"path": "src/app.py"})
     state = make_state(
-        should_terminate=True,
-        termination_reason="验收累计 4 次未通过，已超过上限 3",
-        milestones=(
-            Milestone(id=1, title="定位问题", status="completed"),
-            Milestone(id=2, title="修复并测试", status="in_progress"),
+        plan=(
+            PlanItem(id=1, title="定位问题", status="completed"),
+            PlanItem(id=2, title="修复并测试", status="in_progress"),
         ),
-        confirmed_facts=("bug 在 parse()",),
-        rolling_summary="已改 parse，测试仍失败",
+        facts=("bug 在 parse()",),
         messages=(
             Message(role="user", content="修 bug"),
             Message(role="assistant", content="", tool_calls=(edit,)),
@@ -333,11 +285,10 @@ async def test_a_terminated_task_delivers_what_was_achieved_not_an_internal_dire
             Message(role="assistant", content="继续推进当前里程碑。"),
         ),
     )
-    text = delivery_of(state)
-    assert "任务没有完成：验收累计 4 次未通过" in text
+    text = delivery_of(state, status, "用户取消")
+    assert "任务没有完成：用户取消" in text
     assert "- 定位问题" in text and "未完成：\n- 修复并测试" in text
     assert "已修改的文件：src/app.py" in text and "bug 在 parse()" in text
-    assert "已改 parse，测试仍失败" in text
     assert "继续推进当前里程碑" not in text
 
 
@@ -356,21 +307,19 @@ async def test_files_whose_edit_was_rejected_or_blocked_are_not_listed_as_modifi
         return Message(role="tool", content=text, tool_call_id=i, name="write_file")
 
     state = make_state(
-        should_terminate=True,
-        termination_reason="x",
         messages=(
             Message(role="user", content="写"),
             edit("c1", "done.py"),
             seen("c1", "已写入 done.py（3 字符）"),
             edit("c2", "refused.py"),
-            seen("c2", "已被人工审核拒绝：不允许。请改用合规方案"),
+            seen("c2", "已被人工审核拒绝：不允许。改用合规方案"),
             edit("c3", "blocked.py"),
-            seen("c3", "已拦截：相同工具与参数连续重复，请更换策略后重试。"),
+            seen("c3", "该调用与最近的调用重复，已拦截。请换一种做法"),
             edit("c4", "bad_args.py"),
             seen("c4", "未执行：该调用的参数无法使用"),
         ),
     )
-    text = delivery_of(state)
+    text = delivery_of(state, "cancelled", "用户取消")
     assert "已修改的文件：done.py" in text
     assert "refused.py" not in text and "blocked.py" not in text and "bad_args.py" not in text
 
@@ -378,87 +327,39 @@ async def test_files_whose_edit_was_rejected_or_blocked_are_not_listed_as_modifi
 @pytest.mark.unit
 @pytest.mark.security
 async def test_a_security_termination_delivers_no_content(make_state: MakeState) -> None:
-    state = make_state(
-        should_terminate=True,
-        termination_reason="[SECURITY] Prompt leak detected via canary token",
-        confirmed_facts=("秘密事实",),
-        rolling_summary="含有敏感的摘要",
-    )
-    text = delivery_of(state)
-    assert "安全" in text and "秘密事实" not in text and "敏感" not in text
+    state = make_state(facts=("秘密事实",))
+    text = delivery_of(state, "terminated", "[SECURITY] Prompt leak detected via canary token")
+    assert "安全" in text and "秘密事实" not in text
 
 
-# ------------------------------------------------------------------ 与 drive 联用
-
-
-class CommitLog:
-    def __init__(self) -> None:
-        self.states: list[AgentState] = []
-
-    async def commit(self, state: AgentState) -> int:
-        self.states.append(state)
-        return len(self.states)
+# ------------------------------------------------------------------ 与循环联用
 
 
 @pytest.mark.unit
 async def test_events_follow_commits_and_a_suspend_is_not_a_terminal(
-    make_state: MakeState,
+    tmp_path: Any, make_state: MakeState
 ) -> None:
+    from agent_runtime.checkpoint import CheckpointStore
+    from agent_runtime.core import apply_update
+
     hub = EventHub()
-    seen_at_emit: list[tuple[str, int]] = []
-    log = CommitLog()
+    async with CheckpointStore(tmp_path / "s.db") as store:
+        world = ScriptedWorld(store)
+        world.needs_approval = True
+        world.events = events_for(hub)
+        state = apply_update(make_state(), {"messages": [Message(role="user", content="g")]})
+        first = await run(await world.build(state), state)
+        assert first.status == "waiting_for_approval"
+        got = await history(hub)
+        assert names(got)[-1] == "task.waiting_for_approval"
+        assert names(got)[:2] == ["model.reply", "tool.call"]
 
-    async def planner(state: AgentState) -> Mapping[str, object]:
-        seen_at_emit.append(("planner-ran", len(log.states)))
-        return {
-            "milestones": (Milestone(id=0, title="m"),),
-            "messages": [Message(role="assistant", content="干活")],
-        }
-
-    async def guard(state: AgentState) -> Mapping[str, object]:
-        return {}
-
-    asked = {"n": 0}
-
-    async def executor(state: AgentState) -> Mapping[str, object]:
-        asked["n"] += 1
-        if asked["n"] == 1:
-            raise ApprovalRequired(PENDING)
-        return {"messages": [Message(role="assistant", content="好了")]}
-
-    async def evaluator(state: AgentState) -> Mapping[str, object]:
-        return {"milestones": (Milestone(id=0, title="m", status="completed"),)}
-
-    async def never(state: AgentState) -> Mapping[str, object]:
-        raise AssertionError
-
-    stages: dict[str, Stage] = {
-        "planner": planner,
-        "budget_guard": guard,
-        "executor": executor,
-        "tool_runner": never,
-        "evaluator": evaluator,
-    }
-    task_events = events_for(hub)
-
-    class Sink:
-        async def stage_committed(self, phase: Any, update: Any, state: AgentState) -> None:
-            seen_at_emit.append((phase, len(log.states)))
-            await task_events.stage_committed(phase, update, state)
-
-        async def approval_requested(self, request: PendingApproval, state: AgentState) -> None:
-            await task_events.approval_requested(request, state)
-
-    rt = TaskRuntime(stages=stages, checkpoints=log, events=Sink())  # type: ignore[arg-type]
-    first = await drive(rt, make_state())
-    assert first.status == "waiting_for_approval"
-    got = await history(hub)
-    assert names(got)[-1] == "task.waiting_for_approval"
-    assert ("planner", 1) in seen_at_emit  # 事件在对应提交之后
-    resumed = apply_update(first.state, {"pending_approval": None})
-    await drive(rt, resumed)
-    final = await history(hub)
-    assert [e.seq for e in final] == list(range(1, len(final) + 1))  # 续跑后序号接着走
+        world.needs_approval = False
+        resumed = apply_update(first.state, {"pending_approval": None})
+        await run(await world.build(resumed), resumed)
+        final = await history(hub)
+        assert [e.seq for e in final] == list(range(1, len(final) + 1))  # 续跑后序号接着走
+    _ = (ASSISTANT, FINAL, TaskRuntime)
 
 
 # ------------------------------------------------------------------ llm.call
@@ -468,7 +369,7 @@ def _record(**kw: Any):  # type: ignore[no-untyped-def]
     from agent_runtime.llm import CallRecord, TokenUsage
 
     base: dict[str, Any] = {
-        "purpose": "planner",
+        "purpose": "agent",
         "tier": "reasoning",
         "endpoint": "deepseek-pro",
         "model": "m",
@@ -495,7 +396,7 @@ async def test_gateway_records_become_llm_call_events_for_the_current_task() -> 
     )
     await calls.drain()
     first, second = await history(hub)
-    assert first.name == "llm.call" and first.data["node"] == "planner"
+    assert first.name == "llm.call" and first.data["node"] == "agent"
     assert (first.data["tier"], first.data["tokens"], first.data["duration_ms"]) == (
         "reasoning",
         100,
@@ -557,9 +458,22 @@ async def test_task_finished_is_still_last_when_a_call_record_is_in_flight(
     calls = LlmCallEvents(hub)
     life = LifecycleEvents(hub, REDACTOR, no_state, drain=calls.drain)
     current_task_id.set("t1")
-    calls(_record(purpose="evaluator"))  # 回调是同步的，事件还没发出
+    calls(_record(purpose="agent"))  # 回调是同步的，事件还没发出
     await life.task_finished(finished(make_state(), "succeeded"))
     assert names(await history(hub)) == ["llm.call", "task.finished"]
+
+
+@pytest.mark.unit
+async def test_the_llm_call_tally_counts_tokens_per_task() -> None:
+    from agent_runtime.core import current_task_id
+    from agent_runtime.runtime import LlmCallEvents
+
+    calls = LlmCallEvents(EventHub())
+    current_task_id.set("t1")
+    calls(_record())
+    calls(_record())
+    await calls.drain()
+    assert calls.tokens_of("t1") == 200 and calls.tokens_of("other") == 0
 
 
 @pytest.mark.unit
@@ -573,18 +487,13 @@ async def test_the_runner_sets_the_current_task_for_everything_it_runs(tmp_path)
     async with CheckpointStore(tmp_path / "s.db") as store:
         hub = EventHub()
         world = World(store, hub)
-        original = world.stage
+        original = world.model
 
-        def spying(name: str, events):  # type: ignore[no-untyped-def]
-            stage = original(name, events)
+        async def spying(state: AgentState) -> Message:
+            seen.append(current_task_id.get())
+            return await original(state)
 
-            async def wrapped(state: AgentState):  # type: ignore[no-untyped-def]
-                seen.append(current_task_id.get())
-                return await stage(state)
-
-            return wrapped
-
-        world.stage = spying  # type: ignore[method-assign]
+        world.model = spying  # type: ignore[method-assign]
         deps = RunnerDeps(store, world.build, lambda n: False, lambda s, t: "canary-abcdef")
         runner = TaskRunner(deps, new_task_id=lambda: "task-9")
         task_id = await runner.submit(TaskRequest("w", "/w", "s", "goal", "workspace_write"))

@@ -15,8 +15,8 @@ from agent_runtime.core import (
     ApprovalDecision,
     FailedAttempt,
     Message,
-    Milestone,
     PendingApproval,
+    PlanItem,
     Role,
     StateDecodeError,
     ToolCall,
@@ -97,7 +97,7 @@ def test_message_round_trips(message: Message) -> None:
 @pytest.mark.unit
 @given(st.lists(messages(), max_size=6))
 def test_state_round_trips_through_json(msgs: list[Message]) -> None:
-    state = apply_update(base_state(), {"messages": msgs, "step_count": 4, "total_tokens": 99})
+    state = apply_update(base_state(), {"messages": msgs, "consecutive_errors": 4})
     assert loads_state(dumps_state(state)) == state
 
 
@@ -126,17 +126,16 @@ def test_reasoning_state_key_order_and_unicode_are_preserved() -> None:
 @pytest.mark.unit
 def test_every_field_round_trips() -> None:
     state = apply_update(
-        base_state(rolling_summary="sum", confirmed_facts=["f"]),
+        base_state(),
         {
-            "milestones": [Milestone(id=1, title="m", description="d", status="in_progress")],
-            "current_milestone_idx": 0,
+            "plan": [PlanItem(id=1, title="m", status="in_progress")],
+            "facts": ["f"],
             "failed_attempts": [FailedAttempt(action="a", failure_reason="r", conclusion="c")],
             "artifacts": {"a1": "/x"},
             "fingerprint_history": ["h1", "h2"],
             "consecutive_errors": 2,
-            "should_terminate": True,
-            "termination_reason": "budget",
-            "phase": "tool_runner",
+            "consecutive_blocks": 1,
+            "verification": "failed",
             "pending_approval": PendingApproval(
                 approval_id="appr_1",
                 call_ids=("c1",),
@@ -149,7 +148,6 @@ def test_every_field_round_trips() -> None:
                 related_actions=("pip install y",),
             ),
             "approval_decision": ApprovalDecision(approval_id="appr_1", approved=True),
-            "dispatch_started": ["c1"],
         },
     )
     assert loads_state(dumps_state(state)) == state
@@ -175,29 +173,26 @@ def _valid() -> dict[str, Any]:
 
 @pytest.mark.unit
 def test_schema_version_is_recorded() -> None:
-    assert _valid()["schema_version"] == CURRENT_SCHEMA_VERSION == 2
+    assert _valid()["schema_version"] == CURRENT_SCHEMA_VERSION == 3
 
 
 @pytest.mark.unit
-def test_a_v1_checkpoint_is_upgraded_and_keeps_its_rejection_count() -> None:
+@pytest.mark.parametrize("old", [1, 2])
+def test_workflow_era_checkpoints_are_not_loadable(old: int) -> None:
+    """v1、v2 是五阶段工作流的状态（决策 0006），不迁移。"""
     data = _valid()
-    for name in (
-        "replan_needed",
-        "steps_since_plan",
-        "rejections",
-        "planner_degraded",
-        "verification",
-    ):
-        del data[name]
-    data["schema_version"] = 1
-    data["messages"] += [
-        {"role": "user", "content": "【验收未通过】缺测试"},
-        {"role": "user", "content": "【验收未通过】还是缺"},
-        {"role": "user", "content": "普通消息"},
-    ]
-    state = state_from_dict(data)
-    assert state.schema_version == 2 and state.rejections == 2
-    assert (state.replan_needed, state.steps_since_plan, state.verification) == (False, 0, "none")
+    data["schema_version"] = old
+    with pytest.raises(StateDecodeError, match="schema_version"):
+        state_from_dict(data)
+
+
+@pytest.mark.unit
+def test_removed_workflow_fields_are_unknown() -> None:
+    for name in ("phase", "milestones", "step_count", "total_tokens", "should_terminate"):
+        data = _valid()
+        data[name] = 0
+        with pytest.raises(StateDecodeError, match=name):
+            state_from_dict(data)
 
 
 @pytest.mark.unit
@@ -218,7 +213,7 @@ def test_unknown_role_is_rejected() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "field", ["task_id", "messages", "phase", "permission_level", "step_count"]
+    "field", ["task_id", "messages", "plan", "permission_level", "consecutive_blocks"]
 )
 def test_missing_required_field_is_rejected(field: str) -> None:
     data = _valid()
@@ -256,9 +251,9 @@ def test_message_missing_optional_fields_still_loads() -> None:
 @pytest.mark.unit
 def test_wrong_types_are_rejected() -> None:
     for field, bad in [
-        ("step_count", "3"),
+        ("consecutive_errors", "3"),
         ("messages", "x"),
-        ("should_terminate", 1),
+        ("facts", 1),
         ("artifacts", []),
     ]:
         data = _valid()
@@ -322,25 +317,21 @@ def test_invalid_schema_version_is_rejected(bad: object) -> None:
 
 @pytest.mark.unit
 def test_older_versions_are_migrated_step_by_step() -> None:
-    """用注入的迁移表验证机制；真实迁移在出现第 2 版时才有。"""
+    """用注入的迁移表验证机制；v3 之前的版本不迁移，表是空的。"""
     data = _valid()
 
-    def v0_to_v1(d: dict[str, Any]) -> dict[str, Any]:
+    def v3_to_v4(d: dict[str, Any]) -> dict[str, Any]:
         d = dict(d)
-        d["rolling_summary"] = d.pop("legacy_summary")
+        d["facts"] = [*d["facts"], "migrated"]
         return d
 
-    data["schema_version"] = 0
-    data["legacy_summary"] = "from v0"
-    del data["rolling_summary"]
-    state = state_from_dict(data, migrations={0: v0_to_v1}, current_version=1, minimum_version=0)
-    assert state.rolling_summary == "from v0"
-    assert state.schema_version == 1
+    state = state_from_dict(data, migrations={3: v3_to_v4}, current_version=4, minimum_version=3)
+    assert state.facts == ("migrated",)
+    assert state.schema_version == 4
 
 
 @pytest.mark.unit
 def test_missing_migration_step_is_an_error() -> None:
     data = _valid()
-    data["schema_version"] = 0
     with pytest.raises(StateDecodeError, match="迁移"):
-        state_from_dict(data, migrations={}, current_version=1, minimum_version=0)
+        state_from_dict(data, migrations={}, current_version=4, minimum_version=3)

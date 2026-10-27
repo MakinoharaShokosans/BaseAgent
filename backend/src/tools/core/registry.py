@@ -21,6 +21,7 @@ class ToolRegistry:
         *,
         allow_untrusted: bool = False,
         untrusted_allowlist: Collection[str] | None = None,
+        hidden: Collection[str] = (),
     ) -> None:
         registered: dict[str, AgentTool] = {}
         for tool in tools:
@@ -35,7 +36,11 @@ class ToolRegistry:
                 if untrusted_allowlist is not None and name not in untrusted_allowlist:
                     raise ToolRegistryError(f"不可信工具 {name} 没有逐名授权")
             registered[name] = tool
+        unknown = set(hidden) - registered.keys()
+        if unknown:
+            raise ToolRegistryError(f"hidden 里有未注册的工具：{sorted(unknown)}")
         self._tools: Mapping[str, AgentTool] = registered
+        self._hidden = frozenset(hidden)
 
     def get(self, name: str) -> AgentTool | None:
         return self._tools.get(name)
@@ -48,5 +53,17 @@ class ToolRegistry:
         return tool is not None and tool.idempotent
 
     def schemas(self) -> tuple[ToolSchema, ...]:
-        """按名称排序：工具 Schema 是请求前缀的一部分，顺序必须确定（§10.1）。"""
-        return tuple(self._tools[name].schema() for name in sorted(self._tools))
+        """按名称排序：工具 Schema 是请求前缀的一部分，顺序必须确定（§10.1）。
+
+        ``hidden`` 的工具（MCP 延迟工具）可被派发，但不出现在这里：模型经 ``mcp_describe`` 取定义。
+        """
+        return tuple(
+            self._tools[name].schema() for name in sorted(self._tools) if name not in self._hidden
+        )
+
+    def hidden_schema(self, name: str) -> ToolSchema | None:
+        tool = self._tools.get(name) if name in self._hidden else None
+        return tool.schema() if tool else None
+
+    def hidden_names(self) -> frozenset[str]:
+        return self._hidden

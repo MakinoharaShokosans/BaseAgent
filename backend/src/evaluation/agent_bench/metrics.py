@@ -94,9 +94,9 @@ def summarize_events(events: list[Event]) -> CaseMetrics:
             m.degraded_outputs += 1
         elif name == "guard.loop_blocked":
             m.loop_blocked += 1
-        elif name == "guard.replan_notice":
+        elif name in ("guard.error_notice", "guard.replan_notice"):  # 旧基线用后者
             m.replan_notices += 1
-    m.planner_calls = m.stages.get("planner", 0)
+    m.planner_calls = m.stages.get("planner", 0)  # 没有规划阶段后恒为 0，保留字段以便对照旧基线
     return m
 
 

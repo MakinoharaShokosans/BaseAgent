@@ -14,9 +14,9 @@ from typing import Literal, Protocol
 
 from loguru import logger
 
-from agent_runtime.checkpoint import RecoveryReport, mark_cancelled
+from agent_runtime.checkpoint import RecoveryReport, StoredStatus, mark_cancelled
 from agent_runtime.core import AgentState, ApprovalDecision, current_task_id
-from agent_runtime.loop import TaskOutcome, drive
+from agent_runtime.loop import TaskOutcome, run
 from agent_runtime.runtime.active import ActiveTasks
 from agent_runtime.runtime.errors import (
     TaskAlreadyExistsError,
@@ -177,9 +177,10 @@ class TaskRunner:
         if task_id in self._records:
             return self._records[task_id]
         stored = await self._deps.checkpoints.load(task_id)
-        if stored is None:
+        meta = await self._deps.checkpoints.load_status(task_id)
+        if stored is None or meta is None:
             raise TaskNotFoundError(f"没有任务 {task_id}")
-        record = _Record(_status_of_stored(stored), state=stored)
+        record = _Record(_status_of_stored(meta), meta.reason, stored)
         self._records[task_id] = record
         return record
 
@@ -195,7 +196,7 @@ class TaskRunner:
             if self._observer is not None:
                 await _swallow(self._observer.task_started(task_id, state))
             runtime = await self._deps.build_runtime(state)
-            outcome = await drive(runtime, state)
+            outcome = await run(runtime, state)
         except asyncio.CancelledError:
             if record.shutting_down:
                 record.status, record.reason = "failed", "服务关闭"
@@ -220,10 +221,13 @@ class TaskRunner:
                 if hook is not None:  # 可选通知：只有关心挂起的观察者实现它
                     await _swallow(hook(task_id, outcome.state))
             case "terminated":
-                await self._finish(
-                    task_id, record, "terminated", outcome.state.termination_reason, outcome.state
+                reason = outcome.termination_reason
+                await self._deps.checkpoints.commit(
+                    outcome.state, outcome="terminated", reason=reason
                 )
+                await self._finish(task_id, record, "terminated", reason, outcome.state)
             case "succeeded":
+                await self._deps.checkpoints.commit(outcome.state, outcome="succeeded")
                 await self._finish(task_id, record, "succeeded", "", outcome.state)
 
     async def _finish(
@@ -253,8 +257,7 @@ class TaskRunner:
         final = stored
         if stored is not None:
             final = mark_cancelled(stored)
-            if final != stored:
-                await self._deps.checkpoints.commit(final)
+            await self._deps.checkpoints.commit(final, outcome="cancelled", reason="用户取消")
         await self._finish(task_id, record, "cancelled", "用户取消", final)
         return True
 
@@ -288,11 +291,11 @@ class TaskRunner:
             self._records.setdefault(task_id, _Record("waiting_for_approval"))
 
 
-def _status_of_stored(state: AgentState) -> TaskStatus:
-    if state.pending_approval is not None:
+def _status_of_stored(meta: StoredStatus) -> TaskStatus:
+    if meta.status == "waiting":
         return "waiting_for_approval"
-    if state.phase == "done":
-        return "terminated" if state.should_terminate else "succeeded"
+    if meta.status == "finished":
+        return meta.outcome or "succeeded"  # type: ignore[return-value]
     return "failed"
 
 

@@ -84,6 +84,8 @@ class ServerState:
     status: Status = "idle"
     session: ClientSession | None = None
     tools: list[Vetted] = field(default_factory=list[Vetted])
+    #: 最近一次成功列出的、通过消毒的工具。连接断开不清空：索引不反映瞬时可用性（决策 0007）
+    known: list[Vetted] = field(default_factory=list[Vetted])
     rejected: list[Rejection] = field(default_factory=list[Rejection])
     last_error: str = ""
     failures: int = 0
@@ -136,26 +138,27 @@ class McpManager:
     def is_idempotent(self, exposed_name: str) -> bool:
         return exposed_name in self._idempotent
 
+    def exposure_of(self, server: str) -> str:
+        """服务器的暴露方式：自己的配置优先，否则用全局默认。"""
+        state = self._servers.get(server)
+        return (state.config.exposure if state else "") or self._cfg.exposure
+
     async def tools(self) -> list[Any]:
-        """当前可用的工具适配器。任务准备阶段调用：连接缺失的服务器、重新列出并重新消毒。"""
+        """工具适配器。任务准备阶段调用：连接缺失的服务器、重新列出并重新消毒；
+        用的是各服务器最近一次成功的消毒列表，所以服务器暂时不可用不改变工具集。"""
         from mcps.adapter import McpTool
 
         if not self.active or self._closed:
             return []
         await asyncio.gather(*(self._ensure(name) for name in self._servers))
         pairs = [
-            (state.name, tool.name)
-            for state in self._servers.values()
-            if state.status == "connected"
-            for tool in state.tools
+            (state.name, tool.name) for state in self._servers.values() for tool in state.known
         ]
         names = assign_names(pairs, self._cfg.exposed_name_max_len)
         out: list[McpTool] = []
         self._idempotent = set()
         for state in self._servers.values():
-            if state.status != "connected":
-                continue
-            for tool in state.tools:
+            for tool in state.known:  # 暂时断开的服务器仍在：调用时返回失败，索引保持稳定
                 exposed = names[(state.name, tool.name)]
                 idem = any(fnmatch.fnmatchcase(tool.name, p) for p in state.config.idempotent_tools)
                 if idem:
@@ -286,6 +289,7 @@ class McpManager:
             else:
                 tools.append(verdict)
         state.session, state.tools, state.rejected = session, tools, rejected
+        state.known = list(tools)
         state.status, state.last_error, state.failures, state.retry_after = "connected", "", 0, 0.0
 
     async def _list(self, session: ClientSession) -> list[Any]:

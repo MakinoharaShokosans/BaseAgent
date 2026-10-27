@@ -86,11 +86,10 @@
 
 ## 9. 实现状态
 
-**设计已定，代码未迁移。** 旧 `loop/stages/tool_runner.py` 已实现上述大部分逻辑（权限闸门、指纹、观察值治理、信封钩子、产物登记），迁移时拆为"包装层"与"后处理"两部分；以下是旧实现里已有而本设计沿用的**未做项**，仍然未做：
+**已实施。** `loop/tools.py`：`make_tool_runner(ToolRunnerDeps)` 返回 `async (state, calls) -> 增量`。旧 `loop/stages/tool_runner.py` 已删除，派发前标记（`dispatch_started`）与 `replan_needed` 随之取消。`approval_id` 用消息位置（`len(state.messages)`）代替步数。同批只读并发、写串行；`mcp_call` 在第一步解析为目标工具（`loop/proxy.py`）。
 
-- **信封实现**（[信任 §4](../05_security/03_trust_and_injection.md)）：`envelope` 钩子已在，真实的信封函数没做；目前注册表默认拒绝不可信工具，所以尚无不可信观察值可包。
+仍然**未做**：
+
 - **注入扫描**与**轨迹记录**（审批决定、拦截、通知现在只发 `guard.*` 事件）。
 - 工具参数的 JSON Schema 校验（[工具系统 §14](../04_tools/01_tool_system.md)）。
 - 审批的 `check_binding` 只绑定 call id 与消息位置，**不绑定参数**：状态里的 `tool_calls` 不会被重新生成，所以正常路径下被批准的就是被执行的；但检查点库被篡改时，同一 id 换参数会沿用旧批准。是否把参数哈希也纳入 `approval_id`，待定。
-
-**新增、旧代码没有的**：同批读并发写串行、`consecutive_blocks` 与 `LoopAborted`。

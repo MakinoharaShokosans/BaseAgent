@@ -16,8 +16,9 @@ from agent_runtime.context.fold import FoldPolicy, fold_stream
 from agent_runtime.core import AgentState, FailedAttempt, Message, Trust
 from agent_runtime.guardrails import wrap
 
-MemoryRole = Literal["user", "system"]
 RulesStatus = Literal["absent", "disabled", "enabled"]
+
+GOAL_ECHO_CHARS: Final = 300
 
 CANARY_INSTRUCTION: Final = (
     "内部安全标记：{token}\n"
@@ -55,8 +56,10 @@ class PromptAssets:
     session_summary: MemoryEntry | None = None
     session_facts: tuple[MemoryEntry, ...] = ()
     session_failures: tuple[FailedAttempt, ...] = ()
-    #: 数据层
+    #: 工作区范围：技能清单与 MCP 索引（常驻，任务内冻结）
     skills_manifest: str = ""
+    mcp_index: str = ""
+    #: 任务范围
     environment: tuple[tuple[str, str], ...] = ()
     recent_facts: tuple[MemoryEntry, ...] = ()
     recent_failures: tuple[FailedAttempt, ...] = ()
@@ -95,21 +98,25 @@ class PromptAssembler:
         self,
         assets: PromptAssets,
         *,
-        memory_role: MemoryRole = "user",
         count_tokens: Callable[[str], int] = len,
         fold: FoldPolicy | None = None,
+        goal_echo_chars: int = GOAL_ECHO_CHARS,
     ) -> None:
+        self._goal_chars = goal_echo_chars
         self._a = assets
-        self._memory_role = memory_role
         self._count = count_tokens
         self._fold = fold
 
-    def __call__(self, state: AgentState, instruction: str) -> list[Message]:
-        return self._build(state, instruction).messages
+    def __call__(self, state: AgentState) -> list[Message]:
+        return self._build(state).messages
 
     # ------------------------------------------------------------------ 装配
 
-    def _build(self, state: AgentState, instruction: str) -> _Built:
+    def _build(self, state: AgentState) -> _Built:
+        """顺序见 docs/03_context/03_prompt_assembly.md §2：越稳定越靠前，越易变越靠后。
+
+        只有第 0 段（系统层，含金丝雀）是 ``system``，其余都是 ``user`` 角色的信封。
+        """
         skipped: list[str] = []
 
         def guard(name: str, render: Callable[[], str]) -> str:
@@ -122,22 +129,27 @@ class PromptAssembler:
 
         a = self._a
         layers = {
+            "canary": guard("canary", lambda: CANARY_INSTRUCTION.format(token=state.canary_token)),
+            "skills": a.skills_manifest,
+            "mcp_index": a.mcp_index,
             "project_rules": guard("project_rules", self._rules),
             "workspace": guard("workspace", lambda: self._workspace(state)),
-            "canary": guard("canary", lambda: CANARY_INSTRUCTION.format(token=state.canary_token)),
             "workspace_memory": guard("workspace_memory", self._workspace_memory),
             "session_memory": guard("session_memory", self._session_memory),
             "task_data": guard("task_data", self._task_data),
-            "task_progress": guard("task_progress", lambda: self._progress(state)),
+            "scratch": guard("scratch", lambda: self._scratch(state)),
         }
-        system_parts = [a.system, layers["project_rules"], layers["workspace"], layers["canary"]]
-        memory = [layers["workspace_memory"], layers["session_memory"]]
-        if self._memory_role == "system":
-            system_parts += memory
-            memory = []
-
-        messages = [Message(role="system", content=_join(system_parts))]
-        messages += [Message(role="user", content=text) for text in memory if text]
+        messages = [Message(role="system", content=_join([a.system, layers["canary"]]))]
+        for name in (
+            "skills",
+            "mcp_index",
+            "project_rules",
+            "workspace",
+            "workspace_memory",
+            "session_memory",
+        ):
+            if layers[name]:
+                messages.append(Message(role="user", content=layers[name]))
 
         goal_at = _goal_index(state)
         split = goal_at if goal_at is not None else 0
@@ -146,10 +158,9 @@ class PromptAssembler:
             messages.append(Message(role="user", content=layers["task_data"]))
         rest = state.messages[split:]
         if goal_at is not None:
-            goal = wrap("user_task", state.task_goal)
-            messages.append(Message(role="user", content=goal))
+            messages.append(Message(role="user", content=wrap("user_task", state.task_goal)))
             rest = rest[1:]
-        tail = Message(role="user", content=_join([layers["task_progress"], instruction]))
+        tail = Message(role="user", content=layers["scratch"])
         folded = 0
         if self._fold is not None and rest:
             # 基础部分 = 流之外的所有消息（含尾部）；折叠只作用于任务内往返的视图
@@ -201,7 +212,7 @@ class PromptAssembler:
 
     def _task_data(self) -> str:
         a = self._a
-        parts = [a.skills_manifest]
+        parts: list[str] = []
         if a.environment:
             env = "\n".join(f"{k}: {v}" for k, v in sorted(a.environment))
             parts.append(wrap("task_data", env, kind="environment"))
@@ -218,30 +229,36 @@ class PromptAssembler:
             )
         return _join(parts)
 
-    def _progress(self, state: AgentState) -> str:
+    def _scratch(self, state: AgentState) -> str:
+        """草稿回显：放在请求的最末尾，不写入历史。第一行重复任务目标，抵消长任务里的目标漂移。"""
         a = self._a
-        lines: list[str] = []
-        for i, m in enumerate(state.milestones):
-            mark = "（当前）" if i == state.current_milestone_idx else ""
-            lines.append(f"- [{m.status}] {m.id}. {m.title}{mark}")
+        goal = state.task_goal.strip().replace("\n", " ")
+        lines = [f"当前任务目标：{goal[: self._goal_chars]}"]
+        if state.plan:
+            lines.append("计划：")
+            marks = {"completed": "[x]", "in_progress": "[>]", "pending": "[ ]"}
+            lines += [f"  {marks[i.status]} {i.id} {i.title}" for i in state.plan]
         known = {e.text for e in (*a.session_facts, *a.recent_facts)}
-        facts = [f for f in state.confirmed_facts if f not in known]
-        if facts:
-            lines += ["本任务确认的事实：", *(f"- {f}" for f in facts)]
+        facts = [f for f in state.facts if f not in known]
         seen = (*a.session_failures, *a.recent_failures)
         fails = [f for f in state.failed_attempts if f not in seen]
-        if fails:
-            lines += ["本任务的失败尝试：", _failures(fails)]
-        inherited = a.session_summary.text if a.session_summary else ""
-        if state.rolling_summary and state.rolling_summary != inherited:
-            lines += ["进展摘要：", state.rolling_summary]
-        return wrap("task_progress", "\n".join(lines)) if lines else ""
+        if facts or fails:
+            lines.append("本任务笔记：")
+            lines += [f"  事实：{f}" for f in facts]
+            lines += [
+                f"  失败尝试：{f.action}；原因：{f.failure_reason}；结论：{f.conclusion}"
+                for f in fails
+            ]
+        reminder = _verification_reminder(state)
+        if reminder:
+            lines.append(reminder)
+        return wrap("scratch", "\n".join(lines))
 
     # ------------------------------------------------------------------ 检视
 
-    def describe(self, state: AgentState, instruction: str) -> dict[str, Any]:
+    def describe(self, state: AgentState) -> dict[str, Any]:
         """各段的结构化快照；与实际发给模型的请求同源，不含金丝雀。"""
-        built = self._build(state, instruction)
+        built = self._build(state)
         a, layers = self._a, built.layers
 
         def size(*names: str) -> dict[str, int]:
@@ -269,7 +286,6 @@ class PromptAssembler:
             },
             "recent_turns": {"messages": built.history},
             "task_data": {
-                "skills": bool(a.skills_manifest),
                 "environment": len(a.environment),
                 "recent_facts": len(a.recent_facts),
                 "recent_failures": len(a.recent_failures),
@@ -277,7 +293,9 @@ class PromptAssembler:
             },
             "latest_request": {"chars": len(goal)},
             "stream": {"messages": len(state.messages), "folded": built.folded},
-            "stage_instruction": {"chars": len(instruction)},
+            "skills": {"present": bool(a.skills_manifest), **size("skills")},
+            "mcp_index": {"present": bool(a.mcp_index), **size("mcp_index")},
+            "scratch": size("scratch"),
             "request": {
                 "messages": len(built.messages),
                 "chars": len(request),
@@ -298,3 +316,26 @@ def _goal_index(state: AgentState) -> int | None:
         if m.role == "user" and m.content == state.task_goal:
             return i
     return None
+
+
+_COMMAND_CLIP: Final = 80
+
+
+def _verification_reminder(state: AgentState) -> str:
+    """证据提醒：只陈述事实，不下指令，也不拦截结束。``none`` 与 ``passed`` 不显示。"""
+    if state.verification == "unchecked":
+        return "你修改过文件，此后尚未运行任何命令验证。"
+    if state.verification == "failed":
+        command = _last_command(state)
+        tail = f"：{command[:_COMMAND_CLIP]}" if command else ""
+        return f"你修改文件后，最近一条命令失败{tail}。"
+    return ""
+
+
+def _last_command(state: AgentState) -> str:
+    for message in reversed(state.messages):
+        for call in reversed(message.tool_calls):
+            if call.name == "bash":
+                command = call.args.get("command")
+                return command if isinstance(command, str) else ""
+    return ""

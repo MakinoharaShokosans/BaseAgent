@@ -19,18 +19,25 @@ from agent_runtime.core.errors import (
     InvalidUpdateError,
     StateDecodeError,
 )
-from agent_runtime.core.messages import Message, Role, ToolCall, assert_atomic_pairs
+from agent_runtime.core.messages import (
+    Message,
+    Role,
+    ToolCall,
+    assert_atomic_pairs,
+    unanswered_calls,
+)
 from agent_runtime.core.state import (
     CURRENT_SCHEMA_VERSION,
-    DONE,
+    MAX_FACT_CHARS,
+    MAX_FACTS,
+    MAX_FAILED_ATTEMPTS,
+    MAX_PLAN_ITEMS,
     AgentState,
     ApprovalDecision,
     FailedAttempt,
-    Milestone,
-    NextPhase,
     PendingApproval,
     PermissionLevel,
-    Phase,
+    PlanItem,
     Verification,
     apply_update,
     check_invariants,
@@ -42,7 +49,10 @@ from agent_runtime.core.tools import AgentTool, ToolResult, ToolSchema, Trust
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
-    "DONE",
+    "MAX_FACTS",
+    "MAX_FACT_CHARS",
+    "MAX_FAILED_ATTEMPTS",
+    "MAX_PLAN_ITEMS",
     "MIGRATIONS",
     "MINIMUM_SCHEMA_VERSION",
     "AgentState",
@@ -56,11 +66,9 @@ __all__ = [
     "InvalidStateError",
     "InvalidUpdateError",
     "Message",
-    "Milestone",
-    "NextPhase",
     "PendingApproval",
     "PermissionLevel",
-    "Phase",
+    "PlanItem",
     "Role",
     "StateDecodeError",
     "ToolCall",
@@ -77,4 +85,5 @@ __all__ = [
     "new_state",
     "state_from_dict",
     "state_to_dict",
+    "unanswered_calls",
 ]

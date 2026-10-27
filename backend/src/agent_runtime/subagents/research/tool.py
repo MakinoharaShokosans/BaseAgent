@@ -1,6 +1,6 @@
 """``delegate_research``：主 Agent 获取外部资料的唯一入口。
 
-设计文档：06_subagents/01_research_isolation.md、03_budget_ledger.md。
+设计文档：06_subagents/01_research_isolation.md。
 
 主 Agent 给的是研究意图（主题与问题），不是 URL，也不是最终检索词。每次调用先向预算账本预留、
 结束后在 ``finally`` 里结算，所以研究的消耗计入父任务预算；每任务调用次数也有上限。
@@ -13,10 +13,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from agent_runtime.core import AgentTool, ToolResult
-from agent_runtime.guardrails import BudgetLedger, ChildBudget
 from agent_runtime.subagents.research.models import ResearchRequest
 from agent_runtime.subagents.research.render import render_failure, render_report
 from agent_runtime.subagents.research.runner import ResearchRunner
+from agent_runtime.subagents.usage import ChildUsage
 
 _MAX_TOPIC = 200
 _MAX_QUESTION = 200
@@ -51,18 +51,14 @@ class DelegateResearchTool(AgentTool):
     def __init__(
         self,
         runner: ResearchRunner,
-        ledger: BudgetLedger,
         *,
         task_id: str,
-        max_tokens: int,
         max_wall_time_sec: float,
         max_calls: int,
         max_report_chars: int,
     ) -> None:
         self._runner = runner
-        self._ledger = ledger
         self._task_id = task_id
-        self._max_tokens = max_tokens
         self._max_wall = max_wall_time_sec
         self._max_calls = max_calls
         self._max_report = max_report_chars
@@ -77,16 +73,9 @@ class DelegateResearchTool(AgentTool):
             return ToolResult.failure(
                 f"本任务的研究次数已达上限 {self._max_calls}；请基于已有资料和本地证据继续推进"
             )
-        reservation, reason = self._ledger.reserve(self._max_tokens, "research")
-        if reservation is None:
-            return ToolResult.failure(f"预算不足，无法发起研究：{reason}")
         self._calls += 1
-        budget = ChildBudget(reservation.amount, self._max_wall)
-        try:
-            report = await self._runner.run(request, budget)
-        finally:
-            # 结算在所有退出路径上（含超时取消），用量取框架读出的数，不信子级自述
-            self._ledger.settle(reservation, budget.used)
+        budget = ChildUsage(self._max_wall)
+        report = await self._runner.run(request, budget)
         meta = {"rounds": report.rounds_used, "sources": len(report.sources), "tokens": budget.used}
         if report.empty:
             return ToolResult(

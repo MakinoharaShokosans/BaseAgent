@@ -20,42 +20,19 @@ from agent_runtime.core.state import (
     AgentState,
     ApprovalDecision,
     FailedAttempt,
-    Milestone,
     PendingApproval,
+    PlanItem,
     build_state,
 )
 
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
 
 #: 低于此版本的检查点不再支持加载
-MINIMUM_SCHEMA_VERSION: Final = 1
-_REJECTION_MARK: Final = "【验收未通过】"
+MINIMUM_SCHEMA_VERSION: Final = 3
 
-
-def _v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
-    """v2 新增回路控制字段。旧任务里的验收打回次数从消息前缀数出来，保持上限的语义不变。"""
-    messages = data.get("messages")
-    rejections = 0
-    if isinstance(messages, list):
-        for item in cast("list[object]", messages):
-            if (
-                isinstance(item, dict)
-                and item.get("role") == "user"
-                and str(item.get("content", "")).startswith(_REJECTION_MARK)
-            ):
-                rejections += 1
-    return {
-        **data,
-        "replan_needed": False,
-        "steps_since_plan": 0,
-        "rejections": rejections,
-        "planner_degraded": 0,
-        "verification": "none",
-    }
-
-
-#: 第 n 版升到第 n+1 版的迁移函数
-MIGRATIONS: Final[dict[int, Migration]] = {1: _v1_to_v2}
+#: 第 n 版升到第 n+1 版的迁移函数。v1、v2 是五阶段工作流的状态（含阶段、里程碑、预算计数），
+#: 与纯 agent loop 的状态不兼容，不迁移（docs/12_decisions/0006）
+MIGRATIONS: Final[dict[int, Migration]] = {}
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
@@ -79,11 +56,11 @@ def state_to_dict(state: AgentState) -> dict[str, Any]:
         value = getattr(state, name)
         if name == "messages":
             out[name] = [m.to_dict() for m in state.messages]
-        elif name in ("milestones", "failed_attempts"):
+        elif name in ("plan", "failed_attempts"):
             out[name] = [m.model_dump(mode="json") for m in cast("tuple[BaseModel, ...]", value)]
         elif name in ("pending_approval", "approval_decision"):
             out[name] = None if value is None else cast(BaseModel, value).model_dump(mode="json")
-        elif name in ("confirmed_facts", "fingerprint_history", "dispatch_started"):
+        elif name in ("facts", "fingerprint_history"):
             out[name] = list(cast("tuple[str, ...]", value))
         elif name == "artifacts":
             out[name] = dict(cast("Mapping[str, str]", value))
@@ -132,7 +109,7 @@ def state_from_dict(
 
     values: dict[str, object] = dict(data)
     values["messages"] = _list(data, "messages", Message.from_dict)
-    values["milestones"] = _list(data, "milestones", lambda d: _model(Milestone, d))
+    values["plan"] = _list(data, "plan", lambda d: _model(PlanItem, d))
     values["failed_attempts"] = _list(data, "failed_attempts", lambda d: _model(FailedAttempt, d))
     for name, kind in (
         ("pending_approval", PendingApproval),

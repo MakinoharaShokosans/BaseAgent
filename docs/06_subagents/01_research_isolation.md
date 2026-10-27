@@ -166,7 +166,7 @@ ResearchReport(
 
 代码在 `agent_runtime.subagents.research`（`models`、`render`、`runner`、`tool`、`search_client`）。`delegate_research` 在 `research.enabled` 且有 web_search 客户端时才注册，主工具表里没有 `web_search`。
 
-- **目标设计取消了研究调用的 Token 预算、次数上限与账本**（[0006](../12_decisions/0006-pure-agent-loop.md)）：`max_wall_time_sec`、`max_total_tokens`、`research.max_calls_per_task` 与 `BudgetLedger` 接入待删除。研究调用的用量只作为事件里的统计。
+- **Token 预算与账本已取消**（[0006](../12_decisions/0006-pure-agent-loop.md)）：`research.max_total_tokens` 与 `BudgetLedger` 已删除；保留 `max_wall_time_sec`（单次运行的硬超时，即工具超时）和 `max_calls_per_task`（次数上限，不是预算）。用量由 `ChildUsage` 统计（`subagents/usage.py`），只作为工具结果 `meta` 里的统计值。
 - **§8 第 2 项已修**：每条证据放进 `<web_page url=… trust="untrusted">` 信封，正文里的闭合标签被破坏（`web_page` 已加入信封标签集合，这是写测试时才发现漏掉的）。
 - **第 3 项已修**：来源数取 `min(请求值, 配置值)`。**第 4 项已修**：工具恒标 `untrusted`，信封由编排层统一加；报告渲染在这种情况下不再自带外层信封（信封套信封时内层标签会被外层破坏成 `&lt;`）。**第 5 项已修**：渲染统一破坏信封标签。**第 6 项**：见 [web_search §10](../04_tools/06_web_search_service.md)。
 - **净化通道**四道约束均有测试：引用的 URL 必须在本轮真实抓取到正文的集合里（只有搜索摘要的来源不算）；版本号匹配正则；长度与条数硬上限；`display_only` 恒为真且是冻结字段。子模型的输出宽松解析——列表里不是对象的条目被丢掉，而不是让整份报告解析失败。注入样态的答案被标注并记入 `warnings`。

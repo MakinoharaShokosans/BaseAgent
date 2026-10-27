@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Protocol
 
 from pydantic import BaseModel, Field
 
@@ -10,8 +11,7 @@ from agent_runtime.context import PromptLibrary
 from agent_runtime.core import Message
 from agent_runtime.guardrails import wrap
 from agent_runtime.llm import LLMRequest
-from agent_runtime.llm.structured import Parsed
-from agent_runtime.loop.stages.common import StructuredInvoker
+from agent_runtime.llm.structured import Degraded, Parsed
 from agent_runtime.memory import (
     ExtractedFact,
     ExtractedFailure,
@@ -95,6 +95,14 @@ def render_input(request: ExtractionRequest) -> str:
         f"摘要不超过 {limits.summary_max_chars} 字。",
     ]
     return "\n\n".join(parts)
+
+
+class StructuredInvoker(Protocol):
+    """``LLMGateway`` 满足它；测试用假实现。"""
+
+    async def invoke_structured[T: BaseModel](
+        self, request: LLMRequest, model: type[T]
+    ) -> Parsed[T] | Degraded: ...
 
 
 class GatewayExtractor:

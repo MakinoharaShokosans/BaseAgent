@@ -187,8 +187,8 @@ def test_precedence_file_env_overrides(
 def test_env_override_reaches_deeply_nested_keys(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("BASEAGENT_RUNTIME__GUARDRAILS__MAX_STEPS", "40")
-    assert _load(tmp_path).settings.runtime.guardrails.max_steps == 40
+    monkeypatch.setenv("BASEAGENT_RUNTIME__GUARDRAILS__MAX_CONSECUTIVE_BLOCKS", "9")
+    assert _load(tmp_path).settings.runtime.guardrails.max_consecutive_blocks == 9
 
 
 @pytest.mark.unit

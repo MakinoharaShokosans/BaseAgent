@@ -1,4 +1,4 @@
-"""子智能体执行循环：步数、Token、挂钟三重封顶的朴素异步循环。
+"""子智能体执行循环：步数与单次运行超时封顶的朴素异步循环，没有 Token 额度。
 
 设计文档：06_subagents/02_dynamic_delegation.md §4。越级即失败，绝不挂起（也不参考会话白名单）；
 子级的中间观察值只在这里，不进主状态、不进检查点、不进事件。
@@ -17,7 +17,6 @@ from pydantic import BaseModel
 
 from agent_runtime.core import Message, ToolCall
 from agent_runtime.guardrails import (
-    ChildBudget,
     PermissionPolicy,
     check_permission,
     detect_canary_leak,
@@ -31,6 +30,7 @@ from agent_runtime.subagents.delegate.report import (
     SubagentReport,
     build_report,
 )
+from agent_runtime.subagents.usage import ChildUsage
 from tools.core import ToolDispatcher, ToolRegistry
 
 Emit = Callable[[str, Mapping[str, object]], Awaitable[None]]
@@ -84,9 +84,7 @@ class SubagentRunner:
         self._depth = depth
         self._emit = emit
 
-    async def run(
-        self, role: str, goal: str, budget: ChildBudget, max_steps: int
-    ) -> SubagentReport:
+    async def run(self, role: str, goal: str, budget: ChildUsage, max_steps: int) -> SubagentReport:
         started = time.monotonic()
         access = AccessSet()
         warnings: list[str] = []
@@ -101,15 +99,14 @@ class SubagentRunner:
                 "role": role,
                 "depth": self._depth,
                 "assigned_tools": sorted(s.name for s in self._registry.schemas()),
-                "token_budget": budget.max_tokens,
                 "max_steps": max_steps,
             },
         )
         try:
             schemas = self._registry.schemas()
             while steps < min(max_steps, self._limits.max_steps):
-                if budget.exhausted:
-                    warnings.append(f"预算耗尽：{budget.reason()}")
+                if budget.expired:
+                    warnings.append(budget.reason())
                     break
                 response = await self._model(messages, schemas, budget)
                 if response is None:
@@ -165,7 +162,7 @@ class SubagentRunner:
     # ------------------------------------------------------------------ 步骤
 
     async def _model(
-        self, messages: Sequence[Message], schemas: Sequence[object], budget: ChildBudget
+        self, messages: Sequence[Message], schemas: Sequence[object], budget: ChildUsage
     ) -> LLMResponse | None:
         request = LLMRequest(
             tier=self._tier,  # type: ignore[arg-type]
@@ -228,10 +225,10 @@ class SubagentRunner:
         return [out[c.id] for c in calls]
 
     async def _finalise(
-        self, messages: Sequence[Message], budget: ChildBudget, warnings: list[str]
+        self, messages: Sequence[Message], budget: ChildUsage, warnings: list[str]
     ) -> RawSubagentReport:
-        if budget.exhausted and not budget.remaining:
-            warnings.append("预算已耗尽，未能提炼结论")
+        if budget.expired:
+            warnings.append("单次运行已超时，未能提炼结论")
             return RawSubagentReport()
         request = LLMRequest(
             tier=self._tier,  # type: ignore[arg-type]

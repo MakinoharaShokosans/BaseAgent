@@ -17,7 +17,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from agent_runtime.core import Message
-from agent_runtime.guardrails import ChildBudget, wrap
+from agent_runtime.guardrails import wrap
 from agent_runtime.llm import Degraded, LLMRequest, Parsed
 from agent_runtime.subagents.research.models import (
     Evidence,
@@ -29,6 +29,7 @@ from agent_runtime.subagents.research.models import (
     ResearchSource,
     build_report,
 )
+from agent_runtime.subagents.usage import ChildUsage
 
 Emit = Callable[[str, Mapping[str, object]], Awaitable[None]]
 MAX_QUERIES_PER_ROUND = 3
@@ -72,7 +73,7 @@ class ResearchRunner:
         self._tier = tier
         self._emit = emit
 
-    async def run(self, request: ResearchRequest, budget: ChildBudget) -> ResearchReport:
+    async def run(self, request: ResearchRequest, budget: ChildUsage) -> ResearchReport:
         started = time.monotonic()
         warnings: list[str] = []
         evidence: dict[str, Evidence] = {}
@@ -86,7 +87,7 @@ class ResearchRunner:
                     "max_sources": self._cap(request),
                 },
             )
-            while rounds < self._limits.max_rounds and not budget.exhausted:
+            while rounds < self._limits.max_rounds and not budget.expired:
                 if len(evidence) >= self._cap(request):
                     break
                 queries = await self._plan(request, evidence, budget, warnings)
@@ -103,8 +104,8 @@ class ResearchRunner:
                         "evidence": len(evidence),
                     },
                 )
-            if budget.exhausted:
-                warnings.append(f"预算耗尽：{budget.reason()}")
+            if budget.expired:
+                warnings.append(budget.reason())
             raw = (
                 await self._extract(request, evidence, budget, warnings)
                 if evidence
@@ -152,7 +153,7 @@ class ResearchRunner:
         self,
         request: ResearchRequest,
         evidence: Mapping[str, Evidence],
-        budget: ChildBudget,
+        budget: ChildUsage,
         warnings: list[str],
     ) -> list[str]:
         have = "\n".join(f"- {e.title or e.url}" for e in evidence.values()) or "（还没有来源）"
@@ -207,7 +208,7 @@ class ResearchRunner:
         self,
         request: ResearchRequest,
         evidence: Mapping[str, Evidence],
-        budget: ChildBudget,
+        budget: ChildUsage,
         warnings: list[str],
     ) -> RawReport:
         pages = "\n\n".join(
@@ -230,9 +231,9 @@ class ResearchRunner:
         return result
 
     async def _ask[T: BaseModel](
-        self, system: str, user: str, model: type[T], purpose: str, budget: ChildBudget
+        self, system: str, user: str, model: type[T], purpose: str, budget: ChildUsage
     ) -> T | Degraded | None:
-        if budget.exhausted:
+        if budget.expired:
             return None
         deadline = None
         request = LLMRequest(

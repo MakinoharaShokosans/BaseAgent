@@ -7,7 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from agent_runtime.guardrails import (
-    build_replan_notice,
+    build_error_notice,
     compute_fingerprint,
     is_alternating,
     is_fingerprint_loop,
@@ -103,15 +103,10 @@ def test_success_resets_and_failure_accumulates(current: int, failures: int, exp
 
 
 @pytest.mark.unit
-def test_the_notice_explains_what_triggered_it() -> None:
-    loop = build_replan_notice(0, True, 3)
-    assert "完全相同" in loop
-    errors = build_replan_notice(3, False, 3)
-    assert "连续 3 次" in errors
-    both = build_replan_notice(4, True, 3)
-    assert "完全相同" in both and "连续 4 次" in both
-    assert "完全相同" not in errors
-    assert "阈值" not in loop
+def test_the_notice_states_the_count_and_does_not_command() -> None:
+    notice = build_error_notice(3)
+    assert "连续 3 次" in notice and "换一种做法" in notice
+    assert "重新规划" not in notice  # 没有规划阶段：只是通知，不改变控制流
 
 
 # ==============================================================================

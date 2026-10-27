@@ -122,6 +122,7 @@ class Application:
             web=web,
             mcp=mcp,
             library=library,
+            usage=llm_events.tokens_of,
         )
         runner = TaskRunner(
             RunnerDeps(
@@ -146,6 +147,7 @@ class Application:
             artifacts_root=paths.artifacts_dir,
             traces_root=paths.traces_dir,
             trajectory=trajectory,
+            usage=llm_events.tokens_of,
         )
         runner.attach_observer(tasks.observer(llm_events.drain))
         app = cls(

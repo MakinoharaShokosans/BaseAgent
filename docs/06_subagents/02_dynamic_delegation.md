@@ -181,7 +181,7 @@ denied_tools = ["spawn_subagent", "delegate_research", "delegate_code_search"]
 
 ## 12. 实现状态
 
-代码在 `agent_runtime.subagents.delegate`（`report`、`render`、`runner`、`tool`），由 `RuntimeFactory` 在 `subagent.enabled` 时装配进主工具表。父工具表是派发时刻的快照，子工具表是它的子集（独立的 `ToolRegistry`，但工具实例仍与父级共享，§8 第 4 项未做）。
+代码在 `agent_runtime.subagents.delegate`（`report`、`render`、`runner`、`tool`），由 `RuntimeFactory` 在 `subagent.enabled` 时装配进主工具表。账本、`token_budget` 参数、`max_total_tokens` / `min_token_budget` / `max_spawns_per_task` 已删除；保留 `max_steps` 与 `max_wall_time_sec`（子级单次运行的步数与超时）。父工具表是派发时刻的快照，子工具表是它的子集（独立的 `ToolRegistry`，但工具实例仍与父级共享，§8 第 4 项未做）。
 
 - **三道收窄**：工具集**全有或全无**（不存在、`spawn_subagent` 本身、`denied_tools`、超过 `max_assigned_tools`、空列表、非字符串都整体拒绝，失败信息列出当前可授权的工具）；权限取父任务基线、子级不可升级；深度 `当前 + 1 ≤ max_depth`。
 - **越级即失败，绝不挂起**：每次调用用 `check_permission` 判定，越级的合成失败观察值（"你不能发起审批"）并发 `subagent.blocked`，也不参考会话白名单；不在分配表里的工具即使模型要求也只得到"没有工具"。
@@ -189,4 +189,4 @@ denied_tools = ["spawn_subagent", "delegate_research", "delegate_code_search"]
 - **第 2 项（轨迹）已修**：`subagent.*` 事件进入轨迹（类型 `subagent`）。**第 3 项（金丝雀）已修**：子级每个模型响应都检测，泄露即终止。**第 5 项未做**：子级观察值只按字符截断，不落盘。第 6 项（派发次数续跑后重置）随派发次数上限一并取消。
 - **事件里没有原始输出**：`subagent.tool` 的 `summary` 只有成败与规模（`成功，120 字符`），失败时才带一小段原因；一个整套应用的测试断言子级读到的文件内容不出现在事件流里。
 - **回流**：工具类属性 `trusted`，每次返回时覆盖为 `untrusted`；只要拿到结构良好的报告就 `ok=True`（子级如实报告"做不到"不计连续错误）；渲染不自带外层信封（信封由编排层统一加）。未经验证的结论明确标注，`verified` 由代码置位。
-- **目标设计取消了子级的步数、Token、挂钟上限与账本**（[0006](../12_decisions/0006-pure-agent-loop.md)）；上面 §4、§7、§9 已按目标设计写，代码里的 `BudgetLedger` / `ChildBudget` 接入待删除。
+- **Token 额度与账本已取消**（[0006](../12_decisions/0006-pure-agent-loop.md)），代码里的 `BudgetLedger` / `ChildBudget` 已删除，换成只做统计和计时的 `ChildUsage`。**与设计的偏差：子级的 `max_steps` 与单次运行超时（`max_wall_time_sec`）仍保留**，因为子循环没有父循环的取消与重复拦截，需要一个兜底；这两项不是预算，不随用量变化。

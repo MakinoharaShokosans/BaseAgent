@@ -166,31 +166,26 @@ class ServerConfig(_Section):
 
 
 class GuardrailsConfig(_Section):
-    max_steps: PosInt = 25
-    max_total_tokens: PosInt = 200_000
-    max_wall_time_sec: PosInt = 900
-    warning_ratio: Ratio = 0.9
+    """护栏。没有预算类上限：额度耗尽按模型错误处理（docs/12_decisions/0006）。"""
+
     consecutive_errors_limit: PosInt = 3
     identical_fingerprint_limit: PosInt = 3
+    #: 连续被重复拦截的批次数达到它，任务以 failed 结束
+    max_consecutive_blocks: PosInt = 5
 
 
 class LoopConfig(_Section):
-    """主循环的形状。``replan_interval = 0`` 是每个工具批次都回 planner 的旧行为。"""
+    """主循环的形状：一个模型档、一份工具集，没有阶段。"""
 
-    #: 连续执行几个工具批次后回 planner 复核；连续失败、循环、越权被拒时不等它，立即回
-    replan_interval: NonNegInt = 6
-    #: 验收累计打回超过它就终止任务（带着已完成的部分交付）
-    max_rejections: PosInt = 3
-    #: planner 连续降级（没拿到可用结构化结论）超过它就终止任务
-    max_planner_degradations: PosInt = 3
+    #: 主循环使用的模型档
+    model_tier: ModelTier = "reasoning"
+    #: 单次模型调用的超时秒数；超时按模型错误处理（任务 failed，可续跑）
+    call_timeout_sec: PosInt = 300
     #: 摆动（ABAB…）检测的周期数；0 关闭
     alternation_cycles: NonNegInt = 3
-    #: 在 planner / executor / evaluator 的指令尾部告诉模型已用步数与 Token
-    progress_hint: bool = True
 
 
 class CheckpointConfig(_Section):
-    dispatch_marker: bool = True
     recover_on_start: bool = True
 
 
@@ -342,7 +337,7 @@ class TaskContextConfig(_Section):
     hard_tokens: PosInt = 160_000
     fold_keep_recent_steps: PosInt = 3
     compaction_enabled: bool = False
-    fold_exempt_tools: list[str] = ["load_skill"]
+    fold_exempt_tools: list[str] = ["load_skill", "mcp_describe"]
 
     @model_validator(mode="after")
     def _ordered(self) -> Self:
@@ -373,7 +368,7 @@ class ObservationConfig(_Section):
     json_outline_max_depth: PosInt = 3
     json_outline_array_items: PosInt = 5
     scalar_preview_chars: PosInt = 120
-    exempt_tools: list[str] = ["load_skill"]
+    exempt_tools: list[str] = ["load_skill", "mcp_describe"]
     exempt_multiplier: PosInt = 8
 
 
@@ -399,8 +394,8 @@ class RulesConfig(_Section):
 
 
 class PromptConfig(_Section):
-    memory_role: Literal["user", "system"] = "user"
-    stage_instruction_position: Literal["tail"] = "tail"
+    #: 草稿回显第一行重复任务目标的最大字符数
+    goal_echo_chars: PosInt = 300
 
 
 class ContextConfig(_Section):
@@ -552,7 +547,6 @@ class ResearchConfig(_Section):
     max_sources: PosInt = 5
     max_source_chars: PosInt = 6000
     max_wall_time_sec: PosInt = 45
-    max_total_tokens: PosInt = 20000
     max_calls_per_task: PosInt = 3
     max_findings: PosInt = 8
     max_answer_chars: PosInt = 500
@@ -566,17 +560,21 @@ class SubagentConfig(_Section):
     model_tier: ModelTier = "fast"
     max_depth: NonNegInt = 1
     max_steps: PosInt = 8
-    max_total_tokens: PosInt = 30000
-    min_token_budget: PosInt = 2000
     max_wall_time_sec: PosInt = 90
-    max_spawns_per_task: PosInt = 4
     max_assigned_tools: PosInt = 6
     max_findings: PosInt = 6
     max_observation_chars: PosInt = 4000
     max_answer_chars: PosInt = 400
     max_citations: PosInt = 8
     max_report_chars: PosInt = 3000
-    denied_tools: list[str] = ["spawn_subagent", "delegate_research"]
+    denied_tools: list[str] = [
+        "spawn_subagent",
+        "delegate_research",
+        "update_plan",
+        "note",
+        "mcp_describe",
+        "mcp_call",
+    ]
 
     @field_validator("denied_tools")
     @classmethod
@@ -611,6 +609,9 @@ class PermissionsConfig(_Section):
         "grep",
         "read_artifact",
         "load_skill",
+        "update_plan",
+        "note",
+        "mcp_describe",
         "delegate_research",
         "spawn_subagent",
     ]
@@ -661,6 +662,9 @@ class McpServerConfig(_Section):
     url: str = ""
     env: dict[str, str] = {}
     allow_tools: list[str] = []
+    #: pinned：Schema 直接进 tools；deferred：只在索引里，经 mcp_describe / mcp_call 使用。
+    #: 空表示沿用 [mcp].exposure
+    exposure: Literal["", "pinned", "deferred"] = ""
     #: 可安全重试的工具（支持 ``*`` 通配）：崩溃恢复据此决定重试还是标记“结果未知”
     idempotent_tools: list[str] = []
     #: 覆盖 [mcp] 的全局资源上限；0 表示沿用全局值
@@ -690,6 +694,11 @@ class McpConfig(_Section):
     max_description_chars: PosInt = 1000
     reject_on_injection: bool = True
     exposed_name_max_len: PosInt = 64
+    #: 全局默认暴露方式（决策 0007）
+    exposure: Literal["pinned", "deferred"] = "deferred"
+    #: deferred 索引的条数上限，超出时只列服务器与工具数
+    index_max_listed: PosInt = 60
+    index_desc_chars: PosInt = 80
     refresh_tools_each_task: bool = True
     rlimit_as_mb: PosInt = 4096
     rlimit_fsize_mb: PosInt = 50

@@ -29,12 +29,8 @@ async def health_dependencies(svc: Services) -> dict[str, str]:
 
 @router.get("/system/limits")
 async def limits(svc: Services) -> dict[str, int]:
-    """任务的预算上限，供界面画用量条。只读，不含密钥。"""
-    g = svc.settings.runtime.guardrails
+    """运行时的并发上限。任务没有 Token、步数或时间预算（docs/12_decisions/0006）。只读。"""
     return {
-        "max_steps": g.max_steps,
-        "max_total_tokens": g.max_total_tokens,
-        "max_wall_time_sec": g.max_wall_time_sec,
         "max_concurrent_tasks": svc.settings.server.max_concurrent_tasks,
     }
 

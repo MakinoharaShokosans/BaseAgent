@@ -22,6 +22,8 @@ ENVELOPE_TAGS: Final = (
     "session_memory",
     "task_data",
     "task_progress",
+    "scratch",
+    "available_mcp_tools",
     "workspace",
 )
 _ATTR_LIMIT: Final = 120

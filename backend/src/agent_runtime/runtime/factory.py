@@ -19,34 +19,29 @@ from loguru import logger
 
 from agent_runtime.checkpoint import CheckpointStore
 from agent_runtime.context import ObservationGovernor, ObservationStore, PromptLibrary, RulesCache
-from agent_runtime.core import AgentState, AgentTool
-from agent_runtime.guardrails import BudgetLedger, PhysicalBudgetGuard
+from agent_runtime.core import AgentState, AgentTool, ToolSchema
 from agent_runtime.guardrails.envelope import observation_envelope
 from agent_runtime.llm import LLMGateway, PreferredEndpoint
 from agent_runtime.llm.tokens import estimate_tokens
-from agent_runtime.loop import TaskRuntime
-from agent_runtime.loop.stages import (
-    ExecutorDeps,
-    ModelStageDeps,
+from agent_runtime.loop import (
+    McpProxy,
+    ModelDeps,
+    TaskRuntime,
     ToolRunnerDeps,
-    make_budget_guard_stage,
-    make_evaluator_stage,
-    make_executor_stage,
-    make_planner_stage,
-    make_tool_runner_stage,
+    make_model_step,
+    make_tool_runner,
+    scratch_tools,
 )
 from agent_runtime.memory import SYSTEM_PROMPT_KEY, MemoryStore, SessionPreferences
 from agent_runtime.observability import EventHub, Redactor
 from agent_runtime.runtime.assembly import (
     APPROVAL_HOOKS,
     assembler_from_settings,
-    budget_limits_from_settings,
     build_prompt_assets,
     file_limits_from_settings,
     loop_limits_from_settings,
     observation_limits_from_settings,
     permission_policy_from_settings,
-    progress_hint_from_settings,
     rules_from_settings,
     skill_limits_from_settings,
     skill_roots_from_settings,
@@ -68,12 +63,14 @@ from agent_runtime.subagents.research import (
     SidecarSearchClient,
 )
 from baseagent_config import LoadedSettings
-from mcps import McpManager
+from mcps import McpCallTool, McpDescribeTool, McpManager, McpTool, render_index
 from tools.builtin import ShellBinding, TaskArtifacts, build_builtin_tools
 from tools.core import SidecarClient, ToolDispatcher, ToolRegistry
 
 #: 内置工具的幂等性（重复执行是否安全）：崩溃恢复据此决定重试还是标记“结果未知”
-_IDEMPOTENT: Final = frozenset({"view_file", "list_dir", "grep", "read_artifact", "load_skill"})
+_IDEMPOTENT: Final = frozenset(
+    {"view_file", "list_dir", "grep", "read_artifact", "load_skill", "update_plan", "mcp_describe"}
+)
 
 
 @dataclass(slots=True)
@@ -93,6 +90,8 @@ class RuntimeFactory:
     rules_cache: RulesCache = field(default_factory=RulesCache)
     count_tokens: Callable[[str], int] = estimate_tokens
     clock: Callable[[], float] = time.monotonic
+    #: 任务累计 Token（统计值）；没有接入时恒为 0
+    usage: Callable[[str], int] = lambda task_id: 0
     #: 会话级“永久放行”的签名集合：跨续跑存活，不入检查点
     _allow: defaultdict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
 
@@ -130,18 +129,14 @@ class RuntimeFactory:
         skills = SkillRegistry.scan(
             skill_roots_from_settings(settings, root), skill_limits_from_settings(settings)
         )
-        ledger = BudgetLedger(
-            max_total_tokens=settings.runtime.guardrails.max_total_tokens,
-            max_spawns=settings.subagent.max_spawns_per_task,
-            min_grant_tokens=settings.subagent.min_token_budget,
-        )
         events = TaskEvents(
             self.hub,
             state.task_id,
             self.redactor,
             canary=state.canary_token,
             tool_result_clip=settings.events.tool_result_clip_chars,
-            stage_offset=await self.hub.count(state.task_id, "node.finished"),
+            turn_offset=await self.hub.count(state.task_id, "turn.finished"),
+            usage=lambda: self.usage(state.task_id),
         )
         tools = build_builtin_tools(
             workspace_root=root,
@@ -155,19 +150,37 @@ class RuntimeFactory:
             shell=self._shell_binding(state, root),
             skills=skills,
         )
-        research = self._research_tool(state, ledger, events)
+        tools.extend(scratch_tools())
+        research = self._research_tool(state, events)
         if research is not None:
             tools.append(research)
         mcp_tools = await self._mcp_tools()
         tools.extend(mcp_tools)
+        deferred = [t.name for t in mcp_tools if self._is_deferred(t)]
+        pinned = [t.name for t in mcp_tools if t.name not in set(deferred)]
+        by_name = {t.name: t for t in tools}
+        extra_untrusted: list[str] = []
+        if deferred:
+            # 代理工具：索引里的工具经 mcp_describe 取定义，再经 mcp_call 调用（决策 0007）
+            tools.append(
+                McpDescribeTool(
+                    lambda n: _hidden_schema(by_name, set(deferred), n),
+                    lambda: sorted(deferred),
+                )
+            )
+            tools.append(McpCallTool())
+            extra_untrusted.append("mcp_describe")
         parent_tools = {t.name: t for t in tools}  # 派发时刻父工具表的快照：子级只能是它的子集
-        spawn = self._spawn_tool(state, ledger, events, parent_tools)
+        spawn = self._spawn_tool(state, events, parent_tools)
         if spawn is not None:
             tools.append(spawn)
         # 不可信工具必须逐名授权：研究工具，加上用户在配置里启用的 MCP 服务器通过消毒的工具
-        untrusted = [t.name for t in (research, *mcp_tools) if t is not None]
+        untrusted = [t.name for t in (research, *mcp_tools) if t is not None] + extra_untrusted
         registry = ToolRegistry(
-            tools, allow_untrusted=bool(untrusted), untrusted_allowlist=untrusted or None
+            tools,
+            allow_untrusted=bool(untrusted),
+            untrusted_allowlist=untrusted or None,
+            hidden=deferred,
         )
         context = await self.flow.prepare(state.session_id)
         prefs = SessionPreferences.from_mapping(
@@ -175,12 +188,19 @@ class RuntimeFactory:
         )
         # 用户选的模型只作为主 Agent 的首选端点；研究与子智能体仍走各自配置的档位
         gateway = PreferredEndpoint(self.gateway, prefs.model) if prefs.model else self.gateway
+        mcp_cfg = settings.mcp
+        index = render_index(
+            [(t.server, t.name, t.description) for t in mcp_tools if t.name in set(deferred)],
+            max_listed=mcp_cfg.index_max_listed,
+            desc_chars=mcp_cfg.index_desc_chars,
+        )
         base = build_prompt_assets(
             self.library,
             workspace_name=workspace.name,
             workspace_description=workspace.description,
             rules=rules_from_settings(settings, root, self.rules_cache),
             skills=skills,
+            mcp_index=index,
             tool_names=[s.name for s in registry.schemas()],
         )
         system_override = await self.memory.get_app_setting(SYSTEM_PROMPT_KEY)
@@ -191,57 +211,47 @@ class RuntimeFactory:
             settings, assets, self.count_tokens, context_window=self._context_window()
         )
 
-        guard = PhysicalBudgetGuard(budget_limits_from_settings(settings), clock=self.clock)
-
-        def deadline() -> float | None:
-            return self.clock() + guard.remaining_wall_sec()
-
-        hint = progress_hint_from_settings(settings)
         loop_cfg = settings.runtime.loop
-        model = ModelStageDeps(
-            gateway=gateway, assemble=assembler, deadline=deadline, emit=events.emit, hint=hint
+        limits = loop_limits_from_settings(settings)
+        model = make_model_step(
+            ModelDeps(
+                gateway=gateway,
+                assemble=assembler,
+                tools=registry.schemas(),
+                tier=loop_cfg.model_tier,
+                call_timeout_sec=float(loop_cfg.call_timeout_sec),
+            )
         )
-        dispatcher = ToolDispatcher(registry)
-        tool_runner = ToolRunnerDeps(
-            dispatcher=dispatcher,
-            policy=permission_policy_from_settings(settings),
-            limits=loop_limits_from_settings(settings),
-            governor=ObservationGovernor(
-                observation_limits_from_settings(settings),
-                self.count_tokens,
-                ObservationStore(paths.artifacts_dir),
-            ),
-            approval=APPROVAL_HOOKS,
-            commit=self.checkpoints.commit,
-            allowlist=self._allow[state.session_id],
-            emit=events.emit,
-            ledger=ledger,
-            envelope=observation_envelope,
-            bind=lambda s: artifacts.bind(s.artifacts),
+        tool_runner = make_tool_runner(
+            ToolRunnerDeps(
+                dispatcher=ToolDispatcher(registry),
+                policy=permission_policy_from_settings(settings),
+                limits=limits,
+                governor=ObservationGovernor(
+                    observation_limits_from_settings(settings),
+                    self.count_tokens,
+                    ObservationStore(paths.artifacts_dir),
+                ),
+                approval=APPROVAL_HOOKS,
+                allowlist=self._allow[state.session_id],
+                emit=events.emit,
+                envelope=observation_envelope,
+                bind=lambda s: artifacts.bind(s.artifacts),
+                proxy=McpProxy(deferred, pinned) if deferred else None,
+            )
         )
         return TaskRuntime(
-            stages={
-                "planner": make_planner_stage(
-                    model, max_degradations=loop_cfg.max_planner_degradations
-                ),
-                "budget_guard": make_budget_guard_stage(guard),
-                "executor": make_executor_stage(
-                    ExecutorDeps(
-                        gateway=gateway,
-                        assemble=assembler,
-                        tools=registry.schemas(),
-                        deadline=deadline,
-                        hint=hint,
-                    )
-                ),
-                "tool_runner": make_tool_runner_stage(tool_runner),
-                "evaluator": make_evaluator_stage(model, max_rejections=loop_cfg.max_rejections),
-            },
+            model=model,
+            tools=tool_runner,
             checkpoints=self.checkpoints,
             events=events,
+            max_consecutive_blocks=limits.max_consecutive_blocks,
         )
 
-    async def _mcp_tools(self) -> list[AgentTool]:
+    def _is_deferred(self, tool: McpTool) -> bool:
+        return self.mcp is not None and self.mcp.exposure_of(tool.server) == "deferred"
+
+    async def _mcp_tools(self) -> list[McpTool]:
         """MCP 是增强项：任何故障都只是少几个工具，绝不让任务起不来。"""
         if self.mcp is None:
             return []
@@ -251,9 +261,7 @@ class RuntimeFactory:
             logger.warning("准备 MCP 工具失败，本任务不带外部工具：{!r}", exc)
             return []
 
-    def _research_tool(
-        self, state: AgentState, ledger: BudgetLedger, events: TaskEvents
-    ) -> DelegateResearchTool | None:
+    def _research_tool(self, state: AgentState, events: TaskEvents) -> DelegateResearchTool | None:
         """研究是主 Agent 获取外部信息的唯一入口；关闭或没有 sidecar 客户端时根本不注册。"""
         cfg = self.loaded.settings.research
         if not cfg.enabled or self.web is None:
@@ -282,9 +290,7 @@ class RuntimeFactory:
         )
         return DelegateResearchTool(
             runner,
-            ledger,
             task_id=state.task_id,
-            max_tokens=cfg.max_total_tokens,
             max_wall_time_sec=float(cfg.max_wall_time_sec),
             max_calls=cfg.max_calls_per_task,
             max_report_chars=cfg.max_report_chars,
@@ -293,7 +299,6 @@ class RuntimeFactory:
     def _spawn_tool(
         self,
         state: AgentState,
-        ledger: BudgetLedger,
         events: TaskEvents,
         parent_tools: Mapping[str, AgentTool],
     ) -> SpawnSubagentTool | None:
@@ -327,14 +332,12 @@ class RuntimeFactory:
         return SpawnSubagentTool(
             make_runner,
             lambda: parent_tools,
-            ledger,
             enabled=True,
             depth=0,
             max_depth=cfg.max_depth,
             denied_tools=cfg.denied_tools,
             max_assigned_tools=cfg.max_assigned_tools,
             max_steps=cfg.max_steps,
-            max_total_tokens=cfg.max_total_tokens,
             max_wall_time_sec=float(cfg.max_wall_time_sec),
             max_report_chars=cfg.max_report_chars,
         )
@@ -406,3 +409,10 @@ class RuntimeFactory:
             ("操作系统", f"{platform.system()} {platform.release()}"),
             ("今天", date.today().isoformat()),
         )
+
+
+def _hidden_schema(
+    tools: Mapping[str, AgentTool], deferred: set[str], name: str
+) -> ToolSchema | None:
+    tool = tools.get(name)
+    return tool.schema() if tool is not None and name in deferred else None

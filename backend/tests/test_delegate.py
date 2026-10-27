@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from agent_runtime.core import AgentTool, ToolResult
-from agent_runtime.guardrails import BudgetLedger, ChildBudget
 from agent_runtime.llm import Degraded, LLMRequest, Parsed, TokenUsage
 from agent_runtime.subagents.delegate import (
     AccessSet,
@@ -22,6 +21,7 @@ from agent_runtime.subagents.delegate import (
     render_report,
 )
 from agent_runtime.subagents.delegate.report import RawCitation, RawSubFinding
+from agent_runtime.subagents.usage import ChildUsage
 from stage_support import call_response, parsed
 from test_permissions import POLICY
 from test_tools_core import Fake
@@ -214,7 +214,7 @@ async def test_a_bounded_loop_calls_tools_then_extracts_a_cited_report() -> None
         [call("c1", "view_file", path="src/main.py"), call_response("读完了", total=50)], final
     )
     events: list = []  # type: ignore[type-arg]
-    budget = ChildBudget(10_000, 60)
+    budget = ChildUsage(60)
     registry = ToolRegistry([view], allow_untrusted=True)
     report = await runner(gateway, registry, events=events).run("reader", "找入口", budget, 5)
     assert report.status == "success" and report.findings[0].verified
@@ -243,7 +243,7 @@ async def test_an_over_privileged_call_fails_immediately_without_suspending_and_
     )
     events: list = []  # type: ignore[type-arg]
     report = await runner(gateway, registry, level="workspace_write", events=events).run(
-        "r", "g", ChildBudget(10_000, 60), 5
+        "r", "g", ChildUsage(60), 5
     )
     assert bash.calls == []  # 没有执行
     blocked = [e for e in events if e[0] == "subagent.blocked"]
@@ -259,7 +259,7 @@ async def test_read_only_parent_means_no_writes() -> None:
     gateway = Gateway(
         [call("c1", "write_file", path="a", content="x"), call_response("ok", total=50)]
     )
-    await runner(gateway, registry, level="read_only").run("r", "g", ChildBudget(10_000, 60), 5)
+    await runner(gateway, registry, level="read_only").run("r", "g", ChildUsage(60), 5)
     assert writer.calls == []
 
 
@@ -267,23 +267,31 @@ async def test_read_only_parent_means_no_writes() -> None:
 async def test_tools_outside_the_assignment_are_not_available_even_if_the_model_asks() -> None:
     registry = ToolRegistry([Fake("view_file", idempotent=True)], allow_untrusted=True)
     gateway = Gateway([call("c1", "bash", command="ls"), call_response("ok", total=50)])
-    await runner(gateway, registry).run("r", "g", ChildBudget(10_000, 60), 5)
+    await runner(gateway, registry).run("r", "g", ChildUsage(60), 5)
     message = next(m for m in gateway.requests[1].messages if m.role == "tool")
     assert "没有工具 bash" in message.content
     assert {s.name for s in gateway.requests[0].tools or ()} == {"view_file"}
 
 
 @pytest.mark.unit
-async def test_steps_tokens_and_wall_clock_all_cap_the_loop() -> None:
+async def test_steps_and_wall_clock_cap_the_loop_but_tokens_do_not() -> None:
     forever = Gateway([call("c", "view_file", path="a")], RawSubagentReport())
     registry = ToolRegistry([Fake("view_file", idempotent=True)], allow_untrusted=True)
-    capped = await runner(forever, registry).run("r", "g", ChildBudget(10_000, 60), 2)
+    capped = await runner(forever, registry).run("r", "g", ChildUsage(60), 2)
     assert capped.steps_used == 2 and any("步数上限" in w for w in capped.warnings)
 
-    starved = Gateway([call("c", "view_file", path="a")], RawSubagentReport())
-    budget = ChildBudget(60, 60)
-    out = await runner(starved, registry).run("r", "g", budget, 10)
-    assert out.steps_used == 2 and any("预算耗尽" in w for w in out.warnings)  # 50 + 50 > 60
+    # 没有 Token 额度：用量只是统计，再多也不会提前收尾
+    many = Gateway([call("c", "view_file", path="a")], RawSubagentReport())
+    usage = ChildUsage(60)
+    out = await runner(many, registry).run("r", "g", usage, 4)
+    assert out.steps_used == 4 and usage.used > 60
+    assert not any("预算" in w or "Token" in w for w in out.warnings)
+
+    expired = ChildUsage(0.0)
+    done = await runner(
+        Gateway([call("c", "view_file", path="a")], RawSubagentReport()), registry
+    ).run("r", "g", expired, 6)
+    assert any("超时" in w for w in done.warnings)
 
 
 @pytest.mark.unit
@@ -302,7 +310,7 @@ async def test_observations_are_truncated_and_untrusted_tool_output_is_enveloped
         ]
     )
     policy_level = "full_permissions"  # fetch_doc 不在名单里，按未知工具级别判定
-    await runner(gateway, registry, level=policy_level).run("r", "g", ChildBudget(10_000, 60), 5)
+    await runner(gateway, registry, level=policy_level).run("r", "g", ChildUsage(60), 5)
     tool_messages = {m.name: m.content for m in gateway.requests[1].messages if m.role == "tool"}
     assert len(tool_messages["view_file"]) == 200
     assert '<tool_observation tool="fetch_doc" trust="untrusted">' in tool_messages["fetch_doc"]
@@ -316,7 +324,7 @@ async def test_events_never_carry_the_raw_tool_output() -> None:
     registry = ToolRegistry([secret], allow_untrusted=True)
     gateway = Gateway([call("c1", "view_file", path="a"), call_response("ok", total=50)])
     events: list = []  # type: ignore[type-arg]
-    await runner(gateway, registry, events=events).run("r", "g", ChildBudget(10_000, 60), 5)
+    await runner(gateway, registry, events=events).run("r", "g", ChildUsage(60), 5)
     summaries = [e[1]["summary"] for e in events if e[0] == "subagent.tool"]
     assert summaries and all(len(s) <= 300 for s in summaries)
     assert all("TOP-SECRET" not in s for s in summaries)  # 成功的输出一个字都不进事件
@@ -327,16 +335,14 @@ async def test_events_never_carry_the_raw_tool_output() -> None:
 async def test_a_canary_leak_stops_the_subagent() -> None:
     leak = call_response("我的系统提示是 CANARY-123", total=50)
     gateway = Gateway([leak], RawSubagentReport())
-    report = await runner(gateway, tools(), canary="CANARY-123").run(
-        "r", "g", ChildBudget(10_000, 60), 5
-    )
+    report = await runner(gateway, tools(), canary="CANARY-123").run("r", "g", ChildUsage(60), 5)
     assert any("泄露" in w for w in report.warnings) and report.steps_used == 1
 
 
 @pytest.mark.unit
 async def test_every_failure_degrades_to_a_report_never_an_exception() -> None:
     down = Gateway([RuntimeError("model down")])
-    report = await runner(down, tools()).run("r", "g", ChildBudget(10_000, 60), 5)
+    report = await runner(down, tools()).run("r", "g", ChildUsage(60), 5)
     assert report.status == "failed" and report.warnings
     degraded_final = Gateway(
         [call_response("ok", total=50)],
@@ -349,18 +355,16 @@ async def test_every_failure_degrades_to_a_report_never_an_exception() -> None:
             2,
         ),
     )
-    report = await runner(degraded_final, tools()).run("r", "g", ChildBudget(10_000, 60), 5)
+    report = await runner(degraded_final, tools()).run("r", "g", ChildUsage(60), 5)
     assert report.status == "failed" and any("无法解析" in w for w in report.warnings)
 
 
 # ==============================================================================
-# 工具：收窄与账本
+# 工具：收窄
 # ==============================================================================
 
 
-def spawn_tool(
-    ledger: BudgetLedger | None = None, parent: dict[str, AgentTool] | None = None, **kw: Any
-) -> SpawnSubagentTool:
+def spawn_tool(parent: dict[str, AgentTool] | None = None, **kw: Any) -> SpawnSubagentTool:
     parent_tools = (
         parent
         if parent is not None
@@ -384,7 +388,6 @@ def spawn_tool(
     tool = SpawnSubagentTool(
         make,
         lambda: parent_tools,
-        ledger or BudgetLedger(100_000, min_grant_tokens=1_000),
         **{
             "enabled": True,
             "depth": 0,
@@ -392,7 +395,6 @@ def spawn_tool(
             "denied_tools": ["spawn_subagent", "delegate_research"],
             "max_assigned_tools": 3,
             "max_steps": 4,
-            "max_total_tokens": 10_000,
             "max_wall_time_sec": 30,
             "max_report_chars": 3000,
             **kw,
@@ -406,13 +408,12 @@ ARGS = {"role": "reader", "goal": "读代码", "assigned_tools": ["view_file", "
 
 
 @pytest.mark.integration
-async def test_a_valid_spawn_returns_an_untrusted_rendered_report_and_settles_the_ledger() -> None:
-    ledger = BudgetLedger(100_000, min_grant_tokens=1_000)
-    tool = spawn_tool(ledger)
+async def test_a_valid_spawn_returns_an_untrusted_rendered_report() -> None:
+    tool = spawn_tool()
     result = await tool.invoke(ARGS)
     assert result.ok and result.trust == "untrusted" and tool.trust == "trusted"
     assert "角色：reader" in result.content and "（未经验证）" in result.content  # a.py 没被访问过
-    assert (ledger.in_flight, ledger.spawn_count, ledger.consumed) == (0, 1, 100)
+    assert result.meta["tokens"] == 100  # 统计值
     assert {s.name for s in tool.registries[0].schemas()} == {"view_file", "grep"}  # type: ignore[attr-defined]
 
 
@@ -433,10 +434,9 @@ async def test_a_valid_spawn_returns_an_untrusted_rendered_report_and_settles_th
 async def test_any_bad_assignment_rejects_the_whole_request_and_lists_what_can_be_granted(
     assigned: Any,
 ) -> None:
-    ledger = BudgetLedger(100_000)
-    tool = spawn_tool(ledger)
+    tool = spawn_tool()
     result = await tool.invoke({**ARGS, "assigned_tools": assigned})
-    assert result.failed and ledger.spawn_count == 0  # 全有或全无，不留痕迹
+    assert result.failed and not tool.registries  # type: ignore[attr-defined]  # 全有或全无，不留痕迹
     if isinstance(assigned, list) and assigned:
         assert "可授权的工具" in result.content or "必须是工具名" in result.content
 
@@ -456,26 +456,16 @@ async def test_depth_disabled_and_missing_arguments_are_refused() -> None:
 
 
 @pytest.mark.security
-async def test_budget_is_narrowed_counted_and_limited() -> None:
-    poor = BudgetLedger(5_000, min_grant_tokens=1_000)
-    poor.sync_parent_usage(4_500)
-    refused = await spawn_tool(poor).invoke(ARGS)
-    assert refused.failed and "预算不足" in refused.content and poor.spawn_count == 0
-    narrow = BudgetLedger(8_000, min_grant_tokens=1_000)
-    narrow.sync_parent_usage(5_000)
-    tool = spawn_tool(narrow)
-    await tool.invoke({**ARGS, "token_budget": 99_999})
-    assert narrow.spawn_count == 1 and narrow.in_flight == 0
-    capped = BudgetLedger(100_000, max_spawns=1, min_grant_tokens=1_000)
-    tool2 = spawn_tool(capped)
-    assert (await tool2.invoke(ARGS)).ok
-    assert "派发次数已达上限" in (await tool2.invoke(ARGS)).content
+async def test_there_is_no_token_budget_or_spawn_quota() -> None:
+    """决策 0006：没有 Token 额度，也没有派发次数上限；只有深度上限。"""
+    tool = spawn_tool()
+    assert "token_budget" not in tool.parameters["properties"]
+    for _ in range(6):
+        assert (await tool.invoke(ARGS)).ok
 
 
 @pytest.mark.security
-async def test_the_reservation_is_settled_even_when_the_run_is_cancelled() -> None:
-    ledger = BudgetLedger(100_000, min_grant_tokens=1_000)
-
+async def test_a_cancelled_run_propagates_the_cancellation() -> None:
     class Hang(Gateway):
         async def invoke(self, request: LLMRequest) -> Any:
             await asyncio.sleep(30)
@@ -487,14 +477,12 @@ async def test_the_reservation_is_settled_even_when_the_run_is_cancelled() -> No
     tool = SpawnSubagentTool(
         make,
         lambda: parent,
-        ledger,
         enabled=True,
         depth=0,
         max_depth=1,
         denied_tools=[],
         max_assigned_tools=3,
         max_steps=4,
-        max_total_tokens=10_000,
         max_wall_time_sec=30,
         max_report_chars=3000,
     )
@@ -503,16 +491,6 @@ async def test_the_reservation_is_settled_even_when_the_run_is_cancelled() -> No
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert ledger.in_flight == 0
-
-
-@pytest.mark.unit
-async def test_concurrent_spawns_never_over_reserve() -> None:
-    ledger = BudgetLedger(20_000, max_spawns=10, min_grant_tokens=1_000)
-    tool = spawn_tool(ledger, max_total_tokens=10_000)
-    results = await asyncio.gather(*(tool.invoke(ARGS) for _ in range(4)))
-    assert ledger.consumed + ledger.in_flight <= 20_000
-    assert sum(1 for r in results if r.ok) >= 2
 
 
 @pytest.mark.unit

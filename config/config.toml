@@ -96,23 +96,17 @@ forbid_home_itself = true           # 不允许直接把用户主目录整个当
 # ------------------------------------------------------------------------------
 # 5. 运行时护栏与检查点
 # ------------------------------------------------------------------------------
-[runtime.guardrails]
-max_steps = 25                      # 单任务最大执行步数
-max_total_tokens = 200000           # 单任务累计 Token 上限（服务商返回的总用量，含子智能体与研究）
-max_wall_time_sec = 900             # 单任务总挂钟上限（续跑时重置计时）
-warning_ratio = 0.9                 # 达到上限的该比例时注入软告警
-consecutive_errors_limit = 3        # 连续工具失败达到次数触发重规划通知
+[runtime.guardrails]                # 没有预算类上限：额度耗尽按模型错误处理，任务 failed 且可续跑
+consecutive_errors_limit = 3        # 连续工具失败达到次数，追加提醒通知
 identical_fingerprint_limit = 3     # 相同（工具，参数）连续出现次数，达到则整批拦截
+max_consecutive_blocks = 5          # 连续被拦截的批次数达到它，任务以 failed 结束
 
 [runtime.loop]
-replan_interval = 6                 # 连续执行几个工具批次后回 planner 复核；0 = 每批都回（旧行为）。连续失败、循环、越权被拒时立即回
-max_rejections = 3                  # 验收累计打回超过次数就终止任务，并带着已完成的部分交付
-max_planner_degradations = 3        # planner 连续降级超过次数就终止任务
+model_tier = "reasoning"            # 主循环使用的模型档
+call_timeout_sec = 300              # 单次模型调用超时；超时按模型错误处理
 alternation_cycles = 3              # 摆动（A、B、A、B…）检测的周期数；0 关闭
-progress_hint = true                # 在指令尾部告诉模型已用步数与 Token（不进前缀，不影响缓存）
 
 [runtime.checkpoint]
-dispatch_marker = true              # 派发前提交标记，用于崩溃后识别“结果可能未知”
 recover_on_start = true             # 启动时扫描未完成任务（标记失败待续跑 / 恢复为待审批）
 
 [runtime.approval]
@@ -241,7 +235,7 @@ soft_tokens = 100000                # 实际触发线 = min(窗口 × 比例, �
 hard_tokens = 160000
 fold_keep_recent_steps = 3          # 折叠时保持完整的最近步数
 compaction_enabled = false          # 任务内 LLM 压缩（级别 3）；先只做折叠，数据证明不够再开
-fold_exempt_tools = ["load_skill"]   # 永不折叠的工具（截断流程文档会让做法残缺）
+fold_exempt_tools = ["load_skill", "mcp_describe"]   # 永不折叠的工具（截断流程文档会让做法残缺）
 
 [context.observation]
 max_tokens = 1500                   # 超过则摘要加落盘
@@ -251,7 +245,7 @@ keyword_lines_limit = 30
 json_outline_max_depth = 3
 json_outline_array_items = 5
 scalar_preview_chars = 120
-exempt_tools = ["load_skill"]
+exempt_tools = ["load_skill", "mcp_describe"]
 exempt_multiplier = 8               # 豁免工具的放宽倍数（仍有上限）
 
 [context.memory]
@@ -268,8 +262,7 @@ max_chars = 8000
 candidates = ["CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".baseagent/rules.md", ".aegis/rules.md"]
 
 [context.prompt]
-memory_role = "user"                # 记忆段以哪种消息角色渲染: user | system；默认 user 侧（待验证）
-stage_instruction_position = "tail" # tail：阶段指令放请求尾部，利于前缀缓存
+goal_echo_chars = 300               # 草稿回显第一行重复任务目标的最大字符数（长任务里抵消目标漂移）
 
 
 # ------------------------------------------------------------------------------
@@ -365,7 +358,6 @@ max_rounds = 3
 max_sources = 5
 max_source_chars = 6000
 max_wall_time_sec = 45
-max_total_tokens = 20000
 max_calls_per_task = 3              # 每任务调用次数上限；消耗经预算账本计入父任务
 max_findings = 8
 max_answer_chars = 500
@@ -382,17 +374,14 @@ enabled = true
 model_tier = "fast"
 max_depth = 1
 max_steps = 8
-max_total_tokens = 30000            # 名义上限，实际受父级余额收窄
-min_token_budget = 2000
 max_wall_time_sec = 90
-max_spawns_per_task = 4
 max_assigned_tools = 6
 max_findings = 6
 max_observation_chars = 4000
 max_answer_chars = 400
 max_citations = 8
 max_report_chars = 3000
-denied_tools = ["spawn_subagent", "delegate_research"]
+denied_tools = ["spawn_subagent", "delegate_research", "update_plan", "note", "mcp_describe", "mcp_call"]
 
 
 # ------------------------------------------------------------------------------
@@ -422,6 +411,9 @@ read_only_tools = [
     "grep",
     "read_artifact",
     "load_skill",
+    "update_plan",          # 草稿工具：只改任务内的计划与笔记，无外部副作用
+    "note",
+    "mcp_describe",         # 取延迟 MCP 工具的定义；mcp_call 按目标工具判定，自身不在名单里
     "delegate_research",
     "spawn_subagent",       # 委派动作本身无副作用；子级每次调用按父级权限重新判定
 ]
@@ -470,6 +462,9 @@ max_description_chars = 1000
 reject_on_injection = true
 exposed_name_max_len = 64           # 暴露给模型的函数名长度上限；规范化为 [a-zA-Z0-9_-]
 refresh_tools_each_task = true      # 每个任务准备阶段重新 tools/list 并重新消毒
+exposure = "deferred"               # pinned：Schema 直接进 tools；deferred：只在索引里，经 mcp_describe / mcp_call 使用
+index_max_listed = 60               # deferred 索引条数上限，超出时只列服务器与工具数
+index_desc_chars = 80               # 索引里每个工具描述的最大字符数
 rlimit_as_mb = 4096                 # Node 类服务器需要较大的虚拟地址空间
 rlimit_fsize_mb = 50
 rlimit_cpu_sec = 300
@@ -480,6 +475,7 @@ transport = "stdio"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem@<固定版本>", "<ABSOLUTE_WORKSPACE_PATH>"]
 env = {}
+exposure = ""                       # 覆盖全局 exposure；空表示沿用
 allow_tools = []                    # 空表示该服务器通过消毒的全部工具；非空则只放行列出的名字
 idempotent_tools = []               # 用于崩溃恢复：可安全重试的工具
 

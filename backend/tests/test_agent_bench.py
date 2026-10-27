@@ -360,7 +360,7 @@ async def test_a_case_runs_end_to_end_and_its_checks_are_applied(bench: Any) -> 
     [r] = await runner.run([case])
     assert r.success and r.status == "succeeded" and r.steps >= 1 and r.task_id
     assert [c.passed for c in r.checks] == [True, True]
-    assert r.metrics.stages.get("executor", 0) >= 1  # 指标来自服务端事件
+    assert r.metrics.stages.get("agent", 0) >= 1  # 指标来自服务端事件
     assert runner.spent_tokens == r.total_tokens
 
 
@@ -376,10 +376,10 @@ async def test_a_failed_check_makes_the_case_fail_even_if_the_task_succeeded(ben
 @pytest.mark.integration
 async def test_an_unexpected_final_status_fails_the_case(bench: Any) -> None:
     rig, client, work = bench
-    rig.world.terminate = True
+    rig.world.leak = True
     case = Case("t1", "t", "g")
     [r] = await BenchRunner(client, work, options=FAST).run([case])
-    assert r.status == "terminated" and not r.success and "步数" in r.termination_reason
+    assert r.status == "terminated" and not r.success and "canary" in r.termination_reason
     allowed = Case("t2", "t", "g", expect_status=("terminated",))
     [ok] = await BenchRunner(client, work, options=FAST).run([allowed])
     assert ok.success
@@ -388,7 +388,7 @@ async def test_an_unexpected_final_status_fails_the_case(bench: Any) -> None:
 @pytest.mark.integration
 async def test_approvals_are_answered_per_case(bench: Any) -> None:
     rig, client, work = bench
-    rig.world.approval = True
+    rig.world.needs_approval = True
     approve = Case("yes", "t", "g", approve=True)
     deny = Case("no", "t", "g", approve=False)
     keep = BenchOptions(poll_sec=0.02, default_timeout_sec=10, cleanup=False)

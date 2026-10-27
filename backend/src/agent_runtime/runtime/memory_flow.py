@@ -63,9 +63,10 @@ class FinishReport:
     dropped: tuple[tuple[str, str], ...] = ()
 
 
-def outcome_of(state: AgentState) -> Outcome:
-    if state.should_terminate:
-        return "failed" if state.termination_reason.startswith(_SECURITY_PREFIX) else "terminated"
+def outcome_of(status: str, reason: str = "") -> Outcome:
+    """任务终态到沉淀结果。安全终止算失败（不沉淀事实）。"""
+    if status in ("terminated", "cancelled"):
+        return "failed" if reason.startswith(_SECURITY_PREFIX) else "terminated"
     return "success"
 
 
@@ -156,14 +157,24 @@ class MemoryFlow:
     async def _workspace_of(self, session_id: str) -> str:
         return await self._store.workspace_id_of(session_id)
 
-    async def finish(self, session_id: str, state: AgentState, *, delivery: str) -> FinishReport:
+    async def finish(
+        self,
+        session_id: str,
+        state: AgentState,
+        *,
+        delivery: str,
+        status: str = "succeeded",
+        reason: str = "",
+    ) -> FinishReport:
         try:
-            return await self._finish(session_id, state, delivery)
+            return await self._finish(session_id, state, delivery, outcome_of(status, reason))
         except Exception as exc:  # 记忆写入失败不使已完成的任务变成失败
             logger.error("任务 {} 收尾写记忆失败：{!r}", state.task_id, exc)
             return FinishReport(error=f"{type(exc).__name__}: {exc}")
 
-    async def _finish(self, session_id: str, state: AgentState, delivery: str) -> FinishReport:
+    async def _finish(
+        self, session_id: str, state: AgentState, delivery: str, outcome: Outcome
+    ) -> FinishReport:
         goal = self._redact(state.task_goal, state)
         answer = self._redact(delivery, state)
         await self._store.append_turn(session_id, state.task_id, "user", goal, self._count(goal))
@@ -171,7 +182,6 @@ class MemoryFlow:
             session_id, state.task_id, "assistant", answer, self._count(answer)
         )
 
-        outcome = outcome_of(state)
         files = touched_files(state.messages)
         result_flags: list[bool] = []
         dropped: list[tuple[str, str]] = []
@@ -181,7 +191,7 @@ class MemoryFlow:
                 current,
                 task_id=state.task_id,
                 outcome=outcome,
-                facts=state.confirmed_facts if self._persist else (),
+                facts=state.facts if self._persist else (),
                 failures=state.failed_attempts if self._persist else (),
                 tainted=task_was_tainted(state.messages),
                 last_action_target={"files": files} if files else None,

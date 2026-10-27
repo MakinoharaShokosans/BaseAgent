@@ -108,7 +108,7 @@ class FailedAttempt(BaseModel):
 - `Message` 与 `ToolCall` 手写 `to_dict` / `from_dict`，字段显式，不使用 `pickle` 或按类型名反射构造。`to_dict` 只写非默认字段，字段顺序固定；`reasoning_state` 不排序键，编码、解码、再编码字节相同。
 - `PlanItem`、`FailedAttempt`、`PendingApproval`、`ApprovalDecision` 用 pydantic 的 `model_dump(mode="json")` 与严格 JSON 校验（JSON 数组可进元组字段，但 `"1"` 不会被悄悄当成整数）。
 - 解码是**严格**的：未知 `role`、缺必需字段、未知字段、类型不符、`schema_version` 缺失或高于当前代码版本都直接报 `StateDecodeError`，不做猜测性修复。消息里可选字段（`reasoning` 等）缺失视为默认值，所以旧检查点仍可加载。解码只做结构校验，不检查原子对：该不变量由循环在写入前断言。
-- `schema_version` 低于当前版本时，通过按版本注册的迁移函数逐级升级。v2 → v3：已结束任务的旧状态只读保留（丢弃阶段、里程碑、预算计数与重规划类字段）；进行中或挂起的旧检查点不迁移续跑，续跑时拒绝并提示重新发起任务。
+- `schema_version` 低于当前版本时，通过按版本注册的迁移函数逐级升级。v1、v2 是五阶段工作流的状态，与 v3 不兼容，**不迁移**：`MINIMUM_SCHEMA_VERSION = 3`，旧状态解码时报错；检查点库里的旧表改名为 `task_checkpoints_legacy`，只读保留。
 
 安全上的好处：检查点内容不再能触发任意类型实例化，数据库文件被篡改的最坏后果是解码失败。
 

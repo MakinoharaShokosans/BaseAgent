@@ -1,4 +1,4 @@
-"""从配置装配运行时参数：预算上限、并发名额、权限基线。出处：docs/01_architecture/04_configuration.md。"""
+"""从配置装配运行时参数：循环护栏、并发名额、权限基线。出处：docs/01_architecture/04_configuration.md。"""
 
 from __future__ import annotations
 
@@ -9,10 +9,8 @@ from typing import Any
 
 import pytest
 
-from agent_runtime.guardrails import BudgetLimits
 from agent_runtime.runtime import (
     FullPermissionsNotConfirmedError,
-    budget_limits_from_settings,
     max_concurrent_tasks,
     resolve_permission_level,
 )
@@ -32,19 +30,20 @@ def settings_with(raw: dict[str, Any], section: str, key: str, value: Any) -> Se
 
 
 @pytest.mark.unit
-def test_budget_limits_follow_the_reference_config(raw: dict[str, Any]) -> None:
-    limits = budget_limits_from_settings(Settings.model_validate(raw))
-    assert limits == BudgetLimits(
-        max_steps=25, max_total_tokens=200_000, max_wall_time_sec=900, warning_ratio=0.9
-    )
+def test_there_are_no_budget_settings(raw: dict[str, Any]) -> None:
+    """决策 0006：没有 Token、步数、挂钟预算，也没有预算装配函数。"""
+    import agent_runtime.runtime as runtime
 
-
-@pytest.mark.unit
-def test_budget_limits_follow_overrides(raw: dict[str, Any]) -> None:
-    data = copy.deepcopy(raw)
-    data["runtime"]["guardrails"].update(max_steps=40, max_total_tokens=5000, warning_ratio=0.8)
-    limits = budget_limits_from_settings(Settings.model_validate(data))
-    assert (limits.max_steps, limits.max_total_tokens, limits.warning_ratio) == (40, 5000, 0.8)
+    guardrails = Settings.model_validate(raw).runtime.guardrails.model_dump()
+    assert not set(guardrails) & {
+        "max_steps",
+        "max_total_tokens",
+        "max_wall_time_sec",
+        "warning_ratio",
+    }
+    assert not hasattr(runtime, "budget_limits_from_settings")
+    for name in ("max_total_tokens", "min_token_budget", "max_spawns_per_task"):
+        assert name not in Settings.model_validate(raw).subagent.model_dump()
 
 
 @pytest.mark.unit
@@ -146,8 +145,27 @@ def test_loop_limits_follow_the_reference_config(raw: dict[str, Any]) -> None:
         consecutive_errors_limit=3,
         identical_fingerprint_limit=3,
         alternation_cycles=3,
-        replan_interval=6,
+        max_consecutive_blocks=5,
     )
+
+
+@pytest.mark.unit
+def test_loop_settings_follow_the_reference_config(raw: dict[str, Any]) -> None:
+    loop = Settings.model_validate(raw).runtime.loop
+    assert (loop.model_tier, loop.call_timeout_sec, loop.alternation_cycles) == (
+        "reasoning",
+        300,
+        3,
+    )
+
+
+@pytest.mark.unit
+def test_mcp_exposure_defaults_to_deferred_and_servers_can_override(raw: dict[str, Any]) -> None:
+    data = copy.deepcopy(raw)
+    data["mcp"]["servers"]["docs"] = {"enabled": False, "command": "x", "exposure": "pinned"}
+    mcp = Settings.model_validate(data).mcp
+    assert mcp.exposure == "deferred" and mcp.servers["docs"].exposure == "pinned"
+    assert (mcp.index_max_listed, mcp.index_desc_chars) == (60, 80)
 
 
 @pytest.mark.unit
@@ -164,7 +182,7 @@ def test_observation_limits_follow_the_reference_config(raw: dict[str, Any]) -> 
         json_outline_max_depth=3,
         json_outline_array_items=5,
         scalar_preview_chars=120,
-        exempt_tools=("load_skill",),
+        exempt_tools=("load_skill", "mcp_describe"),
         exempt_multiplier=8,
     )
 
@@ -249,9 +267,9 @@ def test_prompt_assets_and_the_assembler_follow_the_config(raw: dict[str, Any]) 
 
     default = assembler_from_settings(Settings.model_validate(raw), assets)
     data = copy.deepcopy(raw)
-    data["context"]["prompt"]["memory_role"] = "system"
-    switched = assembler_from_settings(Settings.model_validate(data), assets)
-    assert default._memory_role == "user" and switched._memory_role == "system"  # type: ignore[reportPrivateUsage]
+    data["context"]["prompt"]["goal_echo_chars"] = 50
+    tuned = assembler_from_settings(Settings.model_validate(data), assets)
+    assert default._goal_chars == 300 and tuned._goal_chars == 50  # type: ignore[reportPrivateUsage]
 
 
 @pytest.mark.unit
@@ -297,7 +315,9 @@ def test_the_fold_policy_follows_the_task_section_and_takes_the_smaller_trigger(
     from agent_runtime.runtime import fold_policy_from_settings
 
     s = Settings.model_validate(raw)
-    assert fold_policy_from_settings(s, 128_000) == FoldPolicy(76_800, 3, frozenset({"load_skill"}))
+    assert fold_policy_from_settings(s, 128_000) == FoldPolicy(
+        76_800, 3, frozenset({"load_skill", "mcp_describe"})
+    )
     assert fold_policy_from_settings(s, 1_000_000).trigger_tokens == 100_000  # 绝对上限生效
 
 

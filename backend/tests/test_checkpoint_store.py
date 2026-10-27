@@ -20,7 +20,6 @@ from agent_runtime.checkpoint import (
     scan_for_recovery,
 )
 from agent_runtime.core import (
-    DONE,
     AgentState,
     AtomicPairError,
     Message,
@@ -146,7 +145,10 @@ async def test_load_unknown_task_returns_none(store: CheckpointStore) -> None:
 async def test_commit_then_load_round_trips(store: CheckpointStore, make_state: MakeState) -> None:
     state = apply_update(
         make_state(),
-        {"messages": [Message(role="user", content="hi"), ASSISTANT, TOOL], "step_count": 2},
+        {
+            "messages": [Message(role="user", content="hi"), ASSISTANT, TOOL],
+            "consecutive_errors": 2,
+        },
     )
     await store.commit(state)
     assert await store.load("t1") == state
@@ -158,7 +160,7 @@ async def test_only_the_latest_checkpoint_is_kept(
 ) -> None:
     state = make_state()
     for step in range(1, 4):
-        state = apply_update(state, {"step_count": step})
+        state = apply_update(state, {"consecutive_errors": step})
         await store.commit(state)
     assert (await store.load("t1")) == state
     assert _raw(db_path, "SELECT count(*) FROM task_checkpoints") == [(1,)]
@@ -174,8 +176,8 @@ async def test_seq_increments_inside_sql(store: CheckpointStore, make_state: Mak
 
 @pytest.mark.unit
 async def test_tasks_are_isolated(store: CheckpointStore, make_state: MakeState) -> None:
-    a = apply_update(make_state("a"), {"step_count": 1})
-    b = apply_update(make_state("b"), {"step_count": 9})
+    a = apply_update(make_state("a"), {"consecutive_errors": 1})
+    b = apply_update(make_state("b"), {"consecutive_errors": 9})
     await store.commit(a)
     await store.commit(b)
     assert (await store.load("a")) == a
@@ -183,11 +185,28 @@ async def test_tasks_are_isolated(store: CheckpointStore, make_state: MakeState)
 
 
 @pytest.mark.unit
-async def test_phase_column_matches_state(
+async def test_status_column_follows_the_commit(
     store: CheckpointStore, make_state: MakeState, db_path: Path
 ) -> None:
-    await store.commit(apply_update(make_state(), {"phase": "executor"}))
-    assert _raw(db_path, "SELECT phase FROM task_checkpoints") == [("executor",)]
+    running = make_state()
+    await store.commit(running)
+    assert _raw(db_path, "SELECT status, outcome FROM task_checkpoints") == [("running", "")]
+    waiting = apply_update(running, {"messages": [ASSISTANT], "pending_approval": PENDING})
+    await store.commit(waiting)
+    assert _raw(db_path, "SELECT status FROM task_checkpoints") == [("waiting",)]
+    await store.commit(running, outcome="cancelled", reason="用户取消")
+    stored = await store.load_status("t1")
+    assert stored is not None
+    assert (stored.status, stored.outcome, stored.reason) == ("finished", "cancelled", "用户取消")
+
+
+@pytest.mark.unit
+async def test_the_workflow_era_table_is_kept_aside(db_path: Path) -> None:
+    """旧的 phase 表原样留存（只读），新表另建。"""
+    async with CheckpointStore(db_path):
+        pass
+    tables = {r[0] for r in _raw(db_path, "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"task_checkpoints", "task_checkpoints_legacy"} <= tables
 
 
 @pytest.mark.unit
@@ -218,12 +237,12 @@ async def test_delete_removes_the_task(store: CheckpointStore, make_state: MakeS
 
 
 @pytest.mark.unit
-async def test_unpaired_tool_calls_are_not_persisted(
+async def test_an_unpaired_group_in_the_middle_is_not_persisted(
     store: CheckpointStore, make_state: MakeState
 ) -> None:
-    good = apply_update(make_state(), {"step_count": 1})
+    good = apply_update(make_state(), {"consecutive_errors": 1})
     await store.commit(good)
-    broken = apply_update(good, {"messages": [ASSISTANT]})
+    broken = apply_update(good, {"messages": [ASSISTANT, Message(role="user", content="x")]})
     with pytest.raises(AtomicPairError):
         await store.commit(broken)
     assert await store.load("t1") == good
@@ -233,9 +252,7 @@ async def test_unpaired_tool_calls_are_not_persisted(
 async def test_pending_approval_allows_an_unpaired_tail(
     store: CheckpointStore, make_state: MakeState
 ) -> None:
-    state = apply_update(
-        make_state(), {"messages": [ASSISTANT], "pending_approval": PENDING, "phase": "tool_runner"}
-    )
+    state = apply_update(make_state(), {"messages": [ASSISTANT], "pending_approval": PENDING})
     await store.commit(state)
     assert await store.load("t1") == state
 
@@ -258,12 +275,12 @@ async def test_garbage_state_json_is_reported_as_corrupt(
 
 @pytest.mark.security
 @pytest.mark.unit
-async def test_phase_column_disagreeing_with_state_is_corrupt(
+async def test_status_column_disagreeing_with_state_is_corrupt(
     store: CheckpointStore, make_state: MakeState, db_path: Path
 ) -> None:
     await store.commit(make_state())
-    _raw(db_path, "UPDATE task_checkpoints SET phase = 'executor'")
-    with pytest.raises(CheckpointCorruptError, match="phase"):
+    _raw(db_path, "UPDATE task_checkpoints SET status = 'waiting'")
+    with pytest.raises(CheckpointCorruptError, match="status"):
         await store.load("t1")
 
 
@@ -358,13 +375,13 @@ async def test_committed_state_survives_a_hard_process_kill(
 
 
 @pytest.mark.unit
-async def test_list_unfinished_skips_done_tasks(
+async def test_list_unfinished_skips_finished_tasks(
     store: CheckpointStore, make_state: MakeState
 ) -> None:
-    await store.commit(apply_update(make_state("running"), {"phase": "executor"}))
-    await store.commit(apply_update(make_state("finished"), {"phase": DONE}))
+    await store.commit(make_state("running"))
+    await store.commit(make_state("finished"), outcome="succeeded")
     unfinished = await store.list_unfinished()
-    assert [(u.task_id, u.phase) for u in unfinished] == [("running", "executor")]
+    assert [(u.task_id, u.status) for u in unfinished] == [("running", "running")]
 
 
 @pytest.mark.unit
@@ -372,11 +389,10 @@ async def test_list_unfinished_flags_tasks_waiting_for_approval(
     store: CheckpointStore, make_state: MakeState
 ) -> None:
     waiting = apply_update(
-        make_state("waiting"),
-        {"messages": [ASSISTANT], "pending_approval": PENDING, "phase": "tool_runner"},
+        make_state("waiting"), {"messages": [ASSISTANT], "pending_approval": PENDING}
     )
     await store.commit(waiting)
-    await store.commit(apply_update(make_state("running"), {"phase": "planner"}))
+    await store.commit(make_state("running"))
     flags = {u.task_id: u.waiting_for_approval for u in await store.list_unfinished()}
     assert flags == {"waiting": True, "running": False}
 
@@ -385,9 +401,7 @@ async def test_list_unfinished_flags_tasks_waiting_for_approval(
 async def test_waiting_flag_clears_when_the_approval_is_consumed(
     store: CheckpointStore, make_state: MakeState
 ) -> None:
-    waiting = apply_update(
-        make_state(), {"messages": [ASSISTANT], "pending_approval": PENDING, "phase": "tool_runner"}
-    )
+    waiting = apply_update(make_state(), {"messages": [ASSISTANT], "pending_approval": PENDING})
     await store.commit(waiting)
     await store.commit(apply_update(waiting, {"pending_approval": None, "messages": [TOOL]}))
     assert [u.waiting_for_approval for u in await store.list_unfinished()] == [False]
@@ -397,14 +411,11 @@ async def test_waiting_flag_clears_when_the_approval_is_consumed(
 async def test_scan_for_recovery_classifies_tasks(
     store: CheckpointStore, make_state: MakeState
 ) -> None:
-    waiting = apply_update(
-        make_state("w"),
-        {"messages": [ASSISTANT], "pending_approval": PENDING, "phase": "tool_runner"},
-    )
+    waiting = apply_update(make_state("w"), {"messages": [ASSISTANT], "pending_approval": PENDING})
     await store.commit(waiting)
-    await store.commit(apply_update(make_state("r1"), {"phase": "executor"}))
-    await store.commit(apply_update(make_state("r2"), {"phase": "planner"}))
-    await store.commit(apply_update(make_state("d"), {"phase": DONE}))
+    await store.commit(make_state("r1"))
+    await store.commit(make_state("r2"))
+    await store.commit(make_state("d"), outcome="succeeded")
 
     report = await scan_for_recovery(store)
     assert report.waiting_for_approval == ("w",)
@@ -422,7 +433,7 @@ async def test_scan_does_not_decode_state(
     store: CheckpointStore, make_state: MakeState, db_path: Path
 ) -> None:
     """扫描只看列，不解码状态：损坏的任务也能被列出来，让用户知道有它。"""
-    await store.commit(apply_update(make_state(), {"phase": "executor"}))
+    await store.commit(make_state())
     _raw(db_path, "UPDATE task_checkpoints SET state_json = 'garbage'")
     report = await scan_for_recovery(store)
     assert report.interrupted == ("t1",)

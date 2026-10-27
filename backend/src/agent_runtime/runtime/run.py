@@ -6,15 +6,15 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from agent_runtime.checkpoint import CheckpointStore
-from agent_runtime.core import AgentState, FailedAttempt, Message, new_state
-from agent_runtime.loop import TaskOutcome, TaskRuntime, drive
+from agent_runtime.core import AgentState, Message, new_state
+from agent_runtime.loop import TaskOutcome, TaskRuntime, run
 from agent_runtime.runtime.errors import TaskAlreadyExistsError
 
 
 @dataclass(frozen=True, slots=True)
 class RunnerDeps:
     checkpoints: CheckpointStore
-    #: 装配任务级对象（预算守卫、账本、裁剪器、工具注册表、事件总线…），每次运行/续跑重建
+    #: 装配任务级对象（裁剪器、工具注册表、事件总线…），每次运行/续跑重建
     build_runtime: Callable[[AgentState], Awaitable[TaskRuntime]]
     #: 工具名 -> 重复执行是否安全；未知工具应返回 False
     is_idempotent: Callable[[str], bool]
@@ -32,16 +32,12 @@ class TaskRequest:
     permission_level: str
     #: 会话里此前的活跃对话轮次；目标作为最新的用户消息接在其后
     history: Sequence[Message] = ()
-    #: 会话记忆：继承来的摘要、事实、失败尝试
-    rolling_summary: str = ""
-    confirmed_facts: Sequence[str] = ()
-    failed_attempts: Sequence[FailedAttempt] = ()
 
 
 async def create_task(deps: RunnerDeps, request: TaskRequest, task_id: str) -> AgentState:
     """校验请求、构造初始状态并提交初始检查点。
 
-    先于第一个阶段落盘：此后任务即使崩在第一个阶段里，也能被找回并由启动扫描发现。
+    先于第一个回合落盘：此后任务即使崩在第一个回合里，也能被找回并由启动扫描发现。
     任何校验失败都不会写库；已有同名任务的检查点不会被覆盖。
     """
     if not request.goal.strip():
@@ -55,9 +51,6 @@ async def create_task(deps: RunnerDeps, request: TaskRequest, task_id: str) -> A
         permission_level=request.permission_level,
         canary_token=deps.make_canary(request.session_id, task_id),
         messages=[*request.history, Message(role="user", content=request.goal)],
-        rolling_summary=request.rolling_summary,
-        confirmed_facts=request.confirmed_facts,
-        failed_attempts=request.failed_attempts,
     )
     if await deps.checkpoints.load(task_id) is not None:
         raise TaskAlreadyExistsError(f"任务 {task_id} 已存在，不会覆盖")
@@ -67,4 +60,4 @@ async def create_task(deps: RunnerDeps, request: TaskRequest, task_id: str) -> A
 
 async def run_task(deps: RunnerDeps, request: TaskRequest, task_id: str) -> TaskOutcome:
     state = await create_task(deps, request, task_id)
-    return await drive(await deps.build_runtime(state), state)
+    return await run(await deps.build_runtime(state), state)

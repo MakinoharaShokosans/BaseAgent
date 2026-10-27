@@ -47,9 +47,7 @@ def waiting(make_state: MakeState, call_ids: tuple[str, ...] = ("c1", "c2")) -> 
         make_state(),
         {
             "messages": [Message(role="assistant", content="", tool_calls=calls)],
-            "phase": "tool_runner",
-            "step_count": 3,
-            "pending_approval": pending_for("t1", 3, call_ids),
+            "pending_approval": pending_for("t1", 1, call_ids),
         },
     )
 

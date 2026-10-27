@@ -272,8 +272,7 @@ async def test_health_dependencies_and_introspection(rig: ApiRig) -> None:
 
 
 @pytest.mark.unit
-async def test_limits_expose_the_budget_for_usage_bars(rig: ApiRig) -> None:
+async def test_limits_expose_concurrency_only_there_is_no_budget(rig: ApiRig) -> None:
     data = (await rig.client.get(f"{V1}/system/limits", headers=HEADERS)).json()
-    g = rig.services.settings.runtime.guardrails
-    assert data["max_steps"] == g.max_steps and data["max_total_tokens"] == g.max_total_tokens
+    assert data == {"max_concurrent_tasks": rig.services.settings.server.max_concurrent_tasks}
     assert (await rig.client.get(f"{V1}/system/limits")).status_code == 401

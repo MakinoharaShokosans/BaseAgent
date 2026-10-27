@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import tomllib
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -12,17 +11,9 @@ import httpx
 from fastapi import FastAPI
 
 from agent_runtime.api import ApiServices, create_app
-from agent_runtime.approval import compute_approval_id
 from agent_runtime.checkpoint import CheckpointStore
-from agent_runtime.core import (
-    AgentState,
-    ApprovalRequired,
-    Message,
-    Milestone,
-    PendingApproval,
-    ToolCall,
-)
-from agent_runtime.loop import Stage, TaskRuntime
+from agent_runtime.core import AgentState, Message, ToolCall
+from agent_runtime.loop import TaskRuntime
 from agent_runtime.memory import MemoryStore
 from agent_runtime.observability import EventHub, Redactor
 from agent_runtime.runtime import (
@@ -33,84 +24,25 @@ from agent_runtime.runtime import (
 )
 from agent_runtime.runtime.service import TaskService
 from baseagent_config import Settings
+from loop_support import ScriptedWorld
 
-DONE_MS = Milestone(id=0, title="m", status="completed")
-OPEN_MS = Milestone(id=0, title="m")
 CALL = ToolCall(id="c1", name="bash", args={"command": "curl x", "api_key": "hunter2"})
 ASSISTANT = Message(role="assistant", content="", tool_calls=(CALL,))
 TOOL = Message(role="tool", content="ok canary-s1-task-1", tool_call_id="c1", name="bash")
 REDACTOR = Redactor(["key", "token", "secret", "password"], [])
 
 
-class World:
+class World(ScriptedWorld):
+    """API 测试用：事件走真实的 ``TaskEvents``，工具结果里带金丝雀以验证脱敏。"""
+
     def __init__(self, store: CheckpointStore, hub: EventHub) -> None:
-        self.store = store
+        super().__init__(store)
         self.hub = hub
-        self.gate: asyncio.Event | None = None
-        self.entered = asyncio.Event()
-        self.fail: BaseException | None = None
-        self.approval = False
-        self.terminate = False
-        self.ids = iter(f"task-{i}" for i in range(1, 100))
-        self.artifact: Path | None = None
-
-    def stage(self, name: str, events: TaskEvents) -> Stage:
-        async def planner(state: AgentState) -> Mapping[str, object]:
-            done = any(m.role == "tool" for m in state.messages)
-            return {"milestones": [DONE_MS if done else OPEN_MS]}
-
-        async def executor(state: AgentState) -> Mapping[str, object]:
-            self.entered.set()
-            if self.gate is not None:
-                await self.gate.wait()
-            if self.fail is not None:
-                raise self.fail
-            if self.terminate:
-                return {"should_terminate": True, "termination_reason": "步数达到上限（3/3）"}
-            return {"messages": [ASSISTANT], "step_count": state.step_count + 1}
-
-        async def tool_runner(state: AgentState) -> Mapping[str, object]:
-            if self.approval and state.approval_decision is None:
-                raise ApprovalRequired(
-                    PendingApproval(
-                        approval_id=compute_approval_id(state.task_id, state.step_count, ("c1",)),
-                        call_ids=("c1",),
-                        required_level="full_permissions",
-                        current_level="workspace_write",
-                        action_type="network_egress",
-                        command="curl x",
-                        reason="r",
-                        escalation_count=1,
-                    )
-                )
-            leaky = Message(
-                role="tool", content=f"ok {state.canary_token}", tool_call_id="c1", name="bash"
-            )
-            update: dict[str, object] = {
-                "messages": [leaky],
-                "pending_approval": None,
-                "approval_decision": None,
-                "replan_needed": True,
-            }
-            if self.artifact is not None:
-                update["artifacts"] = {"obs_1": str(self.artifact)}
-            return update
-
-        async def noop(state: AgentState) -> Mapping[str, object]:
-            return {}
-
-        return {"planner": planner, "executor": executor, "tool_runner": tool_runner}.get(
-            name, noop
-        )
+        self.tool_content = "ok {canary}"
 
     async def build(self, state: AgentState) -> TaskRuntime:
-        events = TaskEvents(self.hub, state.task_id, REDACTOR, canary=state.canary_token)
-        names = ("planner", "budget_guard", "executor", "tool_runner", "evaluator")
-        return TaskRuntime(
-            stages={n: self.stage(n, events) for n in names},  # type: ignore[misc]
-            checkpoints=self.store,
-            events=events,
-        )
+        self.events = TaskEvents(self.hub, state.task_id, REDACTOR, canary=state.canary_token)
+        return await super().build(state)
 
 
 def resolve(level: str | None, confirmed: bool) -> str:

@@ -1,4 +1,4 @@
-"""重复指纹与连续错误（纯函数）。设计文档：docs/02_runtime/02_main_loop.md §5。"""
+"""重复指纹与连续错误（纯函数）。设计文档：docs/02_runtime/06_tool_execution.md §1。"""
 
 from __future__ import annotations
 
@@ -52,23 +52,17 @@ def update_consecutive_errors(current: int, failures_in_batch: int) -> int:
     return current + failures_in_batch if failures_in_batch > 0 else 0
 
 
-def build_replan_notice(consecutive_errors: int, loop_detected: bool, limit: int) -> str:
-    """强制重规划的提示。由 tool_runner 作为 ``user`` 消息追加在工具消息之后。"""
-    lines = ["[系统护栏] 检测到执行受阻，请停止当前策略并重新规划："]
-    if loop_detected:
-        lines.append("- 你连续多次提交了完全相同的工具与参数，已被拦截。请更换工具或改变思路。")
-    if consecutive_errors >= limit:
-        lines.append(
-            f"- 工具已连续 {consecutive_errors} 次返回失败（阈值 {limit}）。"
-            "请分析根因（前置条件、路径、依赖、参数），而不是继续在同一处微调。"
-        )
-    lines.append("- 请在下一轮给出不同的行动方案，并说明你从失败中学到了什么。")
-    return "\n".join(lines)
+def build_error_notice(consecutive_errors: int) -> str:
+    """连续失败的通知。由工具包装层作为 ``user`` 消息追加在工具消息之后，只是通知，不改变控制流。"""
+    return (
+        f"[系统护栏] 已连续 {consecutive_errors} 次工具调用失败，请换一种做法；"
+        "如果确实无法完成，说明受阻原因并结束。"
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class LoopLimits:
-    #: 连续失败达到此数触发重规划通知
+    #: 连续失败达到此数追加提醒通知
     consecutive_errors_limit: int
     #: 最近这么多次指纹完全一致即拦截整批
     identical_fingerprint_limit: int
@@ -76,8 +70,8 @@ class LoopLimits:
     fingerprint_window: int = 6
     #: 摆动检测的周期数；0 关闭
     alternation_cycles: int = 3
-    #: 工具批次后最多隔几个批次回 planner 重规划；0 表示每个批次都回（旧行为）
-    replan_interval: int = 0
+    #: 连续被拦截的批次数达到它，任务以 failed 结束（LoopAborted）
+    max_consecutive_blocks: int = 5
 
     @property
     def window(self) -> int:

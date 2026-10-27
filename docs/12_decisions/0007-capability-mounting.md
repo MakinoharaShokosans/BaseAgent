@@ -1,6 +1,6 @@
 # 0007 能力挂载：前缀不变，激活只追加
 
-- 状态：**已采纳**（设计层；代码尚未迁移）
+- 状态：**已采纳并实施**（后端）
 - 影响：[MCP](../04_tools/04_mcp.md)、[Skills](../04_tools/05_skills.md)、[工具系统](../04_tools/01_tool_system.md)、[提示词装配](../03_context/03_prompt_assembly.md)、[工具执行](../02_runtime/06_tool_execution.md)
 
 ## 背景

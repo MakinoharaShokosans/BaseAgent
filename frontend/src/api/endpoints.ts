@@ -106,9 +106,7 @@ export function createApi(client: HttpClient = http) {
       health: () => client.get<Record<string, string>>('/health/dependencies'),
       limits: () =>
         client.get<{
-          max_steps: number;
-          max_total_tokens: number;
-          max_wall_time_sec: number;
+          /** 任务没有 Token、步数或时间预算（docs/12_decisions/0006） */
           max_concurrent_tasks: number;
         }>('/system/limits'),
     },

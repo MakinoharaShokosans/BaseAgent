@@ -206,3 +206,14 @@ def assert_atomic_pairs(messages: Sequence[Message], *, allow_pending_tail: bool
         if missing and not (allow_pending_tail and end == total):
             raise AtomicPairError(f"第 {index} 条助手消息的 tool_calls 缺少配对结果：{missing}")
         index = end
+
+
+def unanswered_calls(messages: Sequence[Message]) -> tuple[ToolCall, ...]:
+    """尾部那条助手消息里还没有 tool 消息的调用；没有则为空。"""
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.role != "assistant":
+            continue
+        answered = {m.tool_call_id for m in messages[index + 1 :] if m.role == "tool"}
+        return tuple(c for c in message.tool_calls if c.id not in answered)
+    return ()

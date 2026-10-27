@@ -17,31 +17,31 @@ from agent_runtime.core.errors import InvalidStateError, InvalidUpdateError
 from agent_runtime.core.messages import Message, assert_atomic_pairs
 
 PermissionLevel = Literal["read_only", "workspace_write", "full_permissions"]
-Phase = Literal["planner", "budget_guard", "executor", "tool_runner", "evaluator"]
-#: 终止哨兵：路由函数返回它表示不再有下一个阶段
-DONE: Final = "done"
-NextPhase = Literal["planner", "budget_guard", "executor", "tool_runner", "evaluator", "done"]
 
 PERMISSION_LEVELS: tuple[str, ...] = get_args(PermissionLevel)
-PHASES: tuple[str, ...] = (*get_args(Phase), DONE)
 
 #: 最近一次修改文件之后的验证情况：none 没改过；unchecked 改了还没运行过命令；
 #: failed / passed 改后最近一条命令失败 / 成功
 Verification = Literal["none", "unchecked", "failed", "passed"]
 VERIFICATIONS: tuple[str, ...] = get_args(Verification)
 
-CURRENT_SCHEMA_VERSION: Final = 2
+CURRENT_SCHEMA_VERSION: Final = 3
+
+#: 会话草稿的上限（docs/02_runtime/05_plan_and_scratch.md）
+MAX_PLAN_ITEMS: Final = 12
+MAX_FACTS: Final = 20
+MAX_FACT_CHARS: Final = 300
+MAX_FAILED_ATTEMPTS: Final = 10
 
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class Milestone(_Frozen):
+class PlanItem(_Frozen):
     id: int
     title: str
-    description: str = ""
-    status: Literal["pending", "in_progress", "completed", "failed"] = "pending"
+    status: Literal["pending", "in_progress", "completed"] = "pending"
 
 
 class FailedAttempt(_Frozen):
@@ -86,41 +86,22 @@ class AgentState:
     task_goal: str
     permission_level: PermissionLevel
     canary_token: str
-    # 规划
-    milestones: tuple[Milestone, ...] = ()
-    current_milestone_idx: int = 0
-    # 上下文
+    # 对话
     messages: tuple[Message, ...] = ()
-    # 记忆
-    rolling_summary: str = ""
-    confirmed_facts: tuple[str, ...] = ()
+    # 草稿：任务内临时记忆，由 update_plan / note 工具写入
+    plan: tuple[PlanItem, ...] = ()
+    facts: tuple[str, ...] = ()
     failed_attempts: tuple[FailedAttempt, ...] = ()
     # 产物
     artifacts: Mapping[str, str] = dataclasses.field(default_factory=dict[str, str])
-    # 预算
-    step_count: int = 0
-    total_tokens: int = 0
-    # 防御
+    # 防御（瞬态护栏计数）
     consecutive_errors: int = 0
     fingerprint_history: tuple[str, ...] = ()
-    # 回路控制（schema v2）
-    #: 工具批次之后是否回到 planner 重规划；planner 运行时清零
-    replan_needed: bool = False
-    #: 自上次规划以来执行了几个工具批次
-    steps_since_plan: int = 0
-    #: 验收累计打回次数
-    rejections: int = 0
-    #: planner 连续降级（没拿到可用结构化结论）的次数
-    planner_degraded: int = 0
+    consecutive_blocks: int = 0
     verification: Verification = "none"
-    # 终止
-    should_terminate: bool = False
-    termination_reason: str = ""
     # 控制
-    phase: NextPhase = "planner"
     pending_approval: PendingApproval | None = None
     approval_decision: ApprovalDecision | None = None
-    dispatch_started: tuple[str, ...] = ()
     schema_version: int = CURRENT_SCHEMA_VERSION
 
 
@@ -157,21 +138,9 @@ def _nonempty_str(field: str, value: object) -> str:
     return value
 
 
-def _str(field: str, value: object) -> str:
-    if not isinstance(value, str):
-        raise _bad(field, "必须是字符串")
-    return value
-
-
 def _count(field: str, value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise _bad(field, "必须是非负整数")
-    return value
-
-
-def _flag(field: str, value: object) -> bool:
-    if not isinstance(value, bool):
-        raise _bad(field, "必须是布尔值")
     return value
 
 
@@ -211,12 +180,6 @@ def _permission(field: str, value: object) -> str:
     return cast(str, value)
 
 
-def _phase(field: str, value: object) -> str:
-    if value not in PHASES:
-        raise _bad(field, f"未知阶段 {value!r}")
-    return cast(str, value)
-
-
 def _verification(field: str, value: object) -> str:
     if value not in VERIFICATIONS:
         raise _bad(field, f"未知验证状态 {value!r}")
@@ -249,28 +212,17 @@ VALIDATORS: Final[dict[str, _Check]] = {
     "task_goal": _nonempty_str,
     "permission_level": _permission,
     "canary_token": _nonempty_str,
-    "milestones": _typed_tuple(Milestone),
-    "current_milestone_idx": _count,
     "messages": check_messages,
-    "rolling_summary": _str,
-    "confirmed_facts": _str_tuple,
+    "plan": _typed_tuple(PlanItem),
+    "facts": _str_tuple,
     "failed_attempts": _typed_tuple(FailedAttempt),
     "artifacts": _artifacts,
-    "step_count": _count,
-    "total_tokens": _count,
     "consecutive_errors": _count,
     "fingerprint_history": _str_tuple,
-    "replan_needed": _flag,
-    "steps_since_plan": _count,
-    "rejections": _count,
-    "planner_degraded": _count,
+    "consecutive_blocks": _count,
     "verification": _verification,
-    "should_terminate": _flag,
-    "termination_reason": _str,
-    "phase": _phase,
     "pending_approval": _optional(PendingApproval),
     "approval_decision": _optional(ApprovalDecision),
-    "dispatch_started": _str_tuple,
     "schema_version": _count,
 }
 assert set(VALIDATORS) == set(FIELD_NAMES)
@@ -294,11 +246,8 @@ def new_state(
     permission_level: str,
     canary_token: str,
     messages: Sequence[Message] = (),
-    rolling_summary: str = "",
-    confirmed_facts: Sequence[str] = (),
-    failed_attempts: Sequence[FailedAttempt] = (),
 ) -> AgentState:
-    """任务启动时的初始状态。会话继承来的记忆（摘要、事实、失败尝试）从这里带入。"""
+    """任务启动时的初始状态。会话继承来的记忆不入状态，只在冻结的提示词资产里。"""
     defaults = {f.name: _default_of(f) for f in dataclasses.fields(AgentState) if _has_default(f)}
     given: dict[str, object] = {
         "workspace_id": workspace_id,
@@ -309,9 +258,6 @@ def new_state(
         "permission_level": permission_level,
         "canary_token": canary_token,
         "messages": messages,
-        "rolling_summary": rolling_summary,
-        "confirmed_facts": confirmed_facts,
-        "failed_attempts": failed_attempts,
     }
     return build_state({**defaults, **given})
 
@@ -350,22 +296,19 @@ def apply_update(state: AgentState, update: Mapping[str, object]) -> AgentState:
 
 def check_invariants(state: AgentState) -> None:
     """提交检查点前调用。违反即视为实现缺陷。"""
-    # 最后一组工具调用允许暂无配对：等待审批时；或刚由 executor 产出、正等 tool_runner 执行时
-    pending_tail = state.pending_approval is not None or state.phase == "tool_runner"
-    assert_atomic_pairs(state.messages, allow_pending_tail=pending_tail)
+    # 最后一组工具调用允许暂无配对：回合进行中（模型回复已提交、工具尚未完成），或正挂起在审批上
+    assert_atomic_pairs(state.messages, allow_pending_tail=True)
 
-    if state.current_milestone_idx > len(state.milestones):
+    if len(state.plan) > MAX_PLAN_ITEMS:
+        raise InvalidStateError(f"plan 条数 {len(state.plan)} 超过上限 {MAX_PLAN_ITEMS}")
+    ids = [item.id for item in state.plan]
+    if len(set(ids)) != len(ids):
+        raise InvalidStateError("plan 的 id 重复")
+    if len(state.facts) > MAX_FACTS:
+        raise InvalidStateError(f"facts 条数 {len(state.facts)} 超过上限 {MAX_FACTS}")
+    if any(len(f) > MAX_FACT_CHARS for f in state.facts):
+        raise InvalidStateError(f"facts 单条超过 {MAX_FACT_CHARS} 字符")
+    if len(state.failed_attempts) > MAX_FAILED_ATTEMPTS:
         raise InvalidStateError(
-            f"current_milestone_idx={state.current_milestone_idx} 超出里程碑数量 "
-            f"{len(state.milestones)}"
+            f"failed_attempts 条数 {len(state.failed_attempts)} 超过上限 {MAX_FAILED_ATTEMPTS}"
         )
-
-    if state.dispatch_started:
-        last_calls: set[str] = set()
-        for message in reversed(state.messages):
-            if message.role == "assistant" and message.tool_calls:
-                last_calls = {c.id for c in message.tool_calls}
-                break
-        stray = sorted(set(state.dispatch_started) - last_calls)
-        if stray:
-            raise InvalidStateError(f"dispatch_started 含不属于最近一次工具调用的 id：{stray}")

@@ -25,7 +25,7 @@ from agent_runtime.runtime.service import (
     TaskService,
     TaskStateConflictError,
 )
-from api_support import ASSISTANT, CALL, DONE_MS, OPEN_MS, REDACTOR, TOOL, World, resolve  # noqa: F401
+from api_support import REDACTOR, World, resolve
 
 
 class Rig:
@@ -140,9 +140,9 @@ async def test_finished_task_updates_metadata_and_events(rig: Rig) -> None:
     await rig.service.runner.wait(view.task_id)
     done = await rig.service.get(view.task_id)
     assert done.status == "succeeded" and done.finished_at is not None
-    assert done.step_count == 1 and done.milestones[0]["status"] == "completed"
+    assert done.step_count == 2 and done.milestones == []  # 回合数；没有写过计划
     row = await rig.memory.get_task(view.task_id)
-    assert row is not None and row.status == "succeeded" and row.step_count == 1
+    assert row is not None and row.status == "succeeded" and row.step_count == 2
     events = await rig.hub.history(view.task_id)
     assert events[0].name == "task.started" and events[-1].name == "task.finished"
     assert events[-1].data["status"] == "succeeded"
@@ -151,7 +151,7 @@ async def test_finished_task_updates_metadata_and_events(rig: Rig) -> None:
 
 @pytest.mark.unit
 async def test_failed_task_reports_the_reason(rig: Rig) -> None:
-    rig.world.fail = RuntimeError("boom")
+    rig.world.fail_model = RuntimeError("boom")
     view = await rig.service.submit("s1", "g")
     await rig.service.runner.wait(view.task_id)
     failed = await rig.service.get(view.task_id)
@@ -161,18 +161,32 @@ async def test_failed_task_reports_the_reason(rig: Rig) -> None:
 
 
 @pytest.mark.unit
-async def test_terminated_task_and_resume_after_it(rig: Rig) -> None:
-    rig.world.terminate = True
+async def test_a_failed_task_can_be_resumed_and_event_seqs_continue(rig: Rig) -> None:
+    """余额不足等模型错误：failed，可续跑；没有额度要对齐。"""
+    rig.world.fail_model = RuntimeError("402 insufficient balance")
     view = await rig.service.submit("s1", "g")
     await rig.service.runner.wait(view.task_id)
-    assert (await rig.service.get(view.task_id)).status == "terminated"
-    rig.world.terminate = False
+    assert (await rig.service.get(view.task_id)).status == "failed"
+    rig.world.fail_model = None
     resumed = await rig.service.resume(view.task_id)
     assert resumed.status == "running"
     await rig.service.runner.wait(view.task_id)
     assert (await rig.service.get(view.task_id)).status == "succeeded"
     seqs = [e.seq for e in await rig.hub.history(view.task_id)]
     assert seqs == list(range(1, len(seqs) + 1))  # 续跑后序号接着走
+
+
+@pytest.mark.security
+@pytest.mark.unit
+async def test_a_security_termination_is_final_and_cannot_be_resumed(rig: Rig) -> None:
+    rig.world.leak = True
+    view = await rig.service.submit("s1", "g")
+    await rig.service.runner.wait(view.task_id)
+    done = await rig.service.get(view.task_id)
+    assert done.status == "terminated" and done.should_terminate is True
+    rig.world.leak = False
+    with pytest.raises(TaskNotResumableError):
+        await rig.service.resume(view.task_id)
 
 
 @pytest.mark.unit
@@ -186,7 +200,7 @@ async def test_unknown_task(rig: Rig) -> None:
 
 
 async def waiting(rig: Rig) -> str:
-    rig.world.approval = True
+    rig.world.needs_approval = True
     view = await rig.service.submit("s1", "g")
     await rig.service.runner.wait(view.task_id)
     return view.task_id
@@ -204,7 +218,7 @@ async def test_waiting_task_exposes_the_approval_request_and_persists_status(rig
 @pytest.mark.unit
 async def test_approve_emits_before_the_task_continues_and_completes(rig: Rig) -> None:
     tid = await waiting(rig)
-    approval_id = compute_approval_id(tid, 1, ("c1",))
+    approval_id = compute_approval_id(tid, 2, ("c1",))
     view = await rig.service.approve(tid, approval_id, "once")
     assert view.status == "running"
     await rig.service.runner.wait(tid)
@@ -230,7 +244,7 @@ async def test_repeating_the_same_decision_is_idempotent_but_a_different_one_con
     rig: Rig,
 ) -> None:
     tid = await waiting(rig)
-    approval_id = compute_approval_id(tid, 1, ("c1",))
+    approval_id = compute_approval_id(tid, 2, ("c1",))
     await rig.service.approve(tid, approval_id, "once")
     await rig.service.runner.wait(tid)
     again = await rig.service.approve(tid, approval_id, "once")
@@ -250,7 +264,7 @@ async def test_approving_a_task_that_is_not_waiting_is_a_conflict(rig: Rig) -> N
 @pytest.mark.unit
 async def test_reject_continues_with_a_refusal_and_emits_rejected(rig: Rig) -> None:
     tid = await waiting(rig)
-    approval_id = compute_approval_id(tid, 1, ("c1",))
+    approval_id = compute_approval_id(tid, 2, ("c1",))
     await rig.service.reject(tid, approval_id, "太危险\n了")
     await rig.service.runner.wait(tid)
     rejected = next(e for e in await rig.hub.history(tid) if e.name == "task.rejected")
@@ -267,7 +281,7 @@ async def test_resume_rules_per_status(rig: Rig) -> None:
     with pytest.raises(TaskNotResumableError):
         await rig.service.resume(ok.task_id)
 
-    rig.world.approval = True
+    rig.world.needs_approval = True
     w = await rig.service.submit("s1", "g")
     await rig.service.runner.wait(w.task_id)
     with pytest.raises(TaskStateConflictError):

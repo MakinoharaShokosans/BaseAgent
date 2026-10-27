@@ -12,13 +12,12 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Final, Self
+from typing import Final, Literal, Self
 
 import aiosqlite
 
 from agent_runtime.checkpoint.errors import CheckpointCorruptError, CheckpointError
 from agent_runtime.core import (
-    DONE,
     AgentState,
     StateDecodeError,
     check_invariants,
@@ -43,15 +42,36 @@ _MIGRATIONS: Final[tuple[str, ...]] = (
     );
     CREATE INDEX idx_task_checkpoints_phase ON task_checkpoints(phase);
     """,
+    # 五阶段工作流的检查点（phase 列）与纯 agent loop 的状态不兼容：旧表原样留存，新表另建
+    """
+    ALTER TABLE task_checkpoints RENAME TO task_checkpoints_legacy;
+    CREATE TABLE task_checkpoints (
+        task_id        TEXT PRIMARY KEY,
+        seq            INTEGER NOT NULL,
+        status         TEXT NOT NULL,
+        outcome        TEXT NOT NULL DEFAULT '',
+        reason         TEXT NOT NULL DEFAULT '',
+        state_json     TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        updated_at     REAL NOT NULL
+    );
+    CREATE INDEX idx_task_checkpoints_status ON task_checkpoints(status);
+    """,
 )
 
+#: 检查点状态列。``finished`` 时 ``outcome`` 说明怎么结束的
+Status = Literal["running", "waiting", "finished"]
+Outcome = Literal["", "succeeded", "cancelled", "terminated"]
+
 _UPSERT: Final = """
-INSERT INTO task_checkpoints (task_id, seq, phase, waiting, state_json, schema_version, updated_at)
-VALUES (?, 1, ?, ?, ?, ?, ?)
+INSERT INTO task_checkpoints
+    (task_id, seq, status, outcome, reason, state_json, schema_version, updated_at)
+VALUES (?, 1, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(task_id) DO UPDATE SET
     seq = seq + 1,
-    phase = excluded.phase,
-    waiting = excluded.waiting,
+    status = excluded.status,
+    outcome = excluded.outcome,
+    reason = excluded.reason,
     state_json = excluded.state_json,
     schema_version = excluded.schema_version,
     updated_at = excluded.updated_at
@@ -64,8 +84,17 @@ class UnfinishedTask:
     """启动扫描的一条记录。只来自列，不解码状态。"""
 
     task_id: str
-    phase: str
+    status: Status
     waiting_for_approval: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StoredStatus:
+    """只读列得到的任务状态，不解码 state_json。"""
+
+    status: Status
+    outcome: Outcome = ""
+    reason: str = ""
 
 
 class CheckpointStore:
@@ -139,17 +168,27 @@ class CheckpointStore:
 
     # ------------------------------------------------------------------ 读写
 
-    async def commit(self, state: AgentState) -> int:
+    async def commit(self, state: AgentState, *, outcome: Outcome = "", reason: str = "") -> int:
         """提交检查点，返回新的提交序号（每个任务从 1 起，在 SQL 内自增）。
 
         先断言不变量：不合法的状态不落盘。失败即抛 :class:`CheckpointError`。
+        ``outcome`` 非空表示任务已结束（成功、取消、安全终止），状态列写 ``finished``；
+        否则按是否挂起写 ``waiting`` 或 ``running``。
         """
         conn = self._require()
         check_invariants(state)
+        status: Status = (
+            "finished"
+            if outcome
+            else "waiting"
+            if state.pending_approval is not None
+            else "running"
+        )
         params = (
             state.task_id,
-            state.phase,
-            int(state.pending_approval is not None),
+            status,
+            outcome,
+            reason,
             dumps_state(state),
             state.schema_version,
             time.time(),
@@ -169,7 +208,7 @@ class CheckpointStore:
         conn = self._require()
         try:
             cursor = await conn.execute(
-                "SELECT task_id, phase, schema_version, state_json "
+                "SELECT task_id, status, schema_version, state_json "
                 "FROM task_checkpoints WHERE task_id = ?",
                 (task_id,),
             )
@@ -179,14 +218,14 @@ class CheckpointStore:
         if row is None:
             return None
 
-        row_task, row_phase, row_version, state_json = row
+        row_task, row_status, row_version, state_json = row
         try:
             state = loads_state(state_json)
         except StateDecodeError as exc:
             raise CheckpointCorruptError(f"任务 {task_id} 的检查点无法解码：{exc}") from exc
         for column, in_column, in_state in (
             ("task_id", row_task, state.task_id),
-            ("phase", row_phase, state.phase),
+            ("status", row_status == "waiting", state.pending_approval is not None),
             ("schema_version", row_version, state.schema_version),
         ):
             if in_column != in_state:
@@ -195,6 +234,20 @@ class CheckpointStore:
                     f"状态里为 {in_state!r}"
                 )
         return state
+
+    async def load_status(self, task_id: str) -> StoredStatus | None:
+        conn = self._require()
+        try:
+            cursor = await conn.execute(
+                "SELECT status, outcome, reason FROM task_checkpoints WHERE task_id = ?",
+                (task_id,),
+            )
+            row = await cursor.fetchone()
+        except sqlite3.Error as exc:
+            raise CheckpointError(f"读取检查点状态失败（任务 {task_id}）：{exc}") from exc
+        if row is None:
+            return None
+        return StoredStatus(row[0], row[1], row[2])
 
     async def delete(self, task_id: str) -> bool:
         conn = self._require()
@@ -210,15 +263,17 @@ class CheckpointStore:
         return cursor.rowcount > 0
 
     async def list_unfinished(self) -> list[UnfinishedTask]:
-        """列出 phase 不是终止的任务。只读列，不解码状态，所以损坏的任务也能被列出。"""
+        """列出没有结束的任务（``running`` 与 ``waiting``）。
+
+        只读列，不解码状态，所以损坏的任务也能被列出。
+        """
         conn = self._require()
         try:
             cursor = await conn.execute(
-                "SELECT task_id, phase, waiting FROM task_checkpoints "
-                "WHERE phase != ? ORDER BY updated_at, task_id",
-                (DONE,),
+                "SELECT task_id, status FROM task_checkpoints "
+                "WHERE status != 'finished' ORDER BY updated_at, task_id"
             )
             rows = await cursor.fetchall()
         except sqlite3.Error as exc:
             raise CheckpointError(f"扫描检查点失败：{exc}") from exc
-        return [UnfinishedTask(str(r[0]), str(r[1]), bool(r[2])) for r in rows]
+        return [UnfinishedTask(str(r[0]), r[1], r[1] == "waiting") for r in rows]

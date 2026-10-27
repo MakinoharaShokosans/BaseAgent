@@ -1,4 +1,4 @@
-"""真实内置工具接进 tool_runner：产物回取闭环、路径与权限、不可信信封。"""
+"""真实内置工具接进工具包装层：产物回取闭环、路径与权限、不可信信封。"""
 
 from __future__ import annotations
 
@@ -12,9 +12,16 @@ import pytest
 
 from agent_runtime.approval import check_binding, compute_approval_id
 from agent_runtime.context import ObservationGovernor, ObservationLimits, ObservationStore
-from agent_runtime.core import AgentState, ApprovalRequired, Message, ToolCall, apply_update
+from agent_runtime.core import (
+    AgentState,
+    ApprovalRequired,
+    Message,
+    ToolCall,
+    apply_update,
+    unanswered_calls,
+)
 from agent_runtime.guardrails import LoopLimits
-from agent_runtime.loop.stages import ApprovalHooks, ToolRunnerDeps, make_tool_runner_stage
+from agent_runtime.loop import ApprovalHooks, ToolRunnerDeps, make_tool_runner
 from stage_support import MakeState, with_state
 from test_permissions import POLICY
 from tools.builtin import FileLimits, ShellBinding, TaskArtifacts, build_builtin_tools
@@ -58,15 +65,13 @@ class World:
             grep_max_results=50,
             shell=ShellBinding(client, "ws", str(self.workspace), "t1", 60, 600),
         )
-        self.commits: list[AgentState] = []
-        self.stage = make_tool_runner_stage(
+        self.runner = make_tool_runner(
             ToolRunnerDeps(
                 dispatcher=ToolDispatcher(ToolRegistry(tools)),
                 policy=POLICY_WITH_ARTIFACTS,
                 limits=LoopLimits(3, 3),
                 governor=ObservationGovernor(OBS, len, ObservationStore(self.store)),
                 approval=ApprovalHooks(compute_approval_id, check_binding),
-                commit=self._commit,
                 bind=lambda s: self.artifacts.bind(s.artifacts),
             )
         )
@@ -75,19 +80,14 @@ class World:
         self.requests.append(request)
         return httpx.Response(200, json=dict(body))
 
-    async def _commit(self, state: AgentState) -> None:
-        self.commits.append(state)
-
     async def run(self, state: AgentState) -> AgentState:
-        return apply_update(state, dict(await self.stage(state)))
+        return apply_update(state, dict(await self.runner(state, unanswered_calls(state.messages))))
 
 
 def turn(
     make_state: MakeState, *calls: tuple[str, str, Mapping[str, Any]], **fields: Any
 ) -> AgentState:
     base: dict[str, Any] = {
-        "phase": "tool_runner",
-        "step_count": 1,
         "messages": (
             Message(role="user", content="go"),
             Message(
@@ -169,7 +169,6 @@ async def test_truncated_bash_output_can_be_fetched_back_with_read_artifact(
                 ),
             ),
         ),
-        step_count=2,
     )
     final = await world.run(again)
     assert "row 60" in reply_to(final, "r1") and "row 61" in reply_to(final, "r1")
@@ -202,7 +201,6 @@ async def test_a_big_view_is_governed_and_its_handle_leads_back_to_the_rest(
                 ),
             ),
         ),
-        step_count=2,
     )
     assert "line 0042" in reply_to(await world.run(follow), "g1")
 
@@ -238,5 +236,5 @@ async def test_bash_that_needs_more_than_the_baseline_still_stops_for_approval(
 ) -> None:
     world = World(tmp_path)
     with pytest.raises(ApprovalRequired):
-        await world.stage(turn(make_state, ("b1", "bash", {"command": "git push origin main"})))
+        await world.run(turn(make_state, ("b1", "bash", {"command": "git push origin main"})))
     assert world.requests == []

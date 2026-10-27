@@ -4,16 +4,22 @@
 """
 
 from mcps.adapter import McpTool
+from mcps.index import MCP_CALL, MCP_DESCRIBE, McpCallTool, McpDescribeTool, render_index
 from mcps.manager import McpManager, resolve_env, unpinned_package
 from mcps.naming import assign_names
 from mcps.vetting import Rejection, Vetted, vet_tool
 
 __all__ = [
+    "MCP_CALL",
+    "MCP_DESCRIBE",
+    "McpCallTool",
+    "McpDescribeTool",
     "McpManager",
     "McpTool",
     "Rejection",
     "Vetted",
     "assign_names",
+    "render_index",
     "resolve_env",
     "unpinned_package",
     "vet_tool",

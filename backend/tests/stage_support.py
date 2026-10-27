@@ -1,4 +1,4 @@
-"""planner / evaluator 阶段测试共用的假网关与构造器。"""
+"""测试共用的假网关与响应构造器（结构化输出、带工具调用的响应）。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from agent_runtime.llm import (
     Parsed,
     TokenUsage,
 )
-from agent_runtime.loop.stages.common import Emit, ModelStageDeps
 
 MakeState = Callable[..., AgentState]
 
@@ -77,19 +76,6 @@ class Events:
 
     def names(self) -> list[str]:
         return [n for n, _ in self.items]
-
-
-def assemble(state: AgentState, instruction: str) -> Sequence[Message]:
-    return (Message(role="system", content=instruction), *state.messages)
-
-
-def deps(gateway: FakeGateway, events: Emit | None = None, **kw: Any) -> ModelStageDeps:
-    return ModelStageDeps(
-        gateway=gateway,
-        assemble=assemble,
-        emit=events,
-        **kw,
-    )
 
 
 def with_state(state: AgentState, **fields: Any) -> AgentState:

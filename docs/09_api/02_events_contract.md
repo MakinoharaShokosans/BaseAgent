@@ -194,7 +194,7 @@ task.finished (succeeded)
 - **游标缺口**有三种：早于可重放的最旧事件、事件库已按保留策略清理了中间一段、游标超前于服务端已知的最新序号；都以一条 `task.error`（`code=STREAM_GAP`）结束流。
 - **挂起不结束流；`task.finished` 结束流**，但已结束的任务可能被续跑，所以从头订阅会越过中间的终态事件，只在“终态就是最后一个事件”时才关。
 - **`task.error`** 在不可恢复异常时发（`code=TASK_FAILED`），随后总有一条 `task.finished`。
-- **`tool.result`** 带 `call_id`、`ok`、`artifact_id`；`ok` 来自 tool_runner 经内部的 `tool.observed` 递来的结果，该信号本身不对外发布，随阶段提交后的 `tool.result` 一起发出。
+- **`tool.result`** 带 `call_id`、`ok`、`artifact_id`；`ok` 来自工具包装层经内部的 `tool.observed` 递来的结果，该信号本身不对外发布，随阶段提交后的 `tool.result` 一起发出。
 - **`tool.call` 的 `args`、`tool.result` 的 `result`、审批的 `command` 与 `reason`** 都过统一脱敏，金丝雀由 `TaskEvents` 自己并入；审批的 `command` 不截断，`reason` 等摘要类字段限长 300。
 - **`llm.call`** 由网关的调用记录经 `LlmCallEvents` 发出（每次尝试一条，含重试与降级）：`node`（purpose）、`tier`、`endpoint`、`model`、`attempts`、`outcome`、`duration_ms`、`tokens`、`finish_reason`、`error?`，以及服务商给了才有的用量拆分：`prompt_tokens`、`completion_tokens`、`reasoning_tokens`、`cache_hit_tokens`、`cache_miss_tokens`（缓存命中率与各阶段开销由它们算出，评测框架读取）。记录本身不含消息正文，所以事件只有摘要，也没有 `blob_ref`；完整提示词的外置与按需拉取尚未做。任务收尾前会等在途的 `llm.call` 发完，`task.finished` 仍是最后一个事件。
-- 尚未发出：研究与子智能体事件。
+- **回合事件已发出**（`model.reply`、`plan.updated`、`turn.finished`），**同时仍发旧的 `plan` 与 `node.finished`**（`node` 取 `agent` / `tool_runner`，`should_terminate` 恒为 `false`）：前端 `taskReducer` 还在消费旧事件，改完后去掉。`task.finished` 的 `step_count` 与新增的 `turns` 都是回合数，`total_tokens` 是统计值（`LlmCallEvents` 按任务累计）。`GET /system/limits` 只剩 `max_concurrent_tasks`。

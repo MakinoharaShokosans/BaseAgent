@@ -166,7 +166,7 @@ async def test_a_missing_session_is_an_error(store: MemoryStore) -> None:
 async def test_finishing_records_the_question_and_the_answer(
     store: MemoryStore, make_state: MakeState
 ) -> None:
-    state = finished(make_state, confirmed_facts=("入口 main.py",))
+    state = finished(make_state, facts=("入口 main.py",))
     report = await flow(store).finish("s1", state, delivery="做完了")
     turns = await store.turns_after("s1", 0)
     assert [(t.role, t.content, t.task_id) for t in turns] == [
@@ -191,7 +191,7 @@ async def test_facts_and_failures_go_to_pending_and_the_summary_stays_put(
     store: MemoryStore, make_state: MakeState
 ) -> None:
     fa = FailedAttempt(action="a", failure_reason="r", conclusion="c")
-    state = finished(make_state, confirmed_facts=("事实",), failed_attempts=(fa,))
+    state = finished(make_state, facts=("事实",), failed_attempts=(fa,))
     await flow(store).finish("s1", state, delivery="ok")
     m = await store.load_memory("s1")
     assert [f.text for f in m.pending_facts] == ["事实"] and m.pending_failures[0].attempt == fa
@@ -207,38 +207,32 @@ async def test_facts_inherited_at_the_start_are_not_deposited_again(
     await store.update_memory(
         "s1", lambda m: dataclasses.replace(m, facts=(Fact("旧", "t0", "trusted", "task", 1.0),))
     )
-    state = finished(make_state, confirmed_facts=("旧", "新"))
+    state = finished(make_state, facts=("旧", "新"))
     await flow(store).finish("s1", state, delivery="ok")
     assert [f.text for f in (await store.load_memory("s1")).pending_facts] == ["新"]
 
 
 @pytest.mark.unit
 async def test_a_security_stop_deposits_no_facts(store: MemoryStore, make_state: MakeState) -> None:
-    state = finished(
-        make_state,
-        confirmed_facts=("可疑",),
-        should_terminate=True,
-        termination_reason="[SECURITY] Prompt leak detected via canary token",
-    )
-    assert outcome_of(state) == "failed"
-    await flow(store).finish("s1", state, delivery="x")
+    state = finished(make_state, facts=("可疑",))
+    reason = "[SECURITY] Prompt leak detected via canary token"
+    assert outcome_of("terminated", reason) == "failed"
+    await flow(store).finish("s1", state, delivery="x", status="terminated", reason=reason)
     assert (await store.load_memory("s1")).pending_facts == ()
 
 
 @pytest.mark.unit
-def test_outcomes_follow_the_final_state(make_state: MakeState) -> None:
-    assert outcome_of(finished(make_state)) == "success"
-    assert (
-        outcome_of(finished(make_state, should_terminate=True, termination_reason="预算"))
-        == "terminated"
-    )
+def test_outcomes_follow_the_final_status() -> None:
+    assert outcome_of("succeeded") == "success"
+    assert outcome_of("terminated", "其他原因") == "terminated"
+    assert outcome_of("cancelled", "用户取消") == "terminated"
 
 
 @pytest.mark.unit
 async def test_the_switch_can_turn_depositing_off(
     store: MemoryStore, make_state: MakeState
 ) -> None:
-    state = finished(make_state, confirmed_facts=("事实",))
+    state = finished(make_state, facts=("事实",))
     await flow(store, persist_task_facts=False).finish("s1", state, delivery="ok")
     assert (await store.load_memory("s1")).pending_facts == ()
     assert len(await store.turns_after("s1", 0)) == 2  # 流水照记
@@ -255,7 +249,7 @@ async def test_a_task_that_read_untrusted_content_deposits_untrusted_facts(
         name="x",
     )
     call = Message(role="assistant", content="", tool_calls=(ToolCall(id="c", name="x", args={}),))
-    state = finished(make_state, messages=(call, tainted), confirmed_facts=("事实",))
+    state = finished(make_state, messages=(call, tainted), facts=("事实",))
     assert task_was_tainted(state.messages) is True
     await flow(store).finish("s1", state, delivery="ok")
     assert (await store.load_memory("s1")).pending_facts[0].trust == "untrusted"
@@ -307,7 +301,7 @@ async def test_reaching_the_watermark_compacts_after_the_turns_are_written(
     ex = Ex()
     f = flow(store, ex)
     for i in range(3):  # 每对 ≥ 30 个字符 -> 很快越过 80
-        state = with_state(make_state(task_id=f"t{i}", task_goal="目" * 20), confirmed_facts=())
+        state = with_state(make_state(task_id=f"t{i}", task_goal="目" * 20), facts=())
         await f.finish("s1", state, delivery="答" * 20)
     assert ex.calls >= 1 and (await store.load_memory("s1")).watermark > 0
 
@@ -317,7 +311,7 @@ async def test_overflowing_the_pending_cap_triggers_an_early_merge(
     store: MemoryStore, make_state: MakeState
 ) -> None:
     ex = Ex()
-    state = finished(make_state, confirmed_facts=("a", "b", "c", "d"))
+    state = finished(make_state, facts=("a", "b", "c", "d"))
     report = await flow(store, ex, max_pending=3).finish("s1", state, delivery="ok")
     assert ex.calls == 1 and report.compaction == "compacted"
 
@@ -335,7 +329,7 @@ async def test_a_failing_extractor_is_reported_and_leaves_the_turns_written(
     store: MemoryStore, make_state: MakeState
 ) -> None:
     f = flow(store, Ex(fail=True))
-    state = finished(make_state, confirmed_facts=("a", "b", "c", "d"))
+    state = finished(make_state, facts=("a", "b", "c", "d"))
     report = await f.finish("s1", state, delivery="ok")
     assert report.compaction == "failed" and report.error is None
     assert len(await store.turns_after("s1", 0)) == 2

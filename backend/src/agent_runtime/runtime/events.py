@@ -1,8 +1,11 @@
 """把循环与任务生命周期翻译成对外的事件。设计文档：docs/09_api/02_events_contract.md §3-6。
 
-``TaskEvents`` 满足循环的 ``EventSink``（只在检查点提交之后被调用）和阶段的 ``Emit``。
-工具是否成功这类“提交前才知道”的信息，由 tool_runner 经 ``tool.observed`` 递过来，这里只记下，
-等到该阶段提交后再随 ``tool.result`` 一起发出，所以事件永远不会比可恢复的进度更远。
+``TaskEvents`` 满足循环的 ``EventSink``（只在检查点提交之后被调用）和工具包装层的 ``Emit``。
+工具是否成功这类“提交前才知道”的信息，由包装层经 ``tool.observed`` 递过来，这里只记下，
+等到该回合提交后再随 ``tool.result`` 一起发出，所以事件永远不会比可恢复的进度更远。
+
+回合事件（``model.reply``、``plan.updated``、``turn.finished``）是目标契约；迁移期间同时发出旧的
+``plan`` 与 ``node.finished``，前端改完后再去掉（见 docs/09_api/02_events_contract.md §4.1）。
 """
 
 from __future__ import annotations
@@ -12,27 +15,18 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 from agent_runtime.core import (
-    DONE,
     AgentState,
     Message,
     PendingApproval,
-    Phase,
     current_task_id,
 )
 from agent_runtime.llm import CallRecord
-from agent_runtime.loop.stages.tool_runner import REJECTED_PREFIX
+from agent_runtime.loop.tools import REJECTED_TEMPLATE
 from agent_runtime.observability import EventHub, Redactor, clip
 from agent_runtime.runtime.runner import TaskSnapshot
 
-#: 发给客户端的阶段事件里，展示用的中文文案。机器可读信息放在 ``decision`` 等独立字段
-_INPUT: Final[Mapping[str, str]] = {
-    "planner": "任务目标与当前进展",
-    "budget_guard": "步数、Token 与用时",
-    "executor": "规划指令与最近的观察值",
-    "tool_runner": "待执行的工具调用",
-    "evaluator": "本阶段的执行结果",
-}
-_PASS_THROUGH: Final = frozenset({"task.observed", "tool.observed"})
+_REPLY_CLIP: Final = 2000
+_REASONING_CLIP: Final = 500
 
 
 class TaskEvents:
@@ -46,17 +40,19 @@ class TaskEvents:
         *,
         canary: str = "",
         tool_result_clip: int = 500,
-        stage_offset: int = 0,
+        turn_offset: int = 0,
+        usage: Callable[[], int] = lambda: 0,
     ) -> None:
         self._hub = hub
         self._task_id = task_id
         # 金丝雀在这里并入：事件的出口不依赖装配层记得传
         self._redactor = redactor.with_secrets([canary] if canary else [])
         self._result_clip = tool_result_clip
-        self._stage = stage_offset
+        self._turn = turn_offset
+        self._usage = usage
         self._observed: dict[str, Mapping[str, object]] = {}
 
-    # ------------------------------------------------------------------ 阶段的 Emit
+    # ------------------------------------------------------------------ 工具包装层的 Emit
 
     async def emit(self, name: str, data: Mapping[str, object]) -> None:
         if name == "tool.observed":
@@ -66,59 +62,49 @@ class TaskEvents:
 
     # ------------------------------------------------------------------ EventSink
 
-    async def stage_committed(
-        self, phase: Phase, update: Mapping[str, object], state: AgentState
-    ) -> None:
-        new = _new_messages(update)
-        decision = _decision(phase, new, state)
-        if phase == "planner":
-            content = _last_assistant(new)
+    async def model_replied(self, message: Message, state: AgentState) -> None:
+        turn = self._turn + 1
+        payload: dict[str, object] = {
+            "turn": turn,
+            "content": clip(message.content, _REPLY_CLIP),
+            "tool_calls": [{"id": c.id, "name": c.name} for c in message.tool_calls],
+        }
+        if message.reasoning:
+            payload["reasoning"] = clip(message.reasoning, _REASONING_CLIP)
+        await self._hub.emit(self._task_id, "model.reply", self._scrub(payload))
+        for call in message.tool_calls:
+            args, _ = self._redactor.args(call.args)
             await self._hub.emit(
                 self._task_id,
-                "plan",
-                self._scrub(
-                    {
-                        "thought": content,
-                        "directive": content,
-                        "milestones": _milestones(state),
-                        "step": state.step_count,
-                    }
-                ),
+                "tool.call",
+                {"tool": call.name, "args": args, "step": turn, "call_id": call.id},
             )
-        if phase == "executor":
-            for message in new:
-                for call in message.tool_calls:
-                    args, _ = self._redactor.args(call.args)
-                    await self._hub.emit(
-                        self._task_id,
-                        "tool.call",
-                        {
-                            "tool": call.name,
-                            "args": args,
-                            "step": state.step_count,
-                            "call_id": call.id,
-                        },
-                    )
-        if phase == "tool_runner":
-            for message in new:
-                if message.role == "tool":
-                    await self._tool_result(message, state)
-        self._stage += 1
-        payload: dict[str, object] = {
-            "node": phase,
-            "stage": self._stage,  # 阶段序号；信封里的 seq 是事件序号，二者不能同名
-            "input_summary": _INPUT[phase],
-            "output_summary": self._redactor.text(clip(_last_text(new), 300)),
-            "decision": decision,
-            "step_count": state.step_count,
-            "total_tokens": state.total_tokens,
-            "should_terminate": state.should_terminate,
-        }
-        if phase in ("planner", "evaluator"):
-            payload["milestones"] = _milestones(state)
-        if phase == "planner" and decision == "reply":
-            payload["content"] = self._redactor.text(_last_assistant(new))
-        await self._hub.emit(self._task_id, "node.finished", self._scrub(payload))
+        if not message.tool_calls:
+            self._turn = turn
+            await self._legacy_node(
+                turn, "agent", "reply", message.content, content=message.content
+            )
+
+    async def turn_finished(self, update: Mapping[str, object], state: AgentState) -> None:
+        turn = self._turn + 1
+        self._turn = turn
+        new = [m for m in _list_of(update.get("messages")) if m.role == "tool"]
+        failed = 0
+        for message in new:
+            failed += not await self._tool_result(message, turn)
+        if "plan" in update:
+            await self._plan_updated(state)
+        await self._hub.emit(
+            self._task_id,
+            "turn.finished",
+            {
+                "turn": turn,
+                "tool_count": len(new),
+                "failed_count": failed,
+                "tokens": self._usage(),
+            },
+        )
+        await self._legacy_node(turn, "tool_runner", "executed", new[-1].content if new else "")
 
     async def approval_requested(self, request: PendingApproval, state: AgentState) -> None:
         await self._hub.emit(
@@ -127,20 +113,54 @@ class TaskEvents:
 
     # ------------------------------------------------------------------ 内部
 
-    async def _tool_result(self, message: Message, state: AgentState) -> None:
+    async def _plan_updated(self, state: AgentState) -> None:
+        plan = [{"id": i.id, "title": i.title, "status": i.status} for i in state.plan]
+        await self._hub.emit(self._task_id, "plan.updated", self._scrub({"plan": plan}))
+        await self._hub.emit(
+            self._task_id,
+            "plan",
+            self._scrub(
+                {
+                    "thought": "",
+                    "directive": "",
+                    "milestones": plan_as_milestones(state),
+                    "step": self._turn,
+                }
+            ),
+        )
+
+    async def _legacy_node(
+        self, turn: int, node: str, decision: str, text: str, **extra: object
+    ) -> None:
+        payload: dict[str, object] = {
+            "node": node,
+            "stage": turn,
+            "input_summary": "任务目标与当前进展" if node == "agent" else "待执行的工具调用",
+            "output_summary": self._redactor.text(clip(text, 300)),
+            "decision": decision,
+            "step_count": turn,
+            "total_tokens": self._usage(),
+            "should_terminate": False,
+            **extra,
+        }
+        await self._hub.emit(self._task_id, "node.finished", self._scrub(payload))
+
+    async def _tool_result(self, message: Message, turn: int) -> bool:
         observed = self._observed.pop(message.tool_call_id or "", {})
+        ok = bool(observed.get("ok", True))
         await self._hub.emit(
             self._task_id,
             "tool.result",
             {
                 "tool": message.name or "",
                 "result": self._redactor.text(message.content)[: self._result_clip],
-                "step": state.step_count,
-                "ok": bool(observed.get("ok", True)),
+                "step": turn,
+                "ok": ok,
                 "artifact_id": str(observed.get("artifact_id", "")),
                 "call_id": message.tool_call_id or "",
             },
         )
+        return ok
 
     def _scrub(self, data: Mapping[str, object]) -> dict[str, object]:
         cleaned = self._redactor.value(data)
@@ -179,12 +199,18 @@ class LlmCallEvents:
     def __init__(self, hub: EventHub) -> None:
         self._hub = hub
         self._pending: set[asyncio.Task[object]] = set()
+        self._tokens: dict[str, int] = {}
+
+    def tokens_of(self, task_id: str) -> int:
+        """本进程内该任务的累计 Token（统计值，不对应任何上限）。"""
+        return self._tokens.get(task_id, 0)
 
     def __call__(self, record: CallRecord) -> None:
         task_id = current_task_id.get()
         if task_id is None:
             return
         tokens = record.usage.total_tokens if record.usage is not None else 0
+        self._tokens[task_id] = self._tokens.get(task_id, 0) + tokens
         payload: dict[str, object] = {
             "node": record.purpose,
             "tier": record.tier,
@@ -239,11 +265,13 @@ class LifecycleEvents:
         load_state: StateLoader,
         *,
         drain: Callable[[], Awaitable[None]] | None = None,
+        usage: Callable[[str], int] = lambda task_id: 0,
     ) -> None:
         self._hub = hub
         self._redactor = redactor
         self._load = load_state
         self._drain = drain
+        self._usage = usage
 
     async def task_started(self, task_id: str, state: AgentState) -> None:
         await self._hub.emit(
@@ -267,9 +295,12 @@ class LifecycleEvents:
             {
                 "status": snapshot.status,
                 "termination_reason": redactor.text(snapshot.reason),
-                "step_count": state.step_count if state else 0,
-                "total_tokens": state.total_tokens if state else 0,
-                "delivery": redactor.text(delivery_of(state)) if state else "",
+                "step_count": turns_of(state),
+                "turns": turns_of(state),
+                "total_tokens": self._usage(snapshot.task_id),
+                "delivery": redactor.text(delivery_of(state, snapshot.status, snapshot.reason))
+                if state
+                else "",
             },
         )
 
@@ -277,32 +308,44 @@ class LifecycleEvents:
 _SECURITY_PREFIX = "[SECURITY]"
 _EDIT_TOOLS = frozenset({"write_file", "edit_file"})
 _PARTIAL_LIST_LIMIT = 12
-#: tool_runner 合成的“没有执行”的观察值前缀（被人工拒绝、被循环护栏拦截、参数不可用）
-_NOT_RUN_PREFIXES = (REJECTED_PREFIX, "已拦截", "未执行")
+#: 工具包装层合成的“没有执行”的观察值前缀（被人工拒绝、被循环护栏拦截、参数不可用）
+_NOT_RUN_PREFIXES = (REJECTED_TEMPLATE.split("{")[0], "该调用与最近的调用重复", "未执行")
 
 
-def delivery_of(state: AgentState | None) -> str:
-    """面向用户的交付：正常结束取最后一条不带工具调用的 assistant 消息；被终止的任务
+def turns_of(state: AgentState | None) -> int:
+    """回合数：模型回复的条数（统计值）。"""
+    return sum(1 for m in state.messages if m.role == "assistant") if state else 0
+
+
+def plan_as_milestones(state: AgentState) -> list[dict[str, object]]:
+    """旧事件契约里的里程碑形状。"""
+    return [
+        {"id": i.id, "title": i.title, "description": "", "status": i.status} for i in state.plan
+    ]
+
+
+def delivery_of(state: AgentState | None, status: str = "succeeded", reason: str = "") -> str:
+    """面向用户的交付：正常结束取最后一条不带工具调用的 assistant 消息；被终止或取消的任务
     带着已完成的部分交付（最后一条 assistant 消息多半只是一条内部指令，不是交付）。"""
     if state is None:
         return ""
-    if state.should_terminate:
-        return partial_delivery(state)
+    if status in ("terminated", "cancelled"):
+        return partial_delivery(state, reason)
     for message in reversed(state.messages):
         if message.role == "assistant" and message.content and not message.tool_calls:
             return message.content
     return ""
 
 
-def partial_delivery(state: AgentState) -> str:
-    """任务被终止（预算、验收上限、规划失效、循环……）时的交付：全部由代码根据状态生成，
-    不额外调用模型。安全类终止不展开任何内容。"""
-    reason = state.termination_reason or "任务被终止"
+def partial_delivery(state: AgentState, reason: str = "") -> str:
+    """任务被终止或取消时的交付：全部由代码根据状态生成，不额外调用模型。
+    安全类终止不展开任何内容。"""
+    reason = reason or "任务被终止"
     if reason.startswith(_SECURITY_PREFIX):
         return "任务因安全原因被终止，没有交付内容。"
     lines = [f"任务没有完成：{reason}"]
-    done = [m.title for m in state.milestones if m.status == "completed"]
-    todo = [m.title for m in state.milestones if m.status != "completed"]
+    done = [i.title for i in state.plan if i.status == "completed"]
+    todo = [i.title for i in state.plan if i.status != "completed"]
     if done:
         lines += ["", "已完成：", *(f"- {t}" for t in done[:_PARTIAL_LIST_LIMIT])]
     if todo:
@@ -310,14 +353,8 @@ def partial_delivery(state: AgentState) -> str:
     touched = _touched_files(state)
     if touched:
         lines += ["", "已修改的文件：" + "、".join(touched[:_PARTIAL_LIST_LIMIT])]
-    if state.confirmed_facts:
-        lines += [
-            "",
-            "已确认的事实：",
-            *(f"- {f}" for f in state.confirmed_facts[:_PARTIAL_LIST_LIMIT]),
-        ]
-    if state.rolling_summary:
-        lines += ["", f"最近进展：{state.rolling_summary}"]
+    if state.facts:
+        lines += ["", "已确认的事实：", *(f"- {f}" for f in state.facts[:_PARTIAL_LIST_LIMIT])]
     lines += ["", "可以在同一会话里继续提问，我会从这些成果接着做。"]
     return "\n".join(lines)
 
@@ -344,40 +381,5 @@ def _touched_files(state: AgentState) -> list[str]:
 # ==============================================================================
 
 
-def _new_messages(update: Mapping[str, object]) -> list[Message]:
-    raw = update.get("messages", ())
+def _list_of(raw: object) -> list[Message]:
     return [m for m in raw if isinstance(m, Message)] if isinstance(raw, list | tuple) else []
-
-
-def _last_assistant(messages: list[Message]) -> str:
-    for message in reversed(messages):
-        if message.role == "assistant":
-            return message.content
-    return ""
-
-
-def _last_text(messages: list[Message]) -> str:
-    return messages[-1].content if messages else ""
-
-
-def _milestones(state: AgentState) -> list[dict[str, object]]:
-    return [
-        {"id": m.id, "title": m.title, "description": m.description, "status": m.status}
-        for m in state.milestones
-    ]
-
-
-def _decision(phase: Phase, new: list[Message], state: AgentState) -> str:
-    """``state`` 是该阶段提交之后的状态，``state.phase`` 已是路由出的下一阶段。"""
-    answered = state.phase == DONE and not state.should_terminate
-    match phase:
-        case "planner":
-            return "reply" if answered else clip(_last_assistant(new), 120) or "pass"
-        case "budget_guard":
-            return "terminate" if state.should_terminate else "pass"
-        case "executor":
-            return "call_tools" if any(m.tool_calls for m in new) else "reply"
-        case "tool_runner":
-            return "executed"
-        case "evaluator":
-            return "accepted" if answered else "continue"

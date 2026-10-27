@@ -253,7 +253,7 @@ scratch              计划条数、笔记条数、证据提醒是否出现
 
 ## 10. 实现状态
 
-`agent_runtime.context`：`PromptAssets`（任务启动时装好的冻结资产）、`PromptAssembler`（`__call__(state, instruction)` 与 `describe`）、`RulesCache`、`PromptLibrary`；系统层正文在 `prompts/system.md`；信封在 `guardrails.envelope`（见 [信任 §4.5](../05_security/03_trust_and_injection.md)）。`runtime.build_prompt_assets` / `assembler_from_settings` / `rules_from_settings` 把配置接上。旧实现已接进 planner；`__call__(state, instruction)` 的 `instruction` 参数在目标设计里去掉。
+`agent_runtime.context`：`PromptAssets`（任务启动时装好的冻结资产）、`PromptAssembler`（`__call__(state, instruction)` 与 `describe`）、`RulesCache`、`PromptLibrary`；系统层正文在 `prompts/system.md`；信封在 `guardrails.envelope`（见 [信任 §4.5](../05_security/03_trust_and_injection.md)）。`runtime.build_prompt_assets` / `assembler_from_settings` / `rules_from_settings` 把配置接上。**已迁移**：`__call__(state)` 没有阶段指令，只有一种请求形状。
 
 与上文的差异与细节：
 
@@ -267,7 +267,13 @@ scratch              计划条数、笔记条数、证据提醒是否出现
 - **项目规则**：`RulesCache.load` 先探测、后判断开关：未启用时只报告“检测到文件、未启用”，**连内容都不读**；规则文件解析后必须在工作区内（符号链接指到外面被忽略并附说明）；只读前 `max_chars×4` 字节，超出标 `truncated`；按 `(路径, 修改时间, 大小, 上限)` 缓存，文件一变下次重读。
 - **提示词库**：只接受 `[A-Za-z0-9_]+` 的名字；进程内缓存，`reload()` 清空。
 
-**目标设计与旧实现的差异：** 本文 §2 的分段与角色是 [0006](../12_decisions/0006-pure-agent-loop.md) 之后的目标设计。旧实现把系统层、项目规则、工作区常量与金丝雀拼进同一条 `system` 消息，技能清单在数据层；迁移时把项目规则、工作区常量、技能清单拆成独立的 `user` 信封消息，系统层只留角色、协议、工作法和金丝雀（token 取安装级）。
+**迁移后的状态：** 系统层（`prompts/system.md`）加金丝雀是唯一的 `system` 消息；技能清单、MCP 索引、项目规则、工作区常量、工作区记忆、会话记忆各是独立的 `user` 信封；`memory_role` 与阶段指令已取消，草稿回显（`<scratch>`，第一行重复任务目标）在请求最末尾。
+
+**未做 / 偏差：**
+
+- **金丝雀仍随 (会话, 任务) 派生**（`RuntimeFactory.make_canary`），`security.canary_scope = installation` 没有实现，所以同一工作区的新任务之间第 0 段不共享缓存。
+- 近期新增事实的上限与段预算（§9）、`system.md` 措辞的真实模型验证。
+- MCP 索引（`mcp_index`）已接入：`RuntimeFactory` 用 `mcps.render_index` 生成，只在存在 `deferred` 工具时才有。
 
 记忆的存取与会话压缩已实现，见 [记忆 §11](04_memory.md)：`MemoryFlow.prepare` 把记忆装成资产（`SessionContext.apply_to` 并入真正的资产）。**未做**：任务级的窗口折叠与压缩；环境自检的采集；近期问答里助手交付的信任标注（`messages` 里没有这个信息）；`merge_consecutive_user` 由网关负责，这里不处理；`system.md` 的措辞还没用真实模型验证；规则文件更新的界面提示。
 

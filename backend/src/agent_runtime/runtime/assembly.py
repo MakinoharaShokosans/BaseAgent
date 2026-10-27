@@ -15,10 +15,10 @@ from agent_runtime.context import (
     RulesCache,
     RulesResult,
 )
-from agent_runtime.core import AgentState, PermissionLevel
+from agent_runtime.core import PermissionLevel
 from agent_runtime.core.state import PERMISSION_LEVELS
-from agent_runtime.guardrails import BudgetLimits, LoopLimits, PermissionPolicy
-from agent_runtime.loop.stages import ApprovalHooks
+from agent_runtime.guardrails import LoopLimits, PermissionPolicy
+from agent_runtime.loop import ApprovalHooks
 from agent_runtime.memory import (
     CompactionConfig,
     Extractor,
@@ -32,18 +32,7 @@ from agent_runtime.skills import SkillLimits, SkillRegistry, SkillRoot, skill_ro
 from baseagent_config import Settings
 from tools.builtin import FileLimits
 
-
-def budget_limits_from_settings(settings: Settings) -> BudgetLimits:
-    g = settings.runtime.guardrails
-    return BudgetLimits(
-        max_steps=g.max_steps,
-        max_total_tokens=g.max_total_tokens,
-        max_wall_time_sec=g.max_wall_time_sec,
-        warning_ratio=g.warning_ratio,
-    )
-
-
-#: tool_runner 的审批协议：``loop`` 与 ``approval`` 是同层模块、不能互相导入，由这一层把两者接上
+#: 工具包装层的审批协议：``loop`` 与 ``approval`` 是同层模块、不能互相导入，由这一层把两者接上
 APPROVAL_HOOKS = ApprovalHooks(approval_id=compute_approval_id, check_binding=check_binding)
 
 
@@ -62,29 +51,12 @@ def permission_policy_from_settings(settings: Settings) -> PermissionPolicy:
 
 def loop_limits_from_settings(settings: Settings) -> LoopLimits:
     g = settings.runtime.guardrails
-    loop = settings.runtime.loop
     return LoopLimits(
         consecutive_errors_limit=g.consecutive_errors_limit,
         identical_fingerprint_limit=g.identical_fingerprint_limit,
-        alternation_cycles=loop.alternation_cycles,
-        replan_interval=loop.replan_interval,
+        alternation_cycles=settings.runtime.loop.alternation_cycles,
+        max_consecutive_blocks=g.max_consecutive_blocks,
     )
-
-
-def progress_hint_from_settings(settings: Settings) -> Callable[[AgentState], str]:
-    """附在阶段指令尾部的进度提示。关闭时返回恒空的函数。"""
-    if not settings.runtime.loop.progress_hint:
-        return lambda state: ""
-    g = settings.runtime.guardrails
-
-    def hint(state: AgentState) -> str:
-        used = min(100, round(100 * state.total_tokens / g.max_total_tokens))
-        return (
-            f"[进度] 已执行 {state.step_count}/{g.max_steps} 步，已用 Token {used}%。"
-            "接近上限时，优先把已有成果整理交付，不要开启新的大动作。"
-        )
-
-    return hint
 
 
 def observation_limits_from_settings(settings: Settings) -> ObservationLimits:
@@ -160,6 +132,7 @@ def build_prompt_assets(
     workspace_description: str = "",
     rules: RulesResult | None = None,
     skills: SkillRegistry | None = None,
+    mcp_index: str = "",
     tool_names: Iterable[str] = (),
 ) -> PromptAssets:
     """任务启动时一次装好的资产；记忆与环境自检由调用方用 ``dataclasses.replace`` 补上。"""
@@ -170,6 +143,7 @@ def build_prompt_assets(
         rules=rules.rules if rules else None,
         rules_status=rules.status if rules else "absent",
         skills_manifest=skills.manifest() if skills else "",
+        mcp_index=mcp_index,
         tool_names=tuple(sorted(tool_names)),
     )
 
@@ -194,9 +168,9 @@ def assembler_from_settings(
     fold = fold_policy_from_settings(settings, context_window) if context_window else None
     return PromptAssembler(
         assets,
-        memory_role=settings.context.prompt.memory_role,
         count_tokens=count_tokens,
         fold=fold,
+        goal_echo_chars=settings.context.prompt.goal_echo_chars,
     )
 
 
