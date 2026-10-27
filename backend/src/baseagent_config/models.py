@@ -515,6 +515,7 @@ class WebSearchConfig(_Section):
     host: str = "127.0.0.1"
     port: Port = 8003
     provider: str = "ddgs"
+    ddgs_backends: list[str] = ["yahoo", "bing", "google"]
     max_results: PosInt = 8
     fetch_concurrency: PosInt = 5
     per_host_concurrency: PosInt = 2
@@ -547,7 +548,8 @@ class ResearchConfig(_Section):
     max_rounds: PosInt = 3
     max_sources: PosInt = 5
     max_source_chars: PosInt = 6000
-    max_wall_time_sec: PosInt = 45
+    max_wall_time_sec: PosInt = 60
+    extract_reserve_sec: PosInt = 20
     max_calls_per_task: PosInt = 3
     max_findings: PosInt = 8
     max_answer_chars: PosInt = 500

@@ -287,6 +287,7 @@ class RuntimeFactory:
             extract_prompt=self.library.get("research_extract"),
             tier=cfg.model_tier,
             emit=events.emit,
+            extract_reserve_sec=float(cfg.extract_reserve_sec),
         )
         return DelegateResearchTool(
             runner,

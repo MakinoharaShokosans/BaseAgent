@@ -26,7 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     cfg = loaded.settings.web_search
     provider: SearchProvider
     if cfg.provider == "ddgs":
-        provider = DdgsProvider(timeout_sec=float(cfg.request_timeout_sec))
+        provider = DdgsProvider(
+            timeout_sec=float(cfg.request_timeout_sec), backends=cfg.ddgs_backends
+        )
     elif cfg.provider == "ddg":
         provider = DuckDuckGoProvider(
             user_agent=cfg.user_agent, timeout_sec=float(cfg.request_timeout_sec)

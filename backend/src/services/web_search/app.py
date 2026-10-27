@@ -40,6 +40,21 @@ class QueryRequest(BaseModel):
     task_id: str = Field(min_length=1, max_length=64)
 
 
+class FetchItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=1, max_length=2048)
+    title: str = Field(default="", max_length=500)
+    snippet: str = Field(default="", max_length=2000)
+
+
+class FetchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FetchItem] = Field(min_length=1, max_length=10)
+    task_id: str = Field(min_length=1, max_length=64)
+
+
 @dataclass(frozen=True, slots=True)
 class WebServices:
     config: WebSearchConfig
@@ -168,6 +183,21 @@ def create_app(services: WebServices) -> FastAPI:
             return {"query": body.query, "results": [], "error": f"搜索失败：{type(exc).__name__}"}
         merged = _merge_same_content(list(results))
         return {"query": body.query, "results": merged, "error": None}
+
+    @app.post(f"{PREFIX}/search/fetch")
+    async def fetch(body: FetchRequest) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+        """抓取给定的页面：先 query(fetch=false) 看摘要，再只抓挑中的。地址校验与 query 一致。"""
+        if not _TASK_ID.match(body.task_id):
+            raise HTTPException(
+                422, {"code": "INVALID_TASK_ID", "reason": "task_id 只允许 [A-Za-z0-9_-]{1,64}"}
+            )
+        hits = [SearchHit(i.title, i.url, i.snippet) for i in body.items]
+        try:
+            async with asyncio.timeout(cfg.total_timeout_sec):
+                results = await asyncio.gather(*(fetch_one(h, body.task_id) for h in hits))
+        except TimeoutError as exc:
+            raise HTTPException(504, {"code": "TOTAL_TIMEOUT", "reason": "抓取超过总超时"}) from exc
+        return {"results": _merge_same_content(list(results))}
 
     app.add_middleware(LoopbackGuard)
     return app

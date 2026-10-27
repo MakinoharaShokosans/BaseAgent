@@ -365,37 +365,91 @@ async def test_duckduckgo_challenge_page_is_a_block_not_an_empty_result() -> Non
         await provider.search("python", 5)
 
 
-@pytest.mark.unit
-async def test_ddgs_provider_maps_rows_and_distinguishes_empty_from_blocked(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from ddgs.exceptions import DDGSException
-
-    outcomes: list[Any] = [
-        [
-            {"title": " A  b ", "href": "https://a.example/x", "body": "s  1"},
-            {"title": "bad", "href": "javascript:1", "body": ""},
-        ],
-        DDGSException("No results found."),
-        DDGSException("Timeout"),
-    ]
+def fake_ddgs(monkeypatch: pytest.MonkeyPatch, script: dict[str, Any]) -> list[str]:
+    """按后端名给出结果（列表）或异常；返回被尝试过的后端顺序。"""
+    tried: list[str] = []
 
     class FakeDDGS:
         def __init__(self, **_: Any) -> None: ...
 
-        def text(self, query: str, **_: Any) -> list[dict[str, str]]:
-            outcome = outcomes.pop(0)
+        def text(self, query: str, *, backend: str, **_: Any) -> list[dict[str, str]]:
+            tried.append(backend)
+            outcome = script[backend]
             if isinstance(outcome, Exception):
                 raise outcome
             return outcome
 
     monkeypatch.setattr("ddgs.DDGS", FakeDDGS)
-    provider = DdgsProvider(timeout_sec=5)
-    hits = await provider.search("q", 5)
-    assert hits == [SearchHit("A b", "https://a.example/x", "s 1")]
-    assert await provider.search("q", 5) == []
+    return tried
+
+
+ROWS = [
+    {"title": " A  b ", "href": "https://a.example/x", "body": "s  1"},
+    {"title": "bad", "href": "javascript:1", "body": ""},
+]
+
+
+@pytest.mark.unit
+async def test_ddgs_provider_maps_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    tried = fake_ddgs(monkeypatch, {"yahoo": ROWS})
+    hits = await DdgsProvider(timeout_sec=5, backends=["yahoo"]).search("q", 5)
+    assert hits == [SearchHit("A b", "https://a.example/x", "s 1")] and tried == ["yahoo"]
+
+
+@pytest.mark.unit
+async def test_ddgs_provider_falls_through_empty_and_failing_backends_to_the_first_hit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ddgs.exceptions import DDGSException
+
+    tried = fake_ddgs(
+        monkeypatch,
+        {
+            "yahoo": DDGSException("No results found."),
+            "bing": DDGSException("Timeout"),
+            "google": ROWS,
+        },
+    )
+    provider = DdgsProvider(timeout_sec=5, backends=["yahoo", "bing", "google"])
+    assert [h.url for h in await provider.search("q", 5)] == ["https://a.example/x"]
+    assert tried == ["yahoo", "bing", "google"]
+
+
+@pytest.mark.unit
+async def test_ddgs_provider_stops_at_the_first_backend_with_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tried = fake_ddgs(monkeypatch, {"yahoo": ROWS, "bing": ROWS})
+    await DdgsProvider(timeout_sec=5, backends=["yahoo", "bing"]).search("q", 5)
+    assert tried == ["yahoo"]
+
+
+@pytest.mark.unit
+async def test_ddgs_provider_distinguishes_empty_from_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ddgs.exceptions import DDGSException
+
+    empty = DDGSException("No results found.")
+    fake_ddgs(monkeypatch, {"yahoo": empty, "bing": empty})
+    assert await DdgsProvider(timeout_sec=5, backends=["yahoo", "bing"]).search("q", 5) == []
+    # 全部后端都是错误（不是“没有结果”）：必须作为被拦截上报
+    boom = DDGSException("Timeout")
+    fake_ddgs(monkeypatch, {"yahoo": boom, "bing": boom})
     with pytest.raises(SearchBlocked):
-        await provider.search("q", 5)
+        await DdgsProvider(timeout_sec=5, backends=["yahoo", "bing"]).search("q", 5)
+
+
+@pytest.mark.unit
+async def test_ddgs_provider_gives_up_the_chain_when_the_deadline_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ddgs.exceptions import DDGSException
+
+    tried = fake_ddgs(monkeypatch, {"a": DDGSException("Timeout"), "b": ROWS})
+    provider = DdgsProvider(timeout_sec=5, backends=["a", "b"], deadline_sec=0)
+    assert await provider.search("q", 5) == []  # 时限已到，不再试 b
+    assert tried == ["a"]
 
 
 # ==============================================================================
@@ -488,6 +542,32 @@ async def test_internal_links_from_the_search_provider_are_never_fetched(tmp_pat
         data = (await client.post("/api/v1/search/query", json=body())).json()
     assert [r["status"] for r in data["results"]] == ["ERROR"] * 3
     assert all("不被允许" in r["error"] for r in data["results"])
+
+
+@pytest.mark.integration
+async def test_fetch_endpoint_fetches_only_the_given_pages_with_the_same_address_checks(
+    tmp_path: Path,
+) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return html("<h1>Page</h1><p>body text</p>")
+
+    items = [
+        {"url": "https://example.com/a", "title": "A", "snippet": "sa"},
+        {"url": "http://169.254.169.254/latest/meta-data/"},
+    ]
+    async with make_client(tmp_path, [], handler) as client:
+        response = await client.post("/api/v1/search/fetch", json={"items": items, "task_id": "t1"})
+        bad = await client.post("/api/v1/search/fetch", json={"items": [], "task_id": "t1"})
+        evil = await client.post(
+            "/api/v1/search/fetch", json={"items": items[:1], "task_id": "../x"}
+        )
+    ok, blocked = response.json()["results"]
+    assert ok["status"] == "OK" and ok["title"] == "A" and "# Page" in ok["preview"]
+    assert blocked["status"] == "ERROR" and "不被允许" in blocked["error"]
+    assert len(seen) == 1 and bad.status_code == 400 and evil.status_code == 422
 
 
 @pytest.mark.unit

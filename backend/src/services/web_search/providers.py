@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, Protocol
@@ -108,15 +110,27 @@ class DuckDuckGoProvider:
 
 
 class DdgsProvider:
-    """``ddgs`` 库：多引擎（Bing、Google、Yahoo 等）轮换，一个被拦还有下一个。"""
+    """``ddgs`` 库，按顺序依次试各个后端，取第一个有结果的。
+
+    ``auto`` 每次随机挑后端，实测约三分之一的调用返回空；单个后端也各有 25%–60% 的失败率，
+    所以不押某一个：依次尝试，一个返回空或被拦就换下一个。
+    """
 
     name = "ddgs"
     needs_key = False
     may_return_private_links = True
 
-    def __init__(self, *, timeout_sec: float, backend: str = "auto") -> None:
+    def __init__(
+        self,
+        *,
+        timeout_sec: float,
+        backends: Sequence[str] = ("yahoo", "bing", "google"),
+        deadline_sec: float | None = None,
+    ) -> None:
         self._timeout = int(timeout_sec)
-        self._backend = backend
+        self._backends = tuple(backends) or ("auto",)
+        # 整条链的总时限：前面的后端慢，后面的就不试了，免得撞上 sidecar 的总超时
+        self._deadline = deadline_sec if deadline_sec is not None else timeout_sec * 1.5
 
     async def search(self, query: str, limit: int) -> list[SearchHit]:
         return await asyncio.to_thread(self._search, query, limit)
@@ -125,20 +139,34 @@ class DdgsProvider:
         from ddgs import DDGS  # 仅此提供者需要，延迟导入
         from ddgs.exceptions import DDGSException
 
-        try:
-            rows: list[dict[str, Any]] = DDGS(timeout=self._timeout).text(
-                query, max_results=limit, backend=self._backend
-            )
-        except DDGSException as exc:
-            if "No results found" in str(exc):
-                return []
-            raise SearchBlocked(f"所有搜索后端都失败：{exc}") from exc
-        return [
-            SearchHit(
-                re.sub(r"\s+", " ", str(row.get("title", ""))).strip(),
-                str(row.get("href", "")),
-                re.sub(r"\s+", " ", str(row.get("body", ""))).strip(),
-            )
-            for row in rows
-            if str(row.get("href", "")).startswith(("http://", "https://"))
-        ][:limit]
+        started = time.monotonic()
+        failures: list[str] = []
+        for backend in self._backends:
+            if failures and time.monotonic() - started >= self._deadline:
+                break
+            try:
+                rows: list[dict[str, Any]] = DDGS(timeout=self._timeout).text(
+                    query, max_results=limit, backend=backend
+                )
+            except DDGSException as exc:
+                if "No results found" not in str(exc):
+                    failures.append(f"{backend}：{exc}")
+                continue
+            hits = _rows_to_hits(rows, limit)
+            if hits:
+                return hits
+        if failures and len(failures) == len(self._backends):
+            raise SearchBlocked("所有搜索后端都失败：" + "；".join(failures))
+        return []
+
+
+def _rows_to_hits(rows: Sequence[dict[str, Any]], limit: int) -> list[SearchHit]:
+    return [
+        SearchHit(
+            re.sub(r"\s+", " ", str(row.get("title", ""))).strip(),
+            str(row.get("href", "")),
+            re.sub(r"\s+", " ", str(row.get("body", ""))).strip(),
+        )
+        for row in rows
+        if str(row.get("href", "")).startswith(("http://", "https://"))
+    ][:limit]

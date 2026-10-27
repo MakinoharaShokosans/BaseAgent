@@ -197,4 +197,22 @@ describe('reduceTaskEvent', () => {
     expect(blocked && blocked.kind === 'agent' ? blocked.text : '').toContain('full_permissions');
     expect(agents.some((i) => i.kind === 'agent' && i.text.includes('1 条经过验证'))).toBe(true);
   });
+
+  it('shows why a research round came back empty instead of just "0 new sources"', () => {
+    seq = 0;
+    const state = replay([
+      ev('research.round', {
+        round: 1,
+        fetched: 0,
+        evidence: 0,
+        errors: ['搜索被拦截：限流', '检索请求失败（TimeoutError）', '第三条不显示'],
+      }),
+      ev('research.round', { round: 2, fetched: 2, evidence: 2, errors: [] }),
+    ]);
+    const texts = state.items.flatMap((i) => (i.kind === 'agent' ? [i.text] : []));
+    expect(texts[0]).toBe(
+      '第 1 轮检索，取到 0 个新来源（累计 0），检索出错：搜索被拦截：限流；检索请求失败（TimeoutError）',
+    );
+    expect(texts[1]).toBe('第 2 轮检索，取到 2 个新来源（累计 2）');
+  });
 });

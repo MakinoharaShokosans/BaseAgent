@@ -126,7 +126,7 @@ ResearchReport(
 | 事件 | 内容 |
 |---|---|
 | `research.started` | 主题、问题数、来源上限 |
-| `research.round` | 轮次、检索词、抓取数、累计证据数 |
+| `research.round` | 轮次、检索词、抓到正文的页数、累计证据数、本轮检索错误 |
 | `research.finished` | 轮数、来源数、结论数、版本事实数、耗时 |
 
 ## 8. 已发现的问题
@@ -166,6 +166,9 @@ ResearchReport(
 
 代码在 `agent_runtime.subagents.research`（`models`、`render`、`runner`、`tool`、`search_client`）。`delegate_research` 在 `research.enabled` 且有 web_search 客户端时才注册，主工具表里没有 `web_search`。
 
+- **检索与抓取分两步，并限流**：每个检索词先只取搜索摘要（`/search/query`，`fetch=false`），各词的结果轮流去重后，只对挑中的页面调用 `/search/fetch` 抓取，并留几条候选替补抓不到的页面（403、纯 JS）。检索最多 2 路并发；没结果或出错时退避 1 秒后重试一次。已用过的检索词与各自的命中数告诉规划器，它不会重复同一个词。
+- **搜索错误可见**：sidecar 报告的错误（被反爬拦截、全部后端失败、服务不可用）原样进入 `research.round.errors` 与报告警告，与“搜到 0 条”区分。
+- **为提炼预留时间**：`research.extract_reserve_sec`（默认 20）。检索阶段只用 `max_wall_time_sec` 减去它的时间，不够就停止检索，用已取得的来源提炼，不再出现“抓到了来源却因时间用尽被整体丢弃”。
 - **Token 预算与账本已取消**（[0006](../12_decisions/0006-pure-agent-loop.md)）：`research.max_total_tokens` 与 `BudgetLedger` 已删除；保留 `max_wall_time_sec`（单次运行的硬超时，即工具超时）和 `max_calls_per_task`（次数上限，不是预算）。用量由 `ChildUsage` 统计（`subagents/usage.py`），只作为工具结果 `meta` 里的统计值。
 - **§8 第 2 项已修**：每条证据放进 `<web_page url=… trust="untrusted">` 信封，正文里的闭合标签被破坏（`web_page` 已加入信封标签集合，这是写测试时才发现漏掉的）。
 - **第 3 项已修**：来源数取 `min(请求值, 配置值)`。**第 4 项已修**：工具恒标 `untrusted`，信封由编排层统一加；报告渲染在这种情况下不再自带外层信封（信封套信封时内层标签会被外层破坏成 `&lt;`）。**第 5 项已修**：渲染统一破坏信封标签。**第 6 项**：见 [web_search §10](../04_tools/06_web_search_service.md)。

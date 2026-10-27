@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -27,6 +28,7 @@ from agent_runtime.subagents.research.models import (
     RawFinding,
     RawVersionFact,
 )
+from agent_runtime.subagents.research.search_client import SearchOutcome
 from agent_runtime.subagents.usage import ChildUsage
 from stage_support import degraded, parsed
 
@@ -279,14 +281,29 @@ class Gateway:
 
 
 class Search:
-    def __init__(self, pages: dict[str, list[Evidence]], fail: set[str] | None = None) -> None:
-        self.pages, self.fail, self.calls = pages, fail or set(), []
+    """两步的搜索客户端：``search`` 只给摘要，``fetch`` 才给正文（取自 ``pages``）。"""
 
-    async def search(self, query: str, limit: int, task_id: str) -> list[Evidence]:
+    def __init__(
+        self,
+        pages: dict[str, list[Evidence]],
+        fail: set[str] | None = None,
+        errors: dict[str, str] | None = None,
+    ) -> None:
+        self.pages, self.fail, self.errors = pages, fail or set(), errors or {}
+        self.calls: list[str] = []
+        self.fetched: list[str] = []
+        self.full = {e.url: e for group in pages.values() for e in group}
+
+    async def search(self, query: str, limit: int, task_id: str) -> SearchOutcome:
         self.calls.append(query)
         if query in self.fail:
             raise RuntimeError("search down")
-        return self.pages.get(query, [])
+        hits = [Evidence(e.url, e.title, "摘要", "SNIPPET") for e in self.pages.get(query, [])]
+        return SearchOutcome(hits, "" if hits else self.errors.get(query, ""))
+
+    async def fetch(self, hits: Sequence[Evidence], task_id: str) -> list[Evidence]:
+        self.fetched += [h.url for h in hits]
+        return [self.full[h.url] for h in hits]
 
 
 def page(url: str, text: str = "正文", status: str = "OK") -> Evidence:
@@ -301,13 +318,21 @@ def runner(
     search: Search,
     events: list | None = None,
     limits: ResearchLimits = RUN_LIMITS,
+    **kw: Any,
 ) -> ResearchRunner:  # type: ignore[type-arg]
     async def emit(name: str, data: Any) -> None:
         if events is not None:
             events.append((name, dict(data)))
 
     return ResearchRunner(
-        gateway, search, limits, plan_prompt="plan", extract_prompt="extract", emit=emit
+        gateway,
+        search,
+        limits,
+        plan_prompt="plan",
+        extract_prompt="extract",
+        emit=emit,
+        retry_delay_sec=0,
+        **kw,
     )
 
 
@@ -401,7 +426,99 @@ async def test_at_most_three_queries_per_round_and_blank_ones_are_ignored() -> N
     gateway = Gateway([QueryPlan(queries=["1", "2", "3", "4", "  ", "1"])], GOOD)
     search = Search({})
     await runner(gateway, search).run(REQ, ChildUsage(60))
-    assert search.calls == ["1", "2", "3"]
+    assert sorted(search.calls) == ["1", "1", "2", "2", "3", "3"]  # 没结果的词各重试一次
+
+
+@pytest.mark.unit
+async def test_only_the_chosen_pages_are_fetched_round_robin_across_the_queries() -> None:
+    """先看摘要再抓取：各检索词的第一名先入选，没入选的页面根本不抓。"""
+    pages = {
+        "a": [page(f"https://docs.example/a{i}") for i in range(5)],
+        "b": [page(f"https://docs.example/b{i}") for i in range(5)],
+    }
+    search = Search(pages)
+    gateway = Gateway([QueryPlan(queries=["a", "b"])], GOOD)
+    await runner(gateway, search).run(REQ, ChildUsage(60))  # RUN_LIMITS.max_sources == 3
+    assert search.fetched == [
+        "https://docs.example/a0",
+        "https://docs.example/b0",
+        "https://docs.example/a1",
+    ]
+
+
+@pytest.mark.unit
+async def test_a_flaky_search_is_retried_once_before_a_round_is_spent() -> None:
+    class Flaky(Search):
+        async def search(self, query: str, limit: int, task_id: str) -> SearchOutcome:
+            self.calls.append(query)
+            if self.calls.count(query) == 1:
+                return SearchOutcome(error="搜索被拦截：限流")
+            return SearchOutcome([Evidence("https://docs.example/a", "T", "摘要", "SNIPPET")])
+
+    search = Flaky({"q": [page("https://docs.example/a")]})
+    report = await runner(Gateway([QueryPlan(queries=["q"])], GOOD), search).run(
+        REQ, ChildUsage(60)
+    )
+    assert search.calls == ["q", "q"] and report.rounds_used == 1 and report.findings
+
+
+@pytest.mark.unit
+async def test_search_errors_are_reported_not_mistaken_for_no_results() -> None:
+    events: list = []  # type: ignore[type-arg]
+    search = Search({}, errors={"q": "搜索被拦截：所有搜索后端都失败"})
+    report = await runner(Gateway([QueryPlan(queries=["q"])], GOOD), search, events).run(
+        REQ, ChildUsage(60)
+    )
+    round_event = next(data for name, data in events if name == "research.round")
+    assert round_event["errors"] == ["搜索被拦截：所有搜索后端都失败"]
+    assert any("检索失败：搜索被拦截" in w for w in report.warnings)
+
+
+@pytest.mark.unit
+async def test_the_planner_is_told_what_came_back_and_never_repeats_a_query() -> None:
+    gateway = Gateway([QueryPlan(queries=["a"]), QueryPlan(queries=["a", "b"])], GOOD)
+    search = Search({"b": [page("https://docs.example/b")]}, errors={"a": "被拦截"})
+    await runner(gateway, search).run(REQ, ChildUsage(60))
+    second = [r for r in gateway.requests if r.purpose == "research_plan"][1]
+    assert "「a」→ 0 条（被拦截）" in second.messages[1].content
+    assert sorted(set(search.calls)) == ["a", "b"]  # 第二轮的 "a" 被去掉，只搜了 "b"
+    assert search.calls.count("a") == 2  # 第一轮的那次加一次重试
+
+
+@pytest.mark.unit
+async def test_time_is_reserved_for_extraction_instead_of_discarding_the_sources() -> None:
+    """检索把时间用到只剩预留的那一段后停止，来源照常提炼，并如实写明原因。"""
+    now = [0.0]
+
+    class Slow(Search):
+        async def fetch(self, hits: Sequence[Evidence], task_id: str) -> list[Evidence]:
+            now[0] += 25  # 抓取花掉 25 秒
+            return await super().fetch(hits, task_id)
+
+    search = Slow({"q": [page("https://docs.example/a")]})
+    gateway = Gateway([QueryPlan(queries=["q"]), QueryPlan(queries=["r"])], GOOD)
+    usage = ChildUsage(40, clock=lambda: now[0])
+    report = await runner(gateway, search, extract_reserve_sec=20).run(REQ, usage)
+    assert search.calls == ["q"]  # 剩 15 秒不足预留的 20 秒，没有开第二轮
+    assert report.findings and not report.empty
+    assert any("预留了 20 秒" in w for w in report.warnings)
+
+
+@pytest.mark.unit
+async def test_a_round_that_overruns_the_search_window_is_dropped_but_earlier_sources_survive() -> (
+    None
+):
+    class Hang(Search):
+        async def search(self, query: str, limit: int, task_id: str) -> SearchOutcome:
+            if query == "slow":
+                await asyncio.sleep(30)
+            return await super().search(query, limit, task_id)
+
+    search = Hang({"fast": [page("https://docs.example/a")]})
+    gateway = Gateway([QueryPlan(queries=["fast"]), QueryPlan(queries=["slow"])], GOOD)
+    report = await runner(gateway, search, extract_reserve_sec=0.3).run(REQ, ChildUsage(0.8))
+    assert report.findings
+    assert any("本轮检索超时" in w for w in report.warnings)
 
 
 @pytest.mark.unit

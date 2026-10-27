@@ -124,7 +124,7 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 | 事件 | 载荷 |
 |---|---|
 | `research.started` | `topic`、`questions`、`max_sources` |
-| `research.round` | `round`、`queries[]`、`fetched`、`evidence` |
+| `research.round` | `round`、`queries[]`、`fetched`（抓到正文的页数）、`evidence`（累计有正文的来源数）、`errors[]`（本轮检索失败的原因，没有则为空；只含状态，不含页面正文） |
 | `research.finished` | `rounds`、`sources`、`findings`、`version_facts`、`tokens`、`elapsed_sec` |
 | `subagent.started` | `role`、`depth`、`assigned_tools[]` |
 | `subagent.step` | `step`、`tools[]` |

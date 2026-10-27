@@ -276,7 +276,9 @@ function describeAgent(event: ServerEvent): { name: string; text: string; tone: 
       return {
         name,
         tone: 'info',
-        text: `第 ${num(event['round'])} 轮检索，取到 ${num(event['fetched'])} 个新来源（累计 ${num(event['evidence'])}）`,
+        text:
+          `第 ${num(event['round'])} 轮检索，取到 ${num(event['fetched'])} 个新来源（累计 ${num(event['evidence'])}）` +
+          roundErrors(event),
       };
     case 'research.finished':
       return {
@@ -348,4 +350,14 @@ export function runFromSnapshot(task: {
     totalTokens: task.total_tokens,
     terminationReason: task.termination_reason,
   };
+}
+
+/** 本轮检索的失败原因（被拦截、服务不可用等），没有则为空串；让“取到 0 个”和“搜索坏了”看得出区别 */
+function roundErrors(event: Record<string, unknown>): string {
+  const errors = event['errors'];
+  if (!Array.isArray(errors) || !errors.length) return '';
+  return `，检索出错：${errors
+    .filter((e) => typeof e === 'string')
+    .slice(0, 2)
+    .join('；')}`;
 }
