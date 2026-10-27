@@ -45,7 +45,7 @@ class AgentTool(ABC):
 
 `idempotent: bool` 声明"重复执行是否安全且结果等价"。默认 `False`，需要工具作者显式声明为 `True`。
 
-用途：[检查点](../02_runtime/03_checkpoint_and_resume.md) 的崩溃恢复。若任务在 `tool_runner` 派发期间中断，恢复时对 `idempotent` 工具可直接重试，其余工具改为合成"执行结果未知"的观察值，交给模型核验。
+用途：[检查点](../02_runtime/03_checkpoint_and_resume.md) 的崩溃恢复。若任务在工具派发期间中断，恢复时对 `idempotent` 工具可直接重试，其余工具改为合成"执行结果未知"的观察值，交给模型核验。
 
 | 工具 | idempotent | 说明 |
 |---|---|---|
@@ -106,7 +106,7 @@ class ToolResult(BaseModel):
 
 主工具表即使被误加入 `web_search`，也会在构造期抛 `ToolExecutionError`。"主 Agent 不接触原始外部内容"因此是代码强制的不变量。
 
-另提供：`to_openai_tools()`（导出 function 定义）和 `get_capabilities_summary()`（给 planner 的能力清单，MCP 工具会带标记）。
+另提供：`to_openai_tools()`（导出 function 定义）和 `get_capabilities_summary()`（给模型的能力清单，MCP 工具会带标记）。
 
 ## 6. 信任级的解析
 
@@ -138,7 +138,7 @@ async def dispatch(calls: Sequence[tuple[str, str, Mapping]]) -> list[Dispatched
 - 超时、未预期异常都降级为失败观察值，附 `duration_ms`。
 - 未知工具名返回失败观察值，信任级取 `untrusted`。副作用不可静态推理，所以保守处理。
 
-派发器不做权限判定、不做预算记账、不做观察值裁剪。这些属于 `tool_runner`，见 [主循环 §5](../02_runtime/02_main_loop.md)。
+派发器不做权限判定、不做观察值裁剪。这些属于工具包装层与后处理，见 [工具执行](../02_runtime/06_tool_execution.md)。
 
 ## 8. Schema 导出
 
@@ -203,7 +203,7 @@ async def dispatch(calls: Sequence[tuple[str, str, Mapping]]) -> list[Dispatched
 2. 特权工具表中不存在 `untrusted` 工具，除非逐名授权。
 3. 派发结果的顺序与调用顺序一致，数量相等。
 4. 每个调用都有硬超时。
-5. 工具实现不做权限判定。越权拦截只发生在 `tool_runner`，避免权限逻辑散落。
+5. 工具实现不做权限判定。越权拦截只发生在工具包装层，避免权限逻辑散落。
 
 ## 13. 测试要点
 
@@ -215,7 +215,7 @@ async def dispatch(calls: Sequence[tuple[str, str, Mapping]]) -> list[Dispatched
 
 ## 13.1 实现状态
 
-协议（`AgentTool`、`ToolResult`）在 `agent_runtime.core`，注册表与派发器在 `tools.core`，行为与本文一致（注册表构造期校验、按名排序导出、并发派发且顺序一致、独立硬超时、失败降级、信任级解析），见 [executor 与 tool_runner §3](../02_runtime/06_executor_tool_runner.md)。`ToolResult.failed` 是连续错误计数的依据（`ok` 为假或退出码非零；没有再回退到关键字启发式，因为 `ok` 总是有值）。内置工具与 sidecar 客户端已实现，见 [内置工具 §11](02_builtin_tools.md)：`build_builtin_tools` 缺依赖则不注册（无 shell 绑定就没有 `bash`，无技能目录就没有 `load_skill`），`read_artifact` 与两个文件工具始终在；同配置两次装配导出的 Schema 逐字节相同。`SidecarClient` 在 `tools.core`：延迟创建并共享连接池，`aclose()` 可重复调用且关闭后可再用，网络错误、超时、非预期状态码、非 JSON 对象一律是 `DependencyUnavailableError`；它还允许调用方声明额外接受的状态码（`bash` 用它接收 403 与 422），这样策略拒绝的原因不会丢。
+协议（`AgentTool`、`ToolResult`）在 `agent_runtime.core`，注册表与派发器在 `tools.core`，行为与本文一致（注册表构造期校验、按名排序导出、并发派发且顺序一致、独立硬超时、失败降级、信任级解析），见 [工具执行 §5](../02_runtime/06_tool_execution.md)。`ToolResult.failed` 是连续错误计数的依据（`ok` 为假或退出码非零；没有再回退到关键字启发式，因为 `ok` 总是有值）。内置工具与 sidecar 客户端已实现，见 [内置工具 §11](02_builtin_tools.md)：`build_builtin_tools` 缺依赖则不注册（无 shell 绑定就没有 `bash`，无技能目录就没有 `load_skill`），`read_artifact` 与两个文件工具始终在；同配置两次装配导出的 Schema 逐字节相同。`SidecarClient` 在 `tools.core`：延迟创建并共享连接池，`aclose()` 可重复调用且关闭后可再用，网络错误、超时、非预期状态码、非 JSON 对象一律是 `DependencyUnavailableError`；它还允许调用方声明额外接受的状态码（`bash` 用它接收 403 与 422），这样策略拒绝的原因不会丢。
 **未做**：参数 Schema 校验、`edit_file`、`list_dir`、`grep`。
 
 ## 14. 待定

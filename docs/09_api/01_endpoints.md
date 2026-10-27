@@ -88,7 +88,7 @@ PUT /settings
 { "system_prompt": "……" }
 ```
 
-`system_prompt` 替换内置的 `prompts/system.md` 作为每个任务的系统提示词段；空白字符串视同 `null`。只影响主 Agent 的系统提示词，安全相关的阶段指令、工具说明、记忆渲染不受影响。
+`system_prompt` 替换内置的 `prompts/system.md` 作为每个任务的系统提示词段；空白字符串视同 `null`。只影响主 Agent 的系统提示词，安全相关的指令、工具说明、记忆渲染不受影响。
 
 ## 3. 任务
 
@@ -127,7 +127,7 @@ permission_level,
 approval_request: ApprovalRequestOut | null,
 milestones[], current_milestone_idx,
 step_count, total_tokens, consecutive_errors,
-should_terminate, termination_reason,
+should_terminate, termination_reason,        # 旧实现；目标设计：plan[]、turns、total_tokens（统计）、termination_reason，见事件契约 §4.1
 created_at, started_at, finished_at,
 artifact_count
 ```

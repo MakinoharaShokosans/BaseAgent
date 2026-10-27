@@ -34,8 +34,8 @@ class Message:
 `assistant` 消息带 `tool_calls` 时，其后必须紧跟与每个 `ToolCall.id` 一一对应的 `tool` 消息，数量相等、不缺不多。否则模型端点会返回 400。
 
 - 无论工具被批准、被拒绝、被循环检测拦截还是执行失败，都必须生成配对的 `tool` 消息。
-- 循环在每次提交检查点前调用 `assert_atomic_pairs(messages)`，违反即视为实现缺陷并终止任务，不写入检查点。
-- 例外：最后一条带 `tool_calls` 的 `assistant` 允许暂无配对（其工具尚未执行），当且仅当任务处于"等待审批"（`pending_approval` 非空），或 `phase == "tool_runner"`（executor 刚提交、工具还没跑）。校验函数据此放宽最后一组。
+- 检查点提交前调用 `assert_atomic_pairs(messages)`，违反即视为实现缺陷，不写入检查点。
+- 例外：**最后一组**允许暂无配对（模型回复已提交、工具尚未完成，即回合进行中；或任务挂起在审批上）。续跑时按 [主循环 §7](02_main_loop.md) 补齐。
 
 ## 2. AgentState 字段
 
@@ -45,41 +45,35 @@ class Message:
 |---|---|---|---|
 | 归属 | `workspace_id` `workspace_path` `session_id` | 全生命周期不变 | 初始化 |
 | 任务 | `task_id` `task_goal` | 同上 | 初始化 |
-| 规划 | `milestones` `current_milestone_idx` | 里程碑列表与当前指针 | planner；evaluator 改状态 |
-| 上下文 | `messages` | 追加式对话 | planner / executor / tool_runner / budget_guard |
-| 记忆 | `rolling_summary` `confirmed_facts` `failed_attempts` | 跨轮沉淀 | evaluator |
-| 产物 | `artifacts` | `artifact_id -> 磁盘路径` | executor / tool_runner |
-| 预算 | `step_count` `total_tokens` | 物理计量 | executor 加步数；各阶段加 Token |
-| 防御 | `consecutive_errors` `fingerprint_history` | 瞬态护栏计数 | tool_runner |
+| 对话 | `messages` | 追加式 transcript | 循环 |
+| 草稿 | `plan` `facts` `failed_attempts` | 任务内临时记忆，见 [计划与草稿](05_plan_and_scratch.md) | `update_plan` / `note` 工具 |
+| 产物 | `artifacts` | `artifact_id -> 磁盘路径` | 工具后处理 |
+| 验证 | `verification` | `none`/`unchecked`/`failed`/`passed`：最近一次修改文件之后命令的验证情况，来自工具结果而不是模型自述 | 工具后处理 |
+| 防御 | `consecutive_errors` `fingerprint_history` `consecutive_blocks` | 瞬态护栏计数 | 工具包装层 |
 | 安全 | `permission_level` `canary_token` | 任务基线权限与金丝雀 | 初始化 |
-| 终止 | `should_terminate` `termination_reason` | 硬终止信号 | budget_guard / evaluator / 任一阶段在 LLM 不可用时 |
-| **控制（新增）** | `phase` | 下一个要执行的阶段，检查点提交时写入 | 主循环 |
-| **控制（新增）** | `pending_approval` | 待审批请求，`None` 表示未挂起 | tool_runner 抛出，主循环写入 |
-| **控制（新增）** | `approval_decision` | 已到达、尚未被消费的审批决策 | 续跑入口写入，tool_runner 消费后清空 |
-| **控制（新增）** | `dispatch_started` | 本批已开始派发的 `tool_call` id 列表，派发前提交，批次完成后清空，用于崩溃后识别"可能已部分执行"，见 [检查点](03_checkpoint_and_resume.md) §5 | tool_runner |
-| **控制（新增）** | `replan_needed` `steps_since_plan` | 工具批次后是否回 planner；自上次规划以来的批次数（schema v2） | tool_runner 置位；planner 清零 |
-| **控制（新增）** | `rejections` | 验收累计打回次数（原先从消息前缀数，现为显式字段；v1→v2 迁移时按前缀补数） | evaluator |
-| **控制（新增）** | `planner_degraded` | planner 连续降级次数，超过上限终止任务 | planner |
-| **控制（新增）** | `verification` | `none`/`unchecked`/`failed`/`passed`：最近一次修改文件之后命令的验证情况，来自工具结果而不是模型自述 | tool_runner |
-| **控制（新增）** | `schema_version` | 状态序列化版本（当前 2） | 序列化层 |
+| 控制 | `pending_approval` | 待审批请求，`None` 表示未挂起 | Supervisor（捕获 `ApprovalRequired` 后写入） |
+| 控制 | `approval_decision` | 已到达、尚未被消费的审批决策 | 续跑入口写入，工具包装层消费后清空 |
+| 控制 | `schema_version` | 状态序列化版本（目标 3） | 序列化层 |
 
-两个设计取舍：
+状态里**没有**：`phase`（没有阶段）、里程碑、步数与 Token 计数（没有预算）、终止标志（停止原因是 `run` 的出口，由 Supervisor 记录）、重规划与打回计数、派发前标记（尾部未配对调用即其信号）、会话继承来的摘要与记忆（只在提示词资产里，任务内只读）。
 
-- **挂钟时间不入状态。** 它是 `PhysicalBudgetGuard` 实例的属性，进入状态会让回放时间不可复现。恢复后挂钟计时从恢复时刻重新开始，这是刻意的：否则进程重启本身就会耗尽时间预算。
-- **`phase` 进入状态。** 旧版由 LangGraph 记录"下一个节点"，本版没有这层，必须自己存。放进状态而不是检查点表的独立列，是为了让状态本身足以说明"我停在哪"，便于测试和回放。
+设计取舍：
+
+- **用量与挂钟时间不入状态。** 没有预算，就没有需要持久化的额度计数；用量由网关计量，进入事件与轨迹，Recorder 汇总展示。
+- **继承记忆不入状态。** 会话摘要、历史事实与失败尝试在任务启动时装进冻结的提示词资产（[提示词装配](../03_context/03_prompt_assembly.md)），任务内的笔记另存于 `facts` / `failed_attempts`，两者互不覆盖。
 
 ## 3. 更新语义
 
-阶段函数返回**增量字典**，由 `apply_update(state, update)` 统一应用：
+状态更新用**增量字典**表达，由 `apply_update(state, update)` 统一应用：
 
 | 字段类型 | 语义 |
 |---|---|
 | `messages` | **追加**。增量里的消息按顺序接在末尾 |
-| 其余列表与字典（`milestones`、`artifacts`、`fingerprint_history`、`confirmed_facts` 等） | **整体替换**。阶段需要返回完整的新值 |
+| 其余列表与字典（`plan`、`facts`、`artifacts`、`fingerprint_history` 等） | **整体替换**。写入方需要给出完整的新值 |
 | 标量 | 覆盖 |
 | 未出现在增量里的字段 | 保持不变 |
 
-`apply_update` 是纯函数，返回新状态对象，不原地修改。这让阶段函数可以放心读取传入的状态，而不用担心另一个写入者在期间改动它。
+`apply_update` 是纯函数，返回新状态对象，不原地修改。这让工具后处理等写入方可以放心读取传入的状态，而不用担心另一个写入者在期间改动它。
 
 > 旧版 `add_messages` 还支持按 `id` 替换或删除消息。新版**不支持**：`Message` 没有 `id`，`state.messages` 只追加，压缩与折叠只发生在装配提示词时，不改写状态里的消息。（待核对项已按此定案；若阶段 5 的折叠实现发现必须改写，再回头扩展。）
 
@@ -87,21 +81,19 @@ class Message:
 
 - `AgentState` 是 `frozen` 的 dataclass，不是 TypedDict；序列类字段全是元组，`artifacts` 是字典且约定不原地修改。
 - 初始化后不可更新的字段：`workspace_id`、`workspace_path`、`session_id`、`task_id`、`task_goal`、`permission_level`、`canary_token`、`schema_version`。更新它们直接报 `InvalidUpdateError`。
-- `apply_update` 全有或全无：任一字段不合法则整份增量不生效；增量里的容器会被拷贝，之后对原对象的修改渗不进状态。未知字段、类型错误、负数计数器、非法阶段、非 `Message` 的消息都会被拒绝。
+- `apply_update` 全有或全无：任一字段不合法则整份增量不生效；增量里的容器会被拷贝，之后对原对象的修改渗不进状态。未知字段、类型错误、负数计数器、非 `Message` 的消息都会被拒绝。
 - `Message` 与 `ToolCall` 在构造时就校验角色约束（只有助手能带 `tool_calls` 与思考字段，只有 tool 消息带 `tool_call_id` 与 `name`），`args` 与 `reasoning_state` 深拷贝。
-- `check_invariants(state)` 由循环在提交检查点前调用：原子对（`pending_approval` 非空时放宽最后一组）、`current_milestone_idx` 不超过里程碑数、`dispatch_started` 只含最近一次工具调用的 id。它**不**在 `apply_update` 里调用，因为一个阶段内部可以暂时处于未配对状态。
-- 终止哨兵是字符串 `"done"`，`phase` 的合法值是五个阶段名加 `"done"`。
+- `check_invariants(state)` 由 Recorder 在提交检查点前调用：原子对（最后一组放宽）、`plan` 条数与 `id` 唯一、笔记条数与长度上限。它**不**在 `apply_update` 里调用，因为一个回合内部可以暂时处于未配对状态。
 
-## 4. 里程碑与失败尝试
+## 4. 计划条目与失败尝试
 
-`Milestone` 与 `FailedAttempt` 仍为 pydantic 模型，是全工程唯一定义，`memory/` 等模块复用而不自持第二份。
+`PlanItem` 与 `FailedAttempt` 仍为 pydantic 模型，是全工程唯一定义，`memory/` 等模块复用而不自持第二份。
 
 ```python
-class Milestone(BaseModel):
+class PlanItem(BaseModel):
     id: int
     title: str
-    description: str = ""
-    status: Literal["pending", "in_progress", "completed", "failed"] = "pending"
+    status: Literal["pending", "in_progress", "completed"] = "pending"
 
 class FailedAttempt(BaseModel):
     action: str
@@ -114,9 +106,9 @@ class FailedAttempt(BaseModel):
 检查点里的状态是一份 JSON，由 `state_codec` 负责编解码，取代 `JsonPlusSerializer` 的 msgpack 与模块白名单。
 
 - `Message` 与 `ToolCall` 手写 `to_dict` / `from_dict`，字段显式，不使用 `pickle` 或按类型名反射构造。`to_dict` 只写非默认字段，字段顺序固定；`reasoning_state` 不排序键，编码、解码、再编码字节相同。
-- `Milestone`、`FailedAttempt`、`PendingApproval`、`ApprovalDecision` 用 pydantic 的 `model_dump(mode="json")` 与严格 JSON 校验（JSON 数组可进元组字段，但 `"1"` 不会被悄悄当成整数）。
+- `PlanItem`、`FailedAttempt`、`PendingApproval`、`ApprovalDecision` 用 pydantic 的 `model_dump(mode="json")` 与严格 JSON 校验（JSON 数组可进元组字段，但 `"1"` 不会被悄悄当成整数）。
 - 解码是**严格**的：未知 `role`、缺必需字段、未知字段、类型不符、`schema_version` 缺失或高于当前代码版本都直接报 `StateDecodeError`，不做猜测性修复。消息里可选字段（`reasoning` 等）缺失视为默认值，所以旧检查点仍可加载。解码只做结构校验，不检查原子对：该不变量由循环在写入前断言。
-- `schema_version` 低于当前版本时，通过按版本注册的迁移函数逐级升级。第一版为 `1`，暂无迁移。
+- `schema_version` 低于当前版本时，通过按版本注册的迁移函数逐级升级。v2 → v3：已结束任务的旧状态只读保留（丢弃阶段、里程碑、预算计数与重规划类字段）；进行中或挂起的旧检查点不迁移续跑，续跑时拒绝并提示重新发起任务。
 
 安全上的好处：检查点内容不再能触发任意类型实例化，数据库文件被篡改的最坏后果是解码失败。
 

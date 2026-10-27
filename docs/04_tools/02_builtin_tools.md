@@ -12,6 +12,8 @@
 | `load_skill` | 载入技能 SOP | read_only | 是 | 已有，见 [Skills](05_skills.md) |
 | `read_artifact` | 读取本任务被裁剪的完整输出 | read_only | 是 | **新增** |
 | `edit_file` | 对文件做精确的局部替换 | workspace_write | 否 | **建议新增** |
+| `update_plan` | 整体替换会话草稿里的计划 | read_only | 是 | **目标设计**，见 [计划与草稿](../02_runtime/05_plan_and_scratch.md) |
+| `note` | 向会话草稿追加事实或失败尝试 | read_only | 是（重复忽略） | **目标设计**，同上 |
 | `delegate_research` | 受控的外部检索 | read_only | 否 | 已有，见 [研究隔离区](../06_subagents/01_research_isolation.md) |
 | `spawn_subagent` | 动态委派 | read_only（动作本身） | 否 | 已有，见 [动态委派](../06_subagents/02_dynamic_delegation.md) |
 
@@ -105,7 +107,7 @@ edit_file(path, old_string, new_string, replace_all=false)
 - 第一句说明作用；第二句说明关键约束（路径必须在工作区内、单次返回上限）。
 - 写明失败时的行为，让模型知道该怎么修正。
 - 不在描述里写策略性的指令（如"总是先调用 X"），那属于系统提示词与技能。
-- 描述中的首行会出现在 planner 的能力清单里，所以首行必须自成一句。
+- 描述中的首行会出现在能力清单里，所以首行必须自成一句。
 
 ## 8. 不变量
 
@@ -139,9 +141,9 @@ edit_file(path, old_string, new_string, replace_all=false)
 - **`view_file` 流式读取。** 按行迭代到目标范围之后继续数总行数，不整文件读入内存；未指定行范围且文件超过 `view_max_file_mb` 时拒绝并提示指定范围；前 8 KB 含空字节判为二进制，返回“疑似二进制文件，大小 N 字节”（§2 缺口 1、2 已补）。`end_line` 超过单次上限时同样被截断并给出续读提示。
 - **`write_file` 原子写入。** 写同目录临时文件再 `os.replace`，失败时临时文件被清掉、原文件不动；保留已有文件的权限位；不做换行转译（按字节写入，CRLF 内容原样保留）；大小上限按**字节**计，不按字符。覆盖已有文件前若配置了备份目录（`backup_overwritten`，默认 `artifacts/{task_id}/overwritten/<相对路径>`，重名加 `.1`、`.2`），先拷贝一份；**备份失败则不写**，因为“不得静默丢失用户数据”比“写成功”重要（§3 缺口 1、2、5 已补；缺口 4 的哈希校验未做）。
 - **路径沙箱只有一个函数。** `resolve_within_root`：相对路径按根解释、`resolve()` 之后必须在根内；目标尚不存在时也成立（指向工作区外的符号链接目录之下的新文件同样被拦）。空串、NUL 字节、符号链接环都报“路径不可用”。
-- **`read_artifact`。** `TaskArtifacts` 是任务绑定对象：`tool_runner` 每次进入时把 `state.artifacts` **整体替换**推给它（`ToolRunnerDeps.bind`），别的任务的产物不会残留；只接受已登记的 id（可带 `artifact://` 前缀），失败时列出已有 id 但不暴露路径；即使登记表被篡改，解析后的路径也必须在产物根目录内，符号链接指到外面同样被拒。`grep` 给出时忽略行范围，每行最多匹配前 2000 字符，结果上限 `grep_max_results`。
+- **`read_artifact`。** `TaskArtifacts` 是任务绑定对象：工具执行每次进入时把 `state.artifacts` **整体替换**推给它（旧实现的 `ToolRunnerDeps.bind`），别的任务的产物不会残留；只接受已登记的 id（可带 `artifact://` 前缀），失败时列出已有 id 但不暴露路径；即使登记表被篡改，解析后的路径也必须在产物根目录内，符号链接指到外面同样被拒。`grep` 给出时忽略行范围，每行最多匹配前 2000 字符，结果上限 `grep_max_results`。
 - **产物来源信任。** 登记表里只有 `id -> 路径`，所以来源工具从句柄推：`obs_step_{n}_{工具}` 与 sidecar 的 `step_{n}_{工具}`。同一步的重名后缀（`_2`）与带数字的工具名分不开，所以**两种读法都在可信名单里才算可信**，认不出来源的取不可信；代价是同一步第二个 `bash` 的产物多包一层信封，无害。
-- **`tool_runner` 登记工具自带的产物。** 工具结果里带 `artifact_id` 与 `artifact_path`（sidecar 的命令日志）时登记进同一张表（重名加后缀，不覆盖），被截断时在观察值末尾追加 `[完整输出: artifact://…]`。这统一了 sidecar 日志与裁剪器两套句柄（观察值治理 §6.1 的最后一条）。
+- **工具后处理登记工具自带的产物。** 工具结果里带 `artifact_id` 与 `artifact_path`（sidecar 的命令日志）时登记进同一张表（重名加后缀，不覆盖），被截断时在观察值末尾追加 `[完整输出: artifact://…]`。这统一了 sidecar 日志与裁剪器两套句柄（观察值治理 §6.1 的最后一条）。
 - **`load_skill`** 的信封、转义与不可信标注见 Skills §14。
 
 已知缺口：

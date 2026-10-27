@@ -18,11 +18,11 @@
 
 旧版用 `interrupt()` 挂起，恢复时**整个节点从头重跑**。所以必须把审批放在一个只做纯判定的节点，否则重跑会重复调用 LLM，甚至出现"批准的命令不等于实际执行的命令"。
 
-本版挂起发生在阶段函数的开头，且该阶段在抛出 `ApprovalRequired` 之前不产生任何外部副作用：
+本版挂起发生在工具执行的最开头，且在抛出 `ApprovalRequired` 之前不产生任何外部副作用：
 
 1. 读取状态，做纯判定。
-2. 有越级且无可用决策 → 抛出 `ApprovalRequired`。循环不应用增量，只记录 `pending_approval` 并提交检查点，随后任务退出循环、释放执行资源。
-3. 决策到达后，续跑从检查点重新进入 `tool_runner`，**重新做同一次纯判定**，得到相同的越级集合，再消费决策。
+2. 有越级且无可用决策 → 抛出 `ApprovalRequired`。内核不捕获，由 Supervisor 记录 `pending_approval` 并提交检查点，随后任务退出、释放执行资源。
+3. 决策到达后，续跑从检查点重新进入同一批调用，**重新做同一次纯判定**，得到相同的越级集合，再消费决策。
 
 assistant 的 `tool_calls` 已经在状态里，不会被重新生成，所以被批准的就是将被执行的。
 
@@ -43,7 +43,7 @@ assistant 的 `tool_calls` 已经在状态里，不会被重新生成，所以�
 ```
 
 - `command` 与 `reason` 来自第一个越级项，`related_actions` 最多列出其后的 4 项，`escalation_count` 给出总数。
-- **`approval_id` 是确定性的**：由 `task_id`、`step_count` 与越级 `call_ids` 排序后哈希得到，取前若干位。旧版用随机 UUID。确定性带来两点好处：崩溃后重新进入同一阶段会生成同一个请求，前端已展示的卡片仍然有效；决策可以精确绑定到这一批调用。
+- **`approval_id` 是确定性的**：由 `task_id`、该 assistant 消息在 transcript 中的位置与越级 `call_ids` 排序后哈希得到，取前若干位。旧版用随机 UUID。确定性带来两点好处：崩溃后重新进入同一批调用会生成同一个请求，前端已展示的卡片仍然有效；决策可以精确绑定到这一批调用。
 - `call_ids` 记录该次审批覆盖的调用，决策只对这一批生效。
 
 ## 4. 决策
@@ -60,13 +60,13 @@ assistant 的 `tool_calls` 已经在状态里，不会被重新生成，所以�
 - `scope` 只允许 `once` 或 `always`，缺省视为 `once`。
 - `approved` 必须是布尔值，`reject` 的 `reason` 可空，空则用默认文案。
 
-`approval_id` 的计算：`sha256(JSON[task_id, step_count, 排序后的 call_ids])` 取前 16 位十六进制，前缀 `appr_`；用 JSON 编码，字段边界无歧义。实现见 `agent_runtime.approval`（`compute_approval_id`、`parse_decision`、`bind_decision`、`check_binding`）。
+`approval_id` 的计算：`sha256(JSON[task_id, 消息位置, 排序后的 call_ids])` 取前 16 位十六进制，前缀 `appr_`；用 JSON 编码，字段边界无歧义。实现见 `agent_runtime.approval`（`compute_approval_id`、`parse_decision`、`bind_decision`、`check_binding`）。
 
 重复提交同一决策：第一次消费之后 `pending_approval` 已清空，第二次因任务不再等待审批而被拒绝，不会重复生效。
 
 ## 5. 消费决策
 
-`tool_runner` 入口：
+工具执行入口（权限闸门）：
 
 ```python
 escalations = [判定为越级且签名不在白名单的调用]
@@ -93,11 +93,11 @@ if escalations:
 
 ### 5.1 实现细节
 
-`loop` 与 `approval` 是同层模块、不能互相导入，所以 `tool_runner` 通过注入的 `ApprovalHooks` 调用 `compute_approval_id` 与 `check_binding`，由装配层（`runtime.APPROVAL_HOOKS`）接上。越级集合为空时，残留的 `pending_approval` / `approval_decision` 视为过期并清掉。载荷的 `required_level` 取越级项里最高的。详见 [executor 与 tool_runner](06_executor_tool_runner.md)。
+`loop` 与 `approval` 是同层模块、不能互相导入，所以工具包装层通过注入的 `ApprovalHooks` 调用 `compute_approval_id` 与 `check_binding`，由装配层（`runtime.APPROVAL_HOOKS`）接上。越级集合为空时，残留的 `pending_approval` / `approval_decision` 视为过期并清掉。载荷的 `required_level` 取越级项里最高的。详见 [工具执行](06_tool_execution.md)。
 
 ## 6. 会话白名单
 
-- 白名单是 `action_signature` 的集合，按会话隔离，由任务注册表持有，通过引用传给 `tool_runner`。
+- 白名单是 `action_signature` 的集合，按会话隔离，由任务注册表持有，通过引用传给工具包装层。
 - 不入检查点：进程重启即清空，随后同类操作会重新询问。这是有意偏安全的取舍。
 - `always` 只对**完全相同的签名**生效，签名的构造规则决定了范围是否合理（例如是否包含参数全文）。该函数沿用现有实现，本版不改动，但需要在 [安全文档](../05_security/) 里写清楚它的粒度。
 
@@ -106,7 +106,7 @@ if escalations:
 子智能体**从不请求审批**：
 
 - 越级即失败，以失败观察值回给父级，不挂起。
-- 子智能体运行在 `tool_runner` 内部，若允许它挂起，就会让一个已经开始派发的阶段中途抛出，破坏"挂起前无副作用"的前提。
+- 子智能体运行在工具执行内部，若允许它挂起，就会让一批已经开始派发的调用中途抛出，破坏"挂起前无副作用"的前提。
 - 权限在派发前一次性收窄，子级权限不超过父级基线。父级权限级别由任务授权窗口推送给叶子工具。
 
 ## 8. 挂起期间的任务生命周期
@@ -115,7 +115,7 @@ if escalations:
 |---|---|
 | 状态 | `waiting_for_approval` |
 | 执行资源 | 释放，并发名额让出 |
-| 预算 | 挂钟计时不再累加（守卫随任务退出而销毁，续跑时重置起点） |
+| 超额与计时 | 无预算，不存在随等待而耗尽的额度 |
 | 超时 | 暂不设自动过期，请求会一直挂着，直到被批准、拒绝或任务被取消 |
 | 取消 | 允许。取消后状态记为 `cancelled`，挂起请求作废 |
 | 进程重启 | 启动扫描发现 `pending_approval` 非空，恢复为 `waiting_for_approval`，前端重连后可继续 |
@@ -130,14 +130,14 @@ sequenceDiagram
     participant RT as Runtime
     participant DB as 检查点库
 
-    RT->>RT: tool_runner 判定出越级
+    RT->>RT: 工具包装层判定出越级
     RT->>DB: 提交检查点（pending_approval）
     RT-->>FE: SSE task.waiting_for_approval
-    Note over RT: drive 返回，任务释放
+    Note over RT: run 退出，任务释放
     FE->>API: POST /approve 或 /reject
     API->>RT: resume_task(task_id, decision)
     RT->>DB: 加载检查点并校验决策
-    RT->>RT: 重新进入 tool_runner 并消费决策
+    RT->>RT: 重新进入同一批调用并消费决策
     RT-->>FE: SSE tool.call / tool.result …
 ```
 

@@ -84,9 +84,9 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 |---|---|---|
 | `[app]` `[logging]` `[storage]` | 数据目录、日志、存储路径与保留策略 | [系统总览](01_system_overview.md)、[轨迹与日志](../08_observability/02_trajectory_and_logs.md) |
 | `[server]` `[server.auth]` `[server.filesystem]` `[server.workspace]` | API、令牌、文件系统浏览边界、工作区路径校验 | [API 接入控制](../09_api/03_access_and_errors.md) |
-| `[runtime.guardrails]` `[runtime.loop]` `[runtime.checkpoint]` `[runtime.approval]` | 预算、死循环、回路形状（重规划间隔、打回与降级上限、摆动检测、进度提示）、检查点、审批 | [主循环](../02_runtime/02_main_loop.md)、[检查点](../02_runtime/03_checkpoint_and_resume.md)、[审批](../02_runtime/04_approval.md) |
+| `[runtime.guardrails]` `[runtime.loop]` `[runtime.checkpoint]` `[runtime.approval]` | 死循环拦截（指纹窗口、摆动、`max_consecutive_blocks`）、检查点、审批；旧实现的预算、重规划、打回与降级上限、进度提示项随 [0006](../12_decisions/0006-pure-agent-loop.md) 删除 | [主循环](../02_runtime/02_main_loop.md)、[检查点](../02_runtime/03_checkpoint_and_resume.md)、[审批](../02_runtime/04_approval.md) |
 | `[models.*]` | 两档模型、端点、能力声明 | [网关](../07_llm_gateway/01_gateway.md)、[DeepSeek](../07_llm_gateway/04_deepseek.md) |
-| `[llm.*]` | 重试、熔断、并发、截止时间、用量估算、结构化输出 | [网关](../07_llm_gateway/01_gateway.md)、[结构化输出](../07_llm_gateway/02_structured_output.md) |
+| `[llm.*]` | 重试、熔断、并发、单次调用总耗时上限、用量估算、结构化输出 | [网关](../07_llm_gateway/01_gateway.md)、[结构化输出](../07_llm_gateway/02_structured_output.md) |
 | `[context.*]` | 会话与任务级窗口、观察值裁剪、记忆、项目规则、提示词装配 | [03_context](../03_context/) |
 | `[tools.*]` | 文件工具与派发 | [内置工具](../04_tools/02_builtin_tools.md) |
 | `[services]` `[bash_shell]` `[web_search]` | sidecar 寻址、沙箱、检索与抓取安全 | [Shell 沙箱](../05_security/02_shell_sandbox.md)、[web_search](../04_tools/06_web_search_service.md) |
@@ -104,13 +104,12 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 |---|---|---|
 | 模型窗口 | `models.<档>.endpoints[].context_window` | 每个端点各自声明 |
 | 最大输出 | `models.<档>.endpoints[].max_output_tokens` | 显式设置，避免 JSON 被默认值截断 |
-| 会话活跃对话预算 | `context.session.token_limit` | 默认 32000 |
+| 会话活跃对话窗口 | `context.session.token_limit` | 默认 32000 |
 | 会话压缩触发/回落 | `context.session.high_watermark` / `compaction_ratio` | 0.80 触发，一次压到 0.40 |
 | 任务内折叠触发 | `context.task.soft_ratio` / `soft_tokens` | 取 `min(窗口 × 比例, 绝对值)` |
 | 任务内压缩触发 | `context.task.hard_ratio` / `hard_tokens` | 同上，且默认关闭 `compaction_enabled` |
 | 观察值裁剪阈值 | `context.observation.max_tokens` | 默认 1500 |
-| 单个子智能体 Token | `subagent.max_total_tokens`，经账本收窄 | |
-| 单任务总 Token | `runtime.guardrails.max_total_tokens` | 含子智能体与研究的全部消耗 |
+| 单任务 / 子智能体 Token 上限 | **无**（预算已取消，旧项 `runtime.guardrails.max_total_tokens`、`subagent.max_total_tokens` 待删除） | |
 
 ## 6. 校验
 
@@ -142,12 +141,11 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 | 新增 | `[app]` 数据目录；所有路径改为相对 `BASEAGENT_HOME` |
 | 新增 | `server.auth`、`server.filesystem`、`server.workspace`：令牌、目录浏览边界、工作区路径校验 |
 | 新增 | 端点级的 `context_window`、`max_output_tokens`、`reasoning_effort` 与 `capabilities` |
-| 新增 | `[llm.*]`：退避上限与抖动、熔断、并发、截止时间、用量估算、结构化输出 |
+| 新增 | `[llm.*]`：退避上限与抖动、熔断、并发、单次调用总耗时上限、用量估算、结构化输出 |
 | 新增 | `context.task.*`、`context.memory.*`、`context.rules.*`、`context.prompt.*` |
 | 新增 | `tools.files`：读写上限、原子写、覆盖前备份 |
 | 新增 | `services.sidecar_env_allowlist`、`bash_shell.child_env_allowlist` 与 `child_home`：子进程最小环境 |
 | 新增 | `web_search` 的 SSRF 防护与下载上限 |
-| 新增 | `research.max_calls_per_task` 与经账本计入父任务预算 |
 | 新增 | `mcp.retry_backoff_sec`、`exposed_name_max_len`、`refresh_tools_each_task`，服务器级 `allow_tools` 与 `idempotent_tools` |
 | 新增 | `[events]` `[tracing.*]` `[redaction]` `[security]` `[evaluation]` |
 | 调整 | `mcp.rlimit_as_mb` 默认由 1024 提高到 4096，Node 类服务器需要较大的虚拟地址空间 |

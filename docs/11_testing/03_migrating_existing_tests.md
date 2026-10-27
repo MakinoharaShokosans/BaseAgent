@@ -18,7 +18,7 @@
 
 | 现有位置 | 内容 | 去向 |
 |---|---|---|
-| `tests/guardrails/` | 金丝雀、循环检测、观察值裁剪、权限、权限对抗、物理预算 | **保留**。金丝雀测试把消息类型换掉；权限对抗测试增补"已知未覆盖"用例 |
+| `tests/guardrails/` | 金丝雀、循环检测、观察值裁剪、权限、权限对抗、物理预算 | **保留**，物理预算与账本用例随 0006 删除。金丝雀测试把消息类型换掉；权限对抗测试增补"已知未覆盖"用例 |
 | `tests/test_config*.py`、`test_memory.py`、`test_tokenizer.py`、`test_prompt_*.py` | 配置、记忆、分词、提示词 | **保留**，配置测试去掉 RAG 项 |
 | `tests/services/` | 沙箱审计、内存池、web 去重与设置 | **保留**，补 SSRF 与响应大小上限 |
 | `tests/tools/` | 文件工具、工具核心 | **保留**，补原子写、备份、`edit_file` |
@@ -28,12 +28,12 @@
 | `tests/observability/` | 事件总线 | **保留**，补持久化、脱敏 |
 | `tests/api/` | 任务注册表、schema、安全闸门、文件路由、键盘退出 | **保留**；`test_rag_routes` 删除；安全闸门测试补令牌与路径校验 |
 | `tests/edges/test_edges.py` | 路由函数 | **保留**，把 `END` 换成 `DONE` 哨兵，分支断言不变 |
-| `tests/nodes/` | 规划、评估、工具运行节点 | **类型替换**；`test_tool_runner.py` 用 `MemorySaver` 与 `StateGraph` 搭了小图来测 `interrupt`，属于引擎耦合，**重写**为"抛出 `ApprovalRequired` 加续跑"的测试，验证同样的意图 |
+| `tests/nodes/` | 规划、评估、工具运行节点 | 规划、评估节点的测试随 0006 删除；工具运行节点**类型替换**；`test_tool_runner.py` 用 `MemorySaver` 与 `StateGraph` 搭了小图来测 `interrupt`，属于引擎耦合，**重写**为"抛出 `ApprovalRequired` 加续跑"的测试，验证同样的意图 |
 | `tests/integration/test_graph_workflow.py` | 图工作流的整体行为 | **重写**为"主循环集成测试"，沿用其假模型脚本和断言（见 §3） |
 | `tests/integration/test_crash_recovery.py` | 检查点往返、跨实例续跑、白名单非持久化 | **重写**检查点部分；白名单非持久化的断言保留 |
 | `tests/integration/test_api_lifecycle.py` | API 生命周期 | **保留** |
 | `tests/integration/test_sidecar_clients.py` | sidecar 客户端 | **保留**，去掉 RAG 部分 |
-| `tests/workflow/test_research_runner.py` | 研究运行器 | **保留**，补预算计入、证据信封 |
+| `tests/workflow/test_research_runner.py` | 研究运行器 | **保留**，补证据信封；预算计入相关断言删除 |
 | `tests/workflow/test_code_search_runner.py` | 代码检索子智能体 | **删除** |
 | `tests/real_llm/` | 真实模型的阶段性用例 | 保留，调整导入；其中权限、注入、回退、上下文几组并入评测框架 |
 
@@ -45,8 +45,7 @@
 
 1. 取旧版 `test_graph_workflow.py` 与节点测试里已经存在的假模型脚本和断言。
 2. 在新循环上用同一份脚本驱动，**断言项保持不变**：
-   - 阶段访问顺序；
-   - 每步结束后的 `step_count`、`total_tokens`、`consecutive_errors`；
+   - 每回合结束后的 `consecutive_errors`（阶段访问顺序与 `step_count` 随 0006 作废）；
    - 终止原因与最终状态；
    - 事件序列（名称与关键字段）；
    - 配对消息的完整性。
@@ -56,15 +55,14 @@
 
 | 黄金场景 | 内容 |
 |---|---|
-| 直接答复 | 规划即完成，`step_count == 0`，不进评估 |
-| 单工具往返 | 规划、执行工具、评估通过 |
-| 多里程碑 | 评估打回再继续 |
-| 连续失败 | 重规划通知注入 |
+| 直接答复 | 模型第一回合即给出最终回复，无工具调用 |
+| 单工具往返 | 一次工具往返后给出最终回复 |
+| 多步任务 | 多个回合，草稿计划被更新 |
+| 连续失败 | 连续错误通知追加 |
 | 死循环 | 指纹重复整批拦截 |
-| 预算熔断 | 三种预算各一例 |
 | 审批批准、拒绝、总是允许 | |
 | 并发工具 | 一批多个调用，配对完整 |
-| 子智能体 | 授予、越级被拒、预算对账 |
+| 子智能体 | 授予、越级被拒 |
 | LLM 全部不可用 | 终止原因 |
 | 金丝雀泄露 | 立即终止 |
 

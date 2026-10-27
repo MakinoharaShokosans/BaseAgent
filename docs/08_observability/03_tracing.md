@@ -1,6 +1,6 @@
 # 追踪
 
-追踪回答的是"这个任务的调用树长什么样、时间花在哪"：哪个阶段调用了几次模型、哪次重试耗时最长、子智能体内部做了什么。它是事件、轨迹、日志之上的**结构化视图**，用 span 把它们关联起来。
+追踪回答的是"这个任务的调用树长什么样、时间花在哪"：哪个回合调用了几次模型、哪次重试耗时最长、子智能体内部做了什么。它是事件、轨迹、日志之上的**结构化视图**，用 span 把它们关联起来。
 
 这也是 [概览](../00_overview/README.md) 里的待决事项"去掉 LangChain 回调后，外部追踪如何接入"的答案。
 
@@ -30,8 +30,8 @@ class Span:
     span_id: str
     parent_span_id: str | None
     trace_id: str            # = task_id
-    name: str                # "task" | "stage:planner" | "llm" | "tool:bash" | "subagent:CodeInvestigator" …
-    kind: Literal["task", "stage", "llm", "tool", "subagent", "research", "guard"]
+    name: str                # "task" | "turn" | "llm" | "tool:bash" | "subagent:CodeInvestigator" …
+    kind: Literal["task", "turn", "llm", "tool", "subagent", "research", "guard"]
     start_ts: float
     end_ts: float | None
     status: Literal["ok", "error", "cancelled"]
@@ -42,12 +42,8 @@ class Span:
 
 ```
 task（trace_id = task_id）
-├─ stage:planner
-│   └─ llm（tier、model、usage、attempts）
-├─ stage:budget_guard
-├─ stage:executor
-│   └─ llm
-├─ stage:tool_runner
+├─ turn
+│   ├─ llm（tier、model、usage、attempts）
 │   ├─ tool:bash
 │   ├─ tool:spawn_subagent
 │   │   └─ subagent:CodeInvestigator
@@ -55,8 +51,11 @@ task（trace_id = task_id）
 │   │       ├─ tool:view_file
 │   │       └─ llm（收尾提炼）
 │   └─ guard:approval（挂起与恢复）
-└─ stage:evaluator
-    └─ llm
+├─ turn
+│   ├─ llm
+│   └─ tool:view_file
+└─ turn
+    └─ llm（最终回复）
 ```
 
 ### 3.1 谁创建 span
@@ -64,7 +63,7 @@ task（trace_id = task_id）
 | 位置 | span |
 |---|---|
 | 任务运行器 | `task` |
-| 主循环 | 每个阶段一个 `stage:*` |
+| 主循环 | 每个回合一个 `turn` |
 | LLM 网关 | 每次调用一个 `llm`，重试与降级作为该 span 上的事件或子 span |
 | 工具派发器 | 每个工具调用一个 `tool:*` |
 | 子智能体与研究运行器 | `subagent:*` / `research`，其内部的 `llm` 和 `tool` 是它的子 span |

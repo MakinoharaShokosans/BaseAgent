@@ -64,7 +64,9 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 
 `delivery` 是面向用户的交付结论，已脱敏金丝雀；若是 JSON 形式的结构化结论，服务端已渲染成 Markdown。
 
-## 4. 阶段事件
+## 4. 阶段事件（旧实现的契约）
+
+> 主循环收敛为纯 agent loop 后（[0006](../12_decisions/0006-pure-agent-loop.md)），没有阶段，下面的 `plan` 与 `node.finished` 被回合事件取代，见 §4.1。迁移期间服务端与前端按 §4.1 的映射同步修改，期间旧事件继续可用。
 
 | 事件 | 载荷 |
 |---|---|
@@ -74,6 +76,16 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 `node.finished.decision` 取值：`pass`、`call_tools`、`executed`、`reply`、`accepted`、`continue` 以及规划阶段的指令文本。
 
 里程碑：`{ id, title, description?, status }`，`status` 为 `pending | in_progress | completed | failed`。
+
+### 4.1 目标设计：回合事件
+
+| 事件 | 载荷 | 取代 |
+|---|---|---|
+| `model.reply` | `turn`、`content`、`tool_calls[]`（只含 id 与工具名）、`reasoning?`（截断） | — |
+| `plan.updated` | `plan[]`：`{ id, title, status }`，`status` 为 `pending \| in_progress \| completed` | `plan` |
+| `turn.finished` | `turn`（回合序号，不是信封的 `seq`）、`tool_count`、`failed_count`、`tokens`（统计值） | `node.finished` |
+
+`task.finished` 的 `step_count` 改为回合数 `turns`，`total_tokens` 保留为统计值，二者都不对应任何上限。`should_terminate` 与 `decision` 字段取消，终态由 `task.finished.status` 表达。
 
 > `input_summary` 与 `output_summary` 现状是硬编码的中文模板文案，不是由实际内容生成的。它们对用户有展示价值，但不应被客户端当作机器可读字段解析。新版保留文案，机器可读信息放在独立字段（`decision`、`milestones`）。
 
@@ -114,7 +126,7 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 | `research.started` | `topic`、`questions`、`max_sources` |
 | `research.round` | `round`、`queries[]`、`fetched`、`evidence` |
 | `research.finished` | `rounds`、`sources`、`findings`、`version_facts`、`tokens`、`elapsed_sec` |
-| `subagent.started` | `role`、`depth`、`assigned_tools[]`、`token_budget`、`max_steps` |
+| `subagent.started` | `role`、`depth`、`assigned_tools[]` |
 | `subagent.step` | `step`、`tools[]` |
 | `subagent.tool` | `step`、`tool`、`ok`、`duration_ms`、`untrusted`、`summary`（≤300 字符） |
 | `subagent.blocked` | `step`、`tool`、`required_level`、`current_level`、`action_type`、`reason` |
@@ -133,24 +145,25 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 
 ## 9. 典型序列
 
-一次带审批的工具任务：
+一次带审批的工具任务（目标设计）：
 
 ```
 task.started
-plan
-node.finished (planner)
-node.finished (budget_guard)
+model.reply                        ← 回合 1：带工具调用
+plan.updated                       ← 若模型调用了 update_plan
 tool.call (bash)
-node.finished (executor)
 task.waiting_for_approval          ← 挂起，客户端展示审批卡片
    … 用户批准 …
 task.approved
 tool.result (bash)
-node.finished (tool_runner)
-… 若干轮 …
-node.finished (evaluator)
+turn.finished
+… 若干回合 …
+model.reply                        ← 最终回复，无工具调用
+turn.finished
 task.finished (succeeded)
 ```
+
+旧实现的序列是 `plan`、`node.finished (planner)`、`node.finished (budget_guard)`、`tool.call`、`node.finished (executor)` … `node.finished (evaluator)`，迁移前仍以它为准。
 
 注意审批后事件的 `seq` 接着挂起前的继续，不会重置，即使中间经历过进程重启。
 
@@ -162,7 +175,7 @@ task.finished (succeeded)
 - [ ] 忽略未知字段和未知事件。
 - [ ] `task.waiting_for_approval` 不当作终态。
 - [ ] 以 `task.finished` 作为流的结束标志，之后不再重连。
-- [ ] 不依赖事件条数估计进度，用里程碑和阶段序号。
+- [ ] 不依赖事件条数估计进度，用计划条目和回合序号。
 - [ ] 展示 `command` 时不二次截断。
 
 ## 11. 测试要点

@@ -14,7 +14,7 @@ BaseAgent 让模型执行命令、写文件、联网研究。本目录说明这�
 
 | 层 | 问题 | 由谁负责 |
 |---|---|---|
-| 策略 | 这次调用要不要人工同意 | `check_permission`，位于 `tool_runner` |
+| 策略 | 这次调用要不要人工同意 | `check_permission`，位于工具包装层 |
 | 机制 | 获准之后，进程能做什么 | `bash_shell` 沙箱，独立进程 |
 | 数据 | 工具返回的内容能不能被当成指令 | 信任分级与信封，见 [03](03_trust_and_injection.md) |
 
@@ -52,9 +52,8 @@ BaseAgent 让模型执行命令、写文件、联网研究。本目录说明这�
 | 读取不受路径限制，无网络隔离，无进程数上限 | [沙箱 §4](02_shell_sandbox.md) | 中，已知边界 |
 | 信封正文不转义，工具输出可提前闭合信封 | [信任 §4.4、§8](03_trust_and_injection.md) | 高 |
 | 工作区规则文件进入系统提示词且无信任门控 | [信任 §8](03_trust_and_injection.md) | 高 |
-| 金丝雀盐硬编码、仅 executor 检测 | [信任 §6、§8](03_trust_and_injection.md) | 中 |
+| 金丝雀盐硬编码、旧实现只在个别阶段检测（目标设计统一在网关） | [信任 §6、§8](03_trust_and_injection.md) | 中 |
 | 记忆（事实、摘要）放在系统提示词里，可被投毒并持续影响后续任务 | [记忆 §5.3](../03_context/04_memory.md) | 高 |
-| 研究子智能体不经预算账本，消耗不计入父任务预算，可绕过物理熔断 | [子智能体 README](../06_subagents/README.md) | 高 |
 | `web_search` 抓取无内网地址过滤（SSRF），重定向不受限 | [web_search 服务 §4](../04_tools/06_web_search_service.md) | 高 |
 | 轨迹不记录工具入参，审计无法回答“执行了什么命令”；子智能体内部调用不落盘 | [轨迹 §1.2](../08_observability/02_trajectory_and_logs.md) | 高 |
 | API 没有令牌认证（占位实现），任何本机进程可提交任务、读写文件；目录浏览可枚举主机文件系统；工作区路径不校验 | [API 接入控制 §2、§4](../09_api/03_access_and_errors.md) | 高 |

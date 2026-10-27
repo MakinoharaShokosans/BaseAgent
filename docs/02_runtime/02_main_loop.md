@@ -1,197 +1,157 @@
 # 主循环
 
-## 1. 五个阶段
+决策依据：[0006 主循环收敛为纯 agent loop](../12_decisions/0006-pure-agent-loop.md)。
 
-| 阶段 | 职责 | 模型档 | 产出 |
-|---|---|---|---|
-| `planner` | 宏观规划与重规划，给出里程碑和下一步指令 | 推理档 | 里程碑、指令消息、Token |
-| `budget_guard` | 硬熔断检查与软告警 | 无 | `should_terminate` 或告警消息 |
-| `executor` | 把指令转成具体工具调用 | 快速档 | 带 `tool_calls` 的 assistant 消息，或直接答复；步数加一 |
-| `tool_runner` | 权限闸门、并发派发、观察值治理、预算冲销 | 无 | 配对 tool 消息、错误计数、指纹、产物 |
-| `evaluator` | 复核里程碑、提炼摘要与事实、决定继续或交付 | 推理档 | 里程碑状态、摘要、事实、失败尝试 |
+## 1. 形状
 
-阶段函数的统一签名：
+循环只做一件事：调模型；模型要工具就执行并追加结果，再调模型；模型不再要工具就结束。下一步是什么由模型的回复决定，不由状态机或路由表决定。
 
-```python
-Stage = Callable[[AgentState], Awaitable[StageUpdate]]
-```
+循环**只依赖四样东西**：
 
-输入只读，输出是增量字典，规则见 [状态模型 §3](01_state_model.md)。任务级依赖（模型网关、工具注册表、守卫、裁剪器、记录器、事件总线）通过闭包注入，每个任务构造一次。
+| 依赖 | 作用 |
+|---|---|
+| 工具集 | 内置工具、MCP 工具、技能工具，统一的 `AgentTool` 协议，见 [工具系统](../04_tools/01_tool_system.md) |
+| 上下文装配器 | `assemble()`：从只追加的 transcript 与草稿生成本次请求的消息，见 [提示词装配](../03_context/03_prompt_assembly.md) |
+| 会话草稿 | 计划与笔记，见 [计划与草稿](05_plan_and_scratch.md) |
+| 模型句柄 | 一个可调用对象，由模型网关实现 |
 
-## 2. 路由
+循环**不认识**：预算、权限、审批、检查点、事件、取消、压缩、信封。它们在循环外，经下面的接缝生效。
 
-下一个阶段完全由当前阶段结束后的状态决定，路由函数是纯函数，保持现有 `edges/after_*.py` 的逻辑，仅把 LangGraph 的 `END` 换成自有哨兵 `DONE`。
-
-```mermaid
-stateDiagram-v2
-    [*] --> planner
-    planner --> budget_guard: 里程碑未全部完成
-    planner --> evaluator: 全部完成且 step_count > 0
-    planner --> DONE: 硬终止，或全部完成且 step_count = 0
-    budget_guard --> executor: 预算正常
-    budget_guard --> DONE: 熔断
-    executor --> tool_runner: 有工具调用
-    executor --> evaluator: 无工具调用
-    executor --> DONE: 硬终止
-    tool_runner --> budget_guard: 默认：继续执行
-    tool_runner --> planner: 需要重规划
-    tool_runner --> DONE: 硬终止
-    evaluator --> planner: 尚未收敛
-    evaluator --> DONE: 验收通过或硬终止
-    DONE --> [*]
-```
-
-路由表：
+## 2. 内核
 
 ```python
-ROUTES: Mapping[Phase, Router] = {
-    "planner":      route_after_planner,       # budget_guard | evaluator | DONE
-    "budget_guard": route_after_budget_guard,  # executor | DONE
-    "executor":     route_after_executor,      # tool_runner | evaluator | DONE
-    "tool_runner":  route_after_tool_runner,   # budget_guard | planner | DONE
-    "evaluator":    route_after_evaluator,     # planner | DONE
-}
-```
-
-几条语义要保留：
-
-- **空里程碑视为未完成。** 单步任务不能因为"没有计划"就跳过执行。
-- **`step_count == 0` 且里程碑全部完成** 表示 planner 已直接答复，无需复核，直接交付。
-- **executor 没有产生工具调用** 说明它给出了自然语言结论，转 evaluator 验收，而不是回 planner。
-- 任一阶段置位 `should_terminate`，下一跳一律是 `DONE`。
-- **工具批次之后默认直接继续执行**（`budget_guard → executor`），不回 planner。`tool_runner` 在状态里置 `replan_needed` 才回 planner：
-  - 连续执行满 `[runtime.loop] replan_interval` 个批次（默认 6；0 表示每批都回，即旧行为）；
-  - 连续失败达到阈值、指纹循环或摆动（ABAB…）被拦截；
-  - 有调用被人工拒绝。
-
-  planner 运行时清零 `replan_needed` 与 `steps_since_plan`。这样每个工具步不再多付一次推理档的结构化调用，规划只发生在开头、遇阻和定期复核时。executor 给出自然语言结论仍转 evaluator 验收。
-
-## 3. 循环骨架
-
-```python
-async def drive(rt: TaskRuntime, state: AgentState) -> TaskOutcome:
-    phase = state["phase"]
+async def run(ctx: LoopContext) -> None:
+    pending = ctx.transcript.unanswered_calls()         # 续跑入口：尾部有未配对调用先处理
     while True:
-        stage = rt.stages[phase]
-        try:
-            update = await stage(state)
-        except ApprovalRequired as req:
-            state = apply_update(state, {"pending_approval": req.payload, "phase": phase})
-            await rt.checkpoints.commit(state)
-            await rt.emit(approval_requested_event(req.payload))
-            return TaskOutcome(state, approval_request=req.payload)
-
-        state = apply_update(state, update)
-        nxt = ROUTES[phase](state)
-        state = apply_update(state, {"phase": nxt})
-        check_invariants(state)                      # 原子对等；不满足即实现缺陷，不写检查点
-
-        await rt.checkpoints.commit(state)          # 提交点
-        await rt.emit_stage_events(phase, update, state)
-        if nxt == DONE:
-            return TaskOutcome(state)
-        phase = nxt
+        if not pending:
+            reply = await ctx.model(ctx.assemble(), ctx.tools.schemas())
+            ctx.transcript.append(reply)
+            if not reply.tool_calls:
+                await ctx.checkpoint()                   # 终回合提交
+                return
+            await ctx.checkpoint()                       # 派发前提交
+            pending = reply.tool_calls
+        results = await ctx.tools.run(pending)           # 唯一执行点；可能抛 ApprovalRequired
+        ctx.transcript.extend(results)
+        pending = ()
+        await ctx.checkpoint()                           # 回合结束提交
 ```
 
-要点：
+- **回合** = 一次模型调用加它引出的全部工具结果。
+- `ctx.checkpoint()` 和事件发射是循环声明的端口，由 Recorder 实现：先提交后发事件，提交失败即向上抛，不带着未落盘的进度继续跑。
+- 循环**不捕获**任何异常。异常、取消、挂起全部向上传到 Supervisor。
+- `ctx.tools.run` 保证为每个调用返回一条配对结果，无论成功、失败、被拒绝、被拦截还是超时。
 
-1. **先提交，后发事件。** 事件反映的是已经落盘的事实，客户端看到的进度不会比可恢复的进度更远。
-2. **`ApprovalRequired` 不是错误。** 它是阶段函数向循环请求挂起的信号，不携带增量，该阶段的任何局部结果都不被应用。因此阶段在抛出之前不得产生外部副作用，见 [审批](04_approval.md)。
-3. **异常策略。** 阶段内的其他异常向上传播到任务运行器，任务标记 `failed`，状态停留在上一次提交点，仍可由 `resume` 续跑。LLM 全链路不可用属于预期内的失败：阶段返回 `should_terminate=True` 和原因，而不是抛出。
-4. **取消。** 外层 `asyncio.Task` 被取消时，`CancelledError` 向上传播，状态同样停留在上一次提交点。
+## 3. 接缝：循环之外的东西怎么生效
 
-### 3.1 实现细节（已落地于 `agent_runtime.loop`）
-
-- 路由在 `routes.py`：五个纯函数加 `ROUTES` 与 `ALLOWED_TRANSITIONS`（文档状态图的边）。测试用性质检验断言：任意状态、任意阶段，路由只会走图里画出的边；`should_terminate` 在每个阶段都路由到 `DONE`。
-- 依赖通过 `TaskRuntime(stages, checkpoints, events)` 注入。`checkpoints` 只需要 `commit(state)`，`events` 是 `EventSink`（`stage_committed`、`approval_requested`）。构造时检查五个阶段齐全。
-- **阶段函数不得写 `phase`**，返回的增量里带 `phase` 直接报 `InvalidUpdateError`：`phase` 的唯一写入者是主循环。`pending_approval` 允许阶段清空（消费决策时）。
-- `drive` 返回 `TaskOutcome(state, approval_request)`，`status` 为 `succeeded`、`terminated` 或 `waiting_for_approval`；`failed` 与 `cancelled` 以异常传出，由任务运行器映射。
-- 事件发送失败只记日志、不影响任务（状态已落盘）；`CancelledError` 不被吞掉。
-- 提交失败向上传播，**此后不再发事件、不再运行下一阶段**。
-- `drive` 对已处于 `done` 的状态什么也不做，也不提交。
-- **文档原先的缺口：** 伪代码在提交前断言“所有工具调用已配对”，但 executor 提交时调用刚产出、tool_runner 还没执行，会误报。实现里把“最后一组允许暂无配对”的条件定为：`pending_approval` 非空，**或** `phase == "tool_runner"`。更早的组，以及其他阶段，仍必须完整。
-- `drive` 本身没有迭代上限：防止死循环靠 `budget_guard`（步数/Token/挂钟）。若 `budget_guard` 或路由有缺陷，循环可能不终止；测试里用有限脚本避免，以后接真实阶段时要有总超时兜底。
-
-### 3.2 模型阶段的失败
-
-planner 与 evaluator 遇到模型不可用、截止时间不足、请求被拒时**返回终止增量而不抛异常**，细节与旧版差异见 [planner 与 evaluator](05_planner_evaluator.md)。
-
-## 4. 终止与对外状态
-
-| 终态 | 条件 |
-|---|---|
-| `succeeded` | evaluator 判定里程碑全部达成，或 planner 直接答复交付 |
-| `terminated` | 步数、Token 或挂钟时间任一触达上限 |
-| `failed` | 不可恢复异常，例如 LLM 全链路不可用 |
-| `cancelled` | 客户端主动取消 |
-| `waiting_for_approval` | 非终态，`pending_approval` 非空 |
-
-`terminated` 与 `failed` 可经 `resume` 回到 `running`。`TaskStatus` 的完整迁移图沿用 `state.py` 现有定义。
-
-## 5. 守卫如何嵌入
-
-| 守卫 | 位置 | 作用 |
+| 层 | 职责 | 挂载点 |
 |---|---|---|
-| 物理预算 | `budget_guard` 阶段 | 步数、Token、挂钟三项硬熔断；达到 90% 注入软告警消息 |
-| 重复指纹 | `tool_runner` 内 | 对（工具名，参数）取哈希，连续相同达阈值则拦截整批并注入重规划通知 |
-| 连续错误 | `tool_runner` 内 | 失败累加、成功清零；达阈值注入重规划通知并置 `replan_needed` |
-| 摆动 | `tool_runner` 内 | 最近的指纹在两个取值间来回交替（`alternation_cycles` 个周期，默认 3）视同循环，拦截整批 |
-| 终止时的交付 | 事件与会话记忆 | 被终止的任务（预算、验收上限、规划失效、循环）由代码根据状态生成部分交付：已完成/未完成的里程碑、已修改的文件、已确认的事实、最近进展；安全类终止不展开内容 |
-| 权限闸门 | `tool_runner` 内，派发之前 | 越级则请求挂起 |
-| 子智能体预算账本 | `tool_runner` 内 | 派发前同步父级用量并串行准入；派发后把子智能体的实际消耗以增量并入 `total_tokens` |
-| 观察值裁剪 | `tool_runner` 内 | 超限输出头尾截断，全文落盘为产物 |
+| **Supervisor** | 任务生命周期、取消、挂起与续跑入口、部分交付、状态映射 | 包住 `run` |
+| **模型网关** | 计量、降级端点、重试、金丝雀检测、思考内容回传 | 模型句柄内部，见 [网关](../07_llm_gateway/01_gateway.md) |
+| **工具包装层** | 权限判定、审批挂起、重复指纹、连续错误、拦截上限 | `ctx.tools.run` 内，派发之前，见 [工具执行](06_tool_execution.md) |
+| **工具后处理** | 不可信内容信封、观察值裁剪、产物登记、验证状态 | `ctx.tools.run` 内，派发之后 |
+| **上下文装配器** | 折叠、压缩、技能索引、草稿回显、证据提醒 | `assemble()` |
+| **Recorder** | 检查点、事件流、轨迹 | `checkpoint()` 与事件端口 |
 
-### 5.1 物理预算守卫（已落地）
+## 4. 没有预算
 
-`guardrails.PhysicalBudgetGuard` 与 `loop.stages.make_budget_guard_stage`，配置 `runtime.guardrails`：
+循环、网关、Supervisor 都不设 Token、步数、挂钟上限，不统计"还剩多少额度"。服务商因余额不足、限流或鉴权失败拒绝请求时，网关把它当作普通的不可恢复错误抛出（`LLMUnavailableError` 等），任务按 `failed` 停止；充值后可以从最近的检查点续跑。
 
-| 维度 | 取值来自 | 熔断条件 | 软告警 |
+保留的刹车只有四道，都不是额度类：
+
+1. 用户取消。
+2. 工具包装层的重复指纹拦截；连续被拦截达到 `max_consecutive_blocks`（默认 5）时抛 `LoopAborted`，任务按 `failed` 停止。
+3. 金丝雀泄露：网关抛 `CanaryLeak`，任务按 `terminated` 停止。
+4. 单次模型调用的超时，在网关内，防止一次调用无限挂起。
+
+**上下文窗口不是预算。** 装配器按分词估算当前提示词规模，据此折叠与压缩，见 [窗口与压缩](../03_context/02_window_and_compaction.md)。它只影响送给模型的视图，不会终止任务。
+
+## 5. 退出与对外状态
+
+| 出口 | 条件 | 外层状态 | 可续跑 |
 |---|---|---|---|
-| 步数 | `state.step_count`（executor 每轮加一） | `>= max_steps` | `>= max_steps × warning_ratio` |
-| Token | `state.total_tokens`（含子智能体与研究的并入量） | `>= max_total_tokens` | 同上 |
-| 挂钟 | 守卫实例自己的计时 | `>= max_wall_time_sec` | 同上 |
+| `run` 正常返回 | 模型不再调用工具 | `succeeded` | 否 |
+| `ApprovalRequired` | 工具包装层要求审批 | `waiting_for_approval`（非终态） | 经决策续跑 |
+| `CancelledError` | 用户取消 | `cancelled` | 否 |
+| 模型错误 | 模型不可用、余额不足、鉴权失败、窗口溢出等 | `failed` | 是 |
+| `LoopAborted` | 连续拦截达到上限 | `failed` | 是 |
+| `CanaryLeak` | 模型输出含金丝雀 | `terminated`（安全终止） | 否 |
 
-- **触达上限即熔断**（`>=`）：步数上限 25 表示最多做 25 步，第 25 步之后、第 26 步之前停。已熔断的维度不再同时算告警。
-- **熔断**：增量为 `should_terminate = True` 加 `termination_reason`（如“步数达到上限（25/25）”，多项同时触达用“；”连接）；此时不再追加告警消息。路由因此一律到 `DONE`。
-- **软告警**：追加**一条** `user` 角色的消息，写明各维度已用/上限并请模型收敛。每个维度**只告警一次**：上下文是追加式的，反复提醒既无新信息，又会让每轮多一条消息、破坏前缀缓存。同一次判定里多项同时越线合并成一条。
-- **守卫随任务重建**：挂钟起点与“已告警”集合都不入状态，续跑时重置。因此续跑后挂钟重新计时、告警可再发一次，而 `step_count` 与 `total_tokens` 沿用——上限不变时可能立刻再次熔断（已测）。
-- `remaining_wall_sec()` 供网关计算单次调用的截止时间；守卫只在阶段之间判定，**不会打断一次正在进行的模型调用**，那是网关截止时间的职责。
-- 守卫保证了 `drive` 的终止：只要 executor 每轮增加步数，最迟在 `max_steps` 轮后必然熔断（已用“永远不收敛的任务”测试）。**前提是 executor 确实增加了 `step_count`**；这一点要在真实 executor 的测试里再次断言。
+- 工具自身的异常从不逃出 `ctx.tools.run`，一律变成失败的工具结果交给模型。
+- `failed` 与 `terminated` 的任务由 Supervisor 用代码生成**部分交付**：计划条目的完成情况、已修改的文件、笔记里的事实与失败尝试、最近一次进展；安全类终止不展开内容。正常结束的交付就是模型最后一条回复。
+- "做不到"没有专门出口：被拒绝、缺信息时模型自己说明卡在哪并结束，这条回复就是交付。工具包装层返回的拒绝结果明确写明"不要换着花样绕过被拒绝的操作，也不要编造缺失的信息"。
 
-`tool_runner` 的执行顺序固定，不可调换：
+## 6. 取消与原子对
 
-1. 读取最近一条 assistant 的 `tool_calls`。
-2. 权限闸门：逐项判定，存在未获豁免的越级时，要么消费已到达的审批决策，要么抛出 `ApprovalRequired`。
-3. 同步账本并串行准入，必须在并发派发之前，否则并发子任务会各自读到同一份余额。准入完成后、派发之前，额外提交一次带 `dispatch_started` 的检查点，用于崩溃恢复（见 [检查点](03_checkpoint_and_resume.md) §5）。这是循环里唯一一次阶段中途的提交，由 `tool_runner` 通过注入的提交回调完成。
-4. 指纹登记与死循环判定。
-5. 并发派发，被拒绝或被拦截的调用不派发，改为合成失败观察值。
-6. 观察值治理与配对 tool 消息组装。
-7. 连续错误更新与重规划通知。
-8. 预算冲销。
+`ctx.tools.run` 被取消时，在重新抛出 `CancelledError` 之前，为每个尚无结果的调用追加一条"已取消，未执行或结果未知"的工具结果并提交（此段不受取消影响）。这保证 transcript 的原子对不变量在任何出口都成立：
 
-> 上面的执行顺序已按本节落地，细节与实现取舍见 [executor 与 tool_runner](06_executor_tool_runner.md)。第 3 步（账本）暂未实现，等子智能体。
+> `assistant` 带 `tool_calls` 时，其后必须有与每个调用 id 一一对应的 `tool` 消息。唯一例外是**最后一组**：回合进行中（已提交的回复尚无结果）或任务挂起在审批上。
 
-旧版"冲销必须晚于审批闸门"的约束源自 `interrupt()` 会丢弃节点局部结果。本版挂起发生在第 2 步且不应用任何增量，约束依然成立但不再有隐蔽陷阱：挂起时尚未记账，也无需记账。
+模型端点对违反此约束的请求返回 400，所以这是正确性问题，不是风格问题。
 
-## 6. 事件
+## 7. 续跑
 
-循环在提交之后按阶段发出事件，取代旧版对流式增量的事后解析。事件名与载荷以 [HTTP API 与 SSE 契约](../09_api/) 为准，此处只列循环负责发出的类型：
+续跑只看 transcript 的尾部，不依赖任何阶段字段：
 
-| 事件 | 发出时机 |
+| 尾部形态 | 含义 | 处理 |
+|---|---|---|
+| 最后一条是不带工具调用的 assistant | 已结束 | 拒绝续跑 |
+| 最后一条是 tool 消息，或用户消息 | 回合之间 | 直接 `run`（调模型） |
+| 末组 assistant 的调用未配对，`pending_approval` 非空 | 挂起在审批上 | 绑定决策后 `run`，工具包装层重新做同一次纯判定并消费决策 |
+| 末组 assistant 的调用未配对，无挂起 | 崩溃于派发期间 | 先补齐，再 `run` |
+
+补齐规则（纯函数，幂等）：
+
+- 调用的工具声明了 `idempotent`：丢弃，重新执行。
+- 其余：合成结果"执行结果未知：任务在执行期间中断，工具可能已部分或全部生效，请先核验当前状态再决定是否重试"。
+- 整批一起处理，不留一半重放一半合成的状态。未知工具（如第三方 MCP）按非幂等。
+
+派发前提交保证崩溃后不会丢失"本回合发出过哪些调用"，从而不会让模型重新发出同一批有副作用的调用。检查点细节见 [检查点与续跑](03_checkpoint_and_resume.md)。
+
+## 8. 事件
+
+循环通过事件端口发出下列事件，提交之后才发；名称与载荷以 [事件契约](../09_api/02_events_contract.md) 为准。
+
+| 事件 | 时机 |
 |---|---|
-| `plan` | planner 提交后，带里程碑与指令 |
-| `tool.call` | executor 提交后，每个工具调用一条 |
-| `tool.result` | tool_runner 提交后，每条 tool 消息一条（结果截断） |
-| `node.finished` | 每个阶段提交后一条，含步数、累计 Token、是否终止 |
-| `task.waiting_for_approval` | 挂起检查点提交后 |
+| `model.reply` | 模型回复追加之后 |
+| `tool.call` / `tool.result` | 每个调用开始 / 每条结果追加之后 |
+| `plan.updated` | `update_plan` 执行之后 |
+| `turn.finished` | 回合结束提交之后 |
+| `task.waiting_for_approval` | 挂起检查点提交之后 |
+| `task.finished` | Supervisor 在终态提交之后 |
 
-叶子工具（研究与动态子智能体）的内部进度经任务级事件总线推送。总线在 `drive` 开始前绑定本轮的事件回调，结束或挂起时解绑，这一点沿用现有做法。
+事件发送失败只记日志，不影响任务。
 
-## 7. 入口
+## 9. 入口
 
 ```python
-async def run_task(deps, req) -> TaskOutcome:       # 新任务
-async def resume_task(deps, task_id, decision=None) # 续跑 / 提交审批决策
+async def run_task(deps, req) -> TaskOutcome:             # 新任务
+async def resume_task(deps, task_id, decision=None)       # 续跑 / 提交审批决策
 ```
 
-两者共同步骤：装配任务级运行时 → 取得状态（新建或从检查点加载）→ `drive` → 若非挂起则做收尾（回写会话记忆）→ 关闭 sidecar 客户端。细节见 [检查点与续跑](03_checkpoint_and_resume.md)。
+共同步骤：装配任务级对象（装配器资产、工具集、网关句柄、Recorder）→ 取得状态（新建或从检查点加载）→ Supervisor 包住 `run` → 非挂起则收尾（回写会话记忆，见 [记忆](../03_context/04_memory.md)）。
+
+## 10. 不变量
+
+1. 循环不读不写任何额度、权限、检查点相关的东西。
+2. 每次提交的 transcript 满足原子对不变量（最后一组按 §6 放宽）。
+3. 先提交后发事件。
+4. 工具异常不逃出 `ctx.tools.run`。
+5. transcript 只追加；折叠与压缩只发生在 `assemble()`。
+6. 同一任务同一时刻只有一个 `run`。
+
+## 11. 测试要点
+
+- 脚本化模型驱动：纯文本回复即结束；多轮工具往返；一回合多个并发调用。
+- 原子对：成功、失败、拒绝、拦截、超时、取消六种路径都产生配对结果。
+- 取消：派发期间取消后，transcript 配对完整，检查点可续跑。
+- 崩溃恢复：派发前提交后在派发期间杀进程，续跑时幂等工具重试、非幂等工具得到"结果未知"。
+- 余额不足 / 鉴权失败：网关抛错，状态为 `failed`，检查点保留，可续跑。
+- 审批：挂起前无副作用；决策绑定；拒绝后模型收到拒绝结果并继续。
+- 拦截上限：连续拦截达到上限抛 `LoopAborted`。
+- 循环内核不导入 `guardrails.budget`、`checkpoint`、`approval`（依赖方向由 `import-linter` 约束）。
+
+## 12. 实现状态
+
+**设计已定，代码未迁移。** 代码里仍是旧的五阶段实现，迁移清单见 [0006](../12_decisions/0006-pure-agent-loop.md)。

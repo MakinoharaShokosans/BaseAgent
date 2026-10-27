@@ -1,6 +1,6 @@
 # 0001 主循环保留五阶段
 
-- 状态：**已采纳**
+- 状态：**已被 [0006](0006-pure-agent-loop.md) 取代**
 - 影响：[02_runtime/02_main_loop.md](../02_runtime/02_main_loop.md)
 
 ## 背景

@@ -99,7 +99,7 @@ bash(command, timeout_sec?)
 
 ## 3. 把规范放在哪里
 
-不放进每次都发送的系统提示词（占预算），而是：
+不放进每次都发送的系统提示词（占窗口），而是：
 
 1. `bash` 工具描述里放最关键的三条：非交互、控制输出、被拒后不要绕过。
 2. 其余放进一个内置技能 `shell_best_practices`，按需 `load_skill`。
@@ -146,7 +146,7 @@ bash(command, timeout_sec?)
 - **`ok` 的判定**：有退出码时看 `exit_code == 0`；没有时看 `status == SUCCESS`；`TIMEOUT` 或 `timed_out` 一律失败，观察值保留已有输出并追加“命令执行超时（超过 N 秒），已被终止”。
 - **排队**：`QUEUED` 为 `ok=True`、无退出码，所以 `ToolResult.failed` 为假，不计入连续错误；预估等待写进观察值。
 - **策略拒绝（§1.2）**：403 与 422 单独处理，规则与原因放进观察值，`meta.policy_rejected=True`，并带 `rule`。它们**仍然是失败**（`ok=False`，计入连续错误：这是模型的失误，不是基础设施故障），与“sidecar 不可用”（`meta.dependency_unavailable=True`）区分；死循环检测照常看得到反复提交的同一条被拒命令。原因从 `detail` 的字典、列表、字符串或顶层字段里取，取不到时仍明确说“被安全策略拒绝”。
-- **产物**：`artifact_id` 取日志文件名去扩展名（`step_3_bash`），`tool_runner` 把它登记进 `state.artifacts`（见 [内置工具 §11](02_builtin_tools.md)），摘要里带句柄，全文可用 `read_artifact` 取回（§5 第 4 条成立）。
+- **产物**：`artifact_id` 取日志文件名去扩展名（`step_3_bash`），工具后处理把它登记进 `state.artifacts`（见 [内置工具 §11](02_builtin_tools.md)），摘要里带句柄，全文可用 `read_artifact` 取回（§5 第 4 条成立）。
 - **输出拼接**：stdout 在前，stderr 以 `[stderr]` 标题随后；都为空是“（无输出）”。
 
 sidecar 服务端已实现（见 [沙箱 §10](../05_security/02_shell_sandbox.md)）。**未做**：环境自检（§4）、`shell_best_practices` 内置技能（§3）。
