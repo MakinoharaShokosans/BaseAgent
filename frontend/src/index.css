@@ -221,70 +221,70 @@
 }
 
 /* Markdown 排版：无边框、宽松行距，见 03_visual_design.md §6.3 */
-.prose-aegis {
+.prose-agent {
   @apply max-w-none break-words text-[15px] leading-[1.75] text-ink;
 }
-.prose-aegis > * + * {
+.prose-agent > * + * {
   @apply mt-4;
 }
-.prose-aegis h1 {
+.prose-agent h1 {
   @apply mt-6 text-[24px] font-semibold leading-tight tracking-tight;
 }
-.prose-aegis h2 {
+.prose-agent h2 {
   @apply mt-7 text-[19px] font-semibold leading-snug tracking-tight;
 }
-.prose-aegis h3 {
+.prose-agent h3 {
   @apply mt-5 text-[16px] font-semibold;
 }
-.prose-aegis h4 {
+.prose-agent h4 {
   @apply mt-4 text-[15px] font-semibold text-ink/80;
 }
-.prose-aegis strong {
+.prose-agent strong {
   @apply font-semibold;
 }
-.prose-aegis ul {
+.prose-agent ul {
   @apply list-disc pl-5 marker:text-mute/60;
 }
-.prose-aegis ol {
+.prose-agent ol {
   @apply list-decimal pl-5 marker:text-mute;
 }
-.prose-aegis li + li {
+.prose-agent li + li {
   @apply mt-1.5;
 }
-.prose-aegis li > p {
+.prose-agent li > p {
   @apply mt-0;
 }
-.prose-aegis blockquote {
+.prose-agent blockquote {
   @apply relative pl-4 text-ink/70;
 }
-.prose-aegis blockquote::before {
+.prose-agent blockquote::before {
   content: '';
   @apply absolute inset-y-1 left-0 w-[3px] rounded-full bg-brand opacity-70;
 }
-.prose-aegis :not(pre) > code {
+.prose-agent :not(pre) > code {
   @apply rounded-md bg-ink/[0.06] px-1.5 py-0.5 font-mono text-[0.85em];
 }
-.prose-aegis pre {
+.prose-agent pre {
   @apply overflow-x-auto px-4 pb-4 pt-2 font-mono text-[12.5px] leading-relaxed no-scrollbar;
 }
-.prose-aegis pre code {
+.prose-agent pre code {
   @apply bg-transparent p-0;
 }
-.prose-aegis table {
+.prose-agent table {
   @apply w-full border-collapse overflow-hidden rounded-xl text-sm;
 }
-.prose-aegis thead {
+.prose-agent thead {
   @apply bg-ink/[0.04];
 }
-.prose-aegis th {
+.prose-agent th {
   @apply px-3 py-2 text-left text-[13px] font-semibold;
 }
-.prose-aegis td {
+.prose-agent td {
   @apply px-3 py-2 align-top;
 }
-.prose-aegis tbody tr + tr td {
+.prose-agent tbody tr + tr td {
   @apply border-t border-ink/[0.06];
 }
-.prose-aegis hr {
+.prose-agent hr {
   @apply my-6 border-0 border-t border-ink/[0.08];
 }

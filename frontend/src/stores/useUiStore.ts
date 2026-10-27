@@ -26,7 +26,9 @@ interface UiState extends Prefs {
   toggleTheme: () => void;
 }
 
-const KEY = 'aegis.ui.v2';
+const KEY = 'baseagent.ui.v2';
+/** 改名前的存储键：读得到就沿用，下次保存时写到新键 */
+const LEGACY_KEY = 'aegis.ui.v2';
 const DEFAULTS: Prefs = {
   sidebarCollapsed: false,
   inspectorOpen: true,
@@ -36,7 +38,7 @@ const DEFAULTS: Prefs = {
 
 function load(): Prefs {
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(KEY) ?? window.localStorage.getItem(LEGACY_KEY);
     return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) } : DEFAULTS;
   } catch {
     return DEFAULTS;

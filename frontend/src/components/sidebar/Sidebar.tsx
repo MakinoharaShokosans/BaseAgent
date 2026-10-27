@@ -63,7 +63,7 @@ export function Sidebar() {
       transition={SPRING}
       className="relative z-20 flex h-full shrink-0 flex-col overflow-hidden bg-side/75 backdrop-blur-2xl backdrop-saturate-150"
     >
-      <h1 className="sr-only">Aegis</h1>
+      <h1 className="sr-only">BaseAgent</h1>
 
       {/* 顶部：标题 + 新建工作区 */}
       <div

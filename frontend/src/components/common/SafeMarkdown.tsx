@@ -43,7 +43,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 
 export function SafeMarkdown({ text }: { text: string }) {
   return (
-    <div className="prose-aegis">
+    <div className="prose-agent">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: false }]]}

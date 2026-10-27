@@ -15,7 +15,7 @@ describe('App', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
-    expect(screen.getByRole('heading', { name: 'Aegis' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'BaseAgent' })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/还没有工作区/)).toBeInTheDocument());
     expect(screen.getByText('在左侧选择一个会话，或新建一个会话开始')).toBeInTheDocument();
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
