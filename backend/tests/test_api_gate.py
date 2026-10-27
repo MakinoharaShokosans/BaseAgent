@@ -99,7 +99,7 @@ def test_token_file_is_created_private_and_reused(tmp_path: Path) -> None:
 @pytest.mark.security
 def test_environment_token_wins_over_the_file(tmp_path: Path) -> None:
     got = provision_token(
-        tmp_path / "t", env={"AEGIS_API_TOKEN": " fromenv "}, env_name="AEGIS_API_TOKEN"
+        tmp_path / "t", env={"BASEAGENT_API_TOKEN": " fromenv "}, env_name="BASEAGENT_API_TOKEN"
     )
     assert got == "fromenv" and not (tmp_path / "t").exists()
 
@@ -123,8 +123,8 @@ async def test_loopback_hosts_are_allowed(rig: ApiRig, host: str) -> None:
 
 @pytest.mark.security
 async def test_configured_extra_hosts_are_allowed(tmp_path: Path) -> None:
-    async for rig in build_rig(tmp_path, allowed_hosts=["aegis.local"]):
-        ok = await rig.client.get(URL, headers={**HEADERS, "Host": "aegis.local"})
+    async for rig in build_rig(tmp_path, allowed_hosts=["baseagent.local"]):
+        ok = await rig.client.get(URL, headers={**HEADERS, "Host": "baseagent.local"})
         assert ok.status_code == 200
 
 

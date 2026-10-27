@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping
 
-from agent_runtime.core import AegisTool, ToolSchema
+from agent_runtime.core import AgentTool, ToolSchema
 from tools.core.errors import ToolRegistryError
 
 
@@ -17,12 +17,12 @@ class ToolRegistry:
 
     def __init__(
         self,
-        tools: Iterable[AegisTool],
+        tools: Iterable[AgentTool],
         *,
         allow_untrusted: bool = False,
         untrusted_allowlist: Collection[str] | None = None,
     ) -> None:
-        registered: dict[str, AegisTool] = {}
+        registered: dict[str, AgentTool] = {}
         for tool in tools:
             name = tool.name
             if not name:
@@ -35,9 +35,9 @@ class ToolRegistry:
                 if untrusted_allowlist is not None and name not in untrusted_allowlist:
                     raise ToolRegistryError(f"不可信工具 {name} 没有逐名授权")
             registered[name] = tool
-        self._tools: Mapping[str, AegisTool] = registered
+        self._tools: Mapping[str, AgentTool] = registered
 
-    def get(self, name: str) -> AegisTool | None:
+    def get(self, name: str) -> AgentTool | None:
         return self._tools.get(name)
 
     def knows(self, name: str) -> bool:

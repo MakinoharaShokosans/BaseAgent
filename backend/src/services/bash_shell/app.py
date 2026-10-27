@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from aegis_config.models import BashShellConfig
+from baseagent_config.models import BashShellConfig
 from services.bash_shell.audit import audit
 from services.bash_shell.distill import DistillLimits
 from services.bash_shell.paths import PathEscape, check_write_targets, extract_write_targets
@@ -66,7 +66,7 @@ def create_app(settings: ShellSettings) -> FastAPI:
         cfg.distill_max_keyword_lines,
         cfg.structured_sniff_max_bytes,
     )
-    app = FastAPI(title="Aegis bash_shell", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="BaseAgent bash_shell", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]

@@ -9,11 +9,11 @@ from typing import Any
 
 from fastapi import Request
 
-from aegis_config import Settings
 from agent_runtime.context import PromptLibrary
 from agent_runtime.memory import CompactionResult, MemoryStore
 from agent_runtime.observability import EventHub, Redactor
 from agent_runtime.runtime.service import TaskService
+from baseagent_config import Settings
 
 JsonList = Callable[[], list[dict[str, Any]]]
 

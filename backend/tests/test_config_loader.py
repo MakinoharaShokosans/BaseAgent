@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from aegis_config import ConfigError, LoadedSettings, load_settings
+from baseagent_config import ConfigError, LoadedSettings, load_settings
 
 #: 最小可用配置：只有两档模型（云端端点，需要密钥）
 MINIMAL = """
@@ -42,7 +42,7 @@ max_output_tokens = 2048
 def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """清掉会影响加载的变量，并让工作目录落在空的临时目录，避免读到仓库里的配置。"""
     for name in list(os.environ):
-        if name.startswith("AEGIS_") or name == "TEST_API_KEY":
+        if name.startswith(("BASEAGENT_", "AEGIS_")) or name == "TEST_API_KEY":
             monkeypatch.delenv(name)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TEST_API_KEY", "sk-test")
@@ -50,8 +50,8 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    path = tmp_path / "aegis_home"
-    monkeypatch.setenv("AEGIS_HOME", str(path))
+    path = tmp_path / "baseagent_home"
+    monkeypatch.setenv("BASEAGENT_HOME", str(path))
     return path
 
 
@@ -120,7 +120,7 @@ def test_explicit_argument_beats_env_var(
 ) -> None:
     arg = _write(tmp_path, MINIMAL + "\n[server]\nport = 1111\n", "arg.toml")
     env = _write(tmp_path, MINIMAL + "\n[server]\nport = 2222\n", "env.toml")
-    monkeypatch.setenv("AEGIS_CONFIG", str(env))
+    monkeypatch.setenv("BASEAGENT_CONFIG", str(env))
     assert load_settings(config_path=arg).settings.server.port == 1111
     assert load_settings().settings.server.port == 2222
 
@@ -140,7 +140,7 @@ def test_discovery_prefers_cwd_config_over_home(tmp_path: Path, home: Path) -> N
 def test_the_repo_config_is_the_last_fallback(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = home.parent / "repo.toml"
     repo.write_text(MINIMAL + "\n[server]\nport = 5555\n", encoding="utf-8")
-    monkeypatch.setattr("aegis_config.loader.REPO_CONFIG", repo)
+    monkeypatch.setattr("baseagent_config.loader.REPO_CONFIG", repo)
     assert load_settings().settings.server.port == 5555
 
 
@@ -155,14 +155,14 @@ def test_discovery_falls_back_to_home(tmp_path: Path, home: Path) -> None:
 def test_missing_explicit_config_is_an_error(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AEGIS_CONFIG", str(tmp_path / "nope.toml"))
+    monkeypatch.setenv("BASEAGENT_CONFIG", str(tmp_path / "nope.toml"))
     with pytest.raises(ConfigError, match=r"nope\.toml"):
         load_settings()
 
 
 @pytest.mark.unit
 def test_no_config_anywhere_is_an_error(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aegis_config.loader.REPO_CONFIG", home / "no_repo_config.toml")
+    monkeypatch.setattr("baseagent_config.loader.REPO_CONFIG", home / "no_repo_config.toml")
     with pytest.raises(ConfigError, match="未找到"):
         load_settings()
 
@@ -178,7 +178,7 @@ def test_precedence_file_env_overrides(
 ) -> None:
     body = MINIMAL + "\n[server]\nport = 1000\n"
     assert _load(tmp_path, body).settings.server.port == 1000
-    monkeypatch.setenv("AEGIS_SERVER__PORT", "2000")
+    monkeypatch.setenv("BASEAGENT_SERVER__PORT", "2000")
     assert _load(tmp_path, body).settings.server.port == 2000
     assert _load(tmp_path, body, overrides={"server": {"port": 3000}}).settings.server.port == 3000
 
@@ -187,7 +187,7 @@ def test_precedence_file_env_overrides(
 def test_env_override_reaches_deeply_nested_keys(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AEGIS_RUNTIME__GUARDRAILS__MAX_STEPS", "40")
+    monkeypatch.setenv("BASEAGENT_RUNTIME__GUARDRAILS__MAX_STEPS", "40")
     assert _load(tmp_path).settings.runtime.guardrails.max_steps == 40
 
 
@@ -195,7 +195,7 @@ def test_env_override_reaches_deeply_nested_keys(
 def test_env_override_merges_instead_of_replacing_the_section(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AEGIS_MODELS__FAST__TEMPERATURE", "0.7")
+    monkeypatch.setenv("BASEAGENT_MODELS__FAST__TEMPERATURE", "0.7")
     loaded = _load(tmp_path)
     assert loaded.settings.models.fast.temperature == 0.7
     assert loaded.settings.models.fast.endpoints[0].name == "f"  # 端点列表保留
@@ -205,7 +205,7 @@ def test_env_override_merges_instead_of_replacing_the_section(
 def test_env_override_with_bad_value_is_rejected(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AEGIS_SERVER__PORT", "eighty")
+    monkeypatch.setenv("BASEAGENT_SERVER__PORT", "eighty")
     assert any("server.port" in p for p in _fails(tmp_path).problems)
 
 
@@ -214,13 +214,13 @@ def test_env_override_with_bad_value_is_rejected(
 def test_env_cannot_turn_listen_address_non_loopback(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AEGIS_SERVER__HOST", "0.0.0.0")
+    monkeypatch.setenv("BASEAGENT_SERVER__HOST", "0.0.0.0")
     assert any("回环" in p for p in _fails(tmp_path).problems)
 
 
 @pytest.mark.unit
 def test_env_typo_is_rejected(tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AEGIS_SERVER__PROT", "9000")
+    monkeypatch.setenv("BASEAGENT_SERVER__PROT", "9000")
     assert any("server.prot" in p for p in _fails(tmp_path).problems)
 
 
@@ -228,11 +228,11 @@ def test_env_typo_is_rejected(tmp_path: Path, home: Path, monkeypatch: pytest.Mo
 @pytest.mark.parametrize(
     "name",
     [
-        "AEGIS_SERVER__CORS_ALLOW_ORIGINS",  # 列表
-        "AEGIS_SERVER",  # 整节
-        "AEGIS_SERVER__AUTH",  # 子表
-        "AEGIS_MODELS__REASONING__ENDPOINTS",  # 端点列表
-        "AEGIS_MCP__SERVERS__GITHUB__ENABLED",  # 字典里的项
+        "BASEAGENT_SERVER__CORS_ALLOW_ORIGINS",  # 列表
+        "BASEAGENT_SERVER",  # 整节
+        "BASEAGENT_SERVER__AUTH",  # 子表
+        "BASEAGENT_MODELS__REASONING__ENDPOINTS",  # 端点列表
+        "BASEAGENT_MCP__SERVERS__GITHUB__ENABLED",  # 字典里的项
     ],
 )
 def test_env_cannot_override_arrays_or_tables(
@@ -245,14 +245,14 @@ def test_env_cannot_override_arrays_or_tables(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "name", ["AEGIS_HOME", "AEGIS_CONFIG", "AEGIS_API_TOKEN", "AEGIS_PROXY_TARGET"]
+    "name", ["BASEAGENT_HOME", "BASEAGENT_CONFIG", "BASEAGENT_API_TOKEN", "BASEAGENT_PROXY_TARGET"]
 )
 def test_reserved_variables_are_not_config_overrides(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    if name != "AEGIS_HOME":
-        monkeypatch.setenv(name, str(tmp_path / "x") if name == "AEGIS_CONFIG" else "v")
-    if name == "AEGIS_CONFIG":
+    if name != "BASEAGENT_HOME":
+        monkeypatch.setenv(name, str(tmp_path / "x") if name == "BASEAGENT_CONFIG" else "v")
+    if name == "BASEAGENT_CONFIG":
         shutil.copy(_write(tmp_path), tmp_path / "x")
     assert _load(tmp_path).warnings == ()
 
@@ -294,7 +294,7 @@ def test_relative_home_in_file_is_rejected(tmp_path: Path) -> None:
 def test_relative_home_in_env_is_made_absolute(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AEGIS_HOME", "storage")
+    monkeypatch.setenv("BASEAGENT_HOME", "storage")
     assert _load(tmp_path).home == tmp_path / "storage"
 
 
@@ -326,16 +326,16 @@ def test_unwritable_home_refuses_to_start(tmp_path: Path, home: Path) -> None:
 @pytest.mark.unit
 def test_relative_paths_resolve_under_home(tmp_path: Path, home: Path) -> None:
     loaded = _load(tmp_path)
-    assert loaded.resolve("logs/aegis.jsonl") == home / "logs" / "aegis.jsonl"
-    assert loaded.paths.metadata_db == home / "aegis_meta.db"
+    assert loaded.resolve("logs/baseagent.jsonl") == home / "logs" / "baseagent.jsonl"
+    assert loaded.paths.metadata_db == home / "baseagent_meta.db"
     assert loaded.paths.canary_salt == home / "canary_salt"
     assert loaded.paths.api_token == home / "api_token"
 
 
 @pytest.mark.unit
 def test_absolute_paths_pass_through(tmp_path: Path, home: Path) -> None:
-    body = MINIMAL + '\n[storage]\ntraces_dir = "/var/tmp/aegis-traces"\n'
-    assert _load(tmp_path, body).paths.traces_dir == Path("/var/tmp/aegis-traces")
+    body = MINIMAL + '\n[storage]\ntraces_dir = "/var/tmp/baseagent-traces"\n'
+    assert _load(tmp_path, body).paths.traces_dir == Path("/var/tmp/baseagent-traces")
 
 
 @pytest.mark.security

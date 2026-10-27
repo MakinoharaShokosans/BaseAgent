@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from agent_runtime.core import AegisTool, ToolResult
+from agent_runtime.core import AgentTool, ToolResult
 
 if TYPE_CHECKING:
     from mcps.manager import McpManager
 
 
-class McpTool(AegisTool):
+class McpTool(AgentTool):
     trust = "untrusted"
 
     def __init__(

@@ -21,7 +21,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from aegis_config.models import WebSearchConfig
+from baseagent_config.models import WebSearchConfig
 from services.common import LoopbackGuard
 from services.web_search.extract import extract_text, title_of
 from services.web_search.netguard import SafeFetcher
@@ -69,7 +69,7 @@ def fingerprint(text: str) -> str:
 
 def create_app(services: WebServices) -> FastAPI:
     cfg = services.config
-    app = FastAPI(title="Aegis web_search", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="BaseAgent web_search", docs_url=None, redoc_url=None, openapi_url=None)
     host_slots: defaultdict[str, asyncio.Semaphore] = defaultdict(
         lambda: asyncio.Semaphore(cfg.per_host_concurrency)
     )

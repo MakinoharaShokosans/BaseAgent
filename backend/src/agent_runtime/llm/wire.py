@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
-from aegis_config.models import Endpoint
 from agent_runtime.core import Message, ToolCall, ToolSchema
 from agent_runtime.llm.errors import LLMInvalidResponse
 from agent_runtime.llm.structured import (
@@ -22,6 +21,7 @@ from agent_runtime.llm.structured import (
 )
 from agent_runtime.llm.tokens import estimate_completion_tokens, estimate_prompt_tokens
 from agent_runtime.llm.types import LLMRequest, TokenUsage
+from baseagent_config.models import Endpoint
 
 #: DeepSeek 的三档强度（见 docs/07_llm_gateway/04_deepseek.md §3）
 _DEEPSEEK_EFFORT: Final = {"low": "low", "medium": "high", "high": "high", "max": "max"}

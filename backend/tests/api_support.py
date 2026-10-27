@@ -11,7 +11,6 @@ from typing import Any
 import httpx
 from fastapi import FastAPI
 
-from aegis_config import Settings
 from agent_runtime.api import ApiServices, create_app
 from agent_runtime.approval import compute_approval_id
 from agent_runtime.checkpoint import CheckpointStore
@@ -33,6 +32,7 @@ from agent_runtime.runtime import (
     TaskRunner,
 )
 from agent_runtime.runtime.service import TaskService
+from baseagent_config import Settings
 
 DONE_MS = Milestone(id=0, title="m", status="completed")
 OPEN_MS = Milestone(id=0, title="m")

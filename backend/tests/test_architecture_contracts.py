@@ -40,13 +40,13 @@ VIOLATIONS = [
         "工具层不依赖运行时",
     ),
     (
-        "src/aegis_config/_v_config.py",
+        "src/baseagent_config/_v_config.py",
         "import agent_runtime.core\n",
         "配置包零项目内依赖",
     ),
     (
         "src/agent_runtime/core/_v_core_cfg.py",
-        "import aegis_config\n",
+        "import baseagent_config\n",
         "core 零项目内依赖",
     ),
     (
@@ -100,9 +100,9 @@ ALLOWED = [
         "import agent_runtime.approval\n",
     ),
     ("src/agent_runtime/api/_ok_runtime.py", "import agent_runtime.runtime\n"),
-    ("src/services/bash_shell/_ok_cfg.py", "import aegis_config\n"),
-    ("src/tools/core/_ok_cfg.py", "import aegis_config\n"),
-    ("src/agent_runtime/llm/_ok_cfg.py", "import aegis_config\n"),
+    ("src/services/bash_shell/_ok_cfg.py", "import baseagent_config\n"),
+    ("src/tools/core/_ok_cfg.py", "import baseagent_config\n"),
+    ("src/agent_runtime/llm/_ok_cfg.py", "import baseagent_config\n"),
     ("src/tools/core/_ok_core.py", "import agent_runtime.core\n"),
     ("src/tools/core/_ok_guard.py", "import agent_runtime.guardrails\n"),
     ("src/mcps/_ok_mcps.py", "import agent_runtime.guardrails\nimport agent_runtime.core\n"),

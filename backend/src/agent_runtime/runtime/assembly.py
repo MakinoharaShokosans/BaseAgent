@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from aegis_config import Settings
 from agent_runtime.approval import check_binding, compute_approval_id
 from agent_runtime.context import (
     FoldPolicy,
@@ -30,6 +29,7 @@ from agent_runtime.memory import (
 from agent_runtime.runtime.errors import FullPermissionsNotConfirmedError
 from agent_runtime.runtime.memory_flow import MemoryFlow
 from agent_runtime.skills import SkillLimits, SkillRegistry, SkillRoot, skill_roots
+from baseagent_config import Settings
 from tools.builtin import FileLimits
 
 
@@ -126,13 +126,19 @@ def skill_limits_from_settings(settings: Settings) -> SkillLimits:
 _BUILTIN_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 
 
+def _default_global_skills_dir() -> Path:
+    """全局技能目录是 ``~/.baseagent/skills``；旧的 ``~/.aegis/skills`` 在而新的不在时沿用旧的。"""
+    new, old = Path.home() / ".baseagent" / "skills", Path.home() / ".aegis" / "skills"
+    return old if old.is_dir() and not new.exists() else new
+
+
 def skill_roots_from_settings(
     settings: Settings, workspace_root: Path, *, global_dir: Path | None = None
 ) -> tuple[SkillRoot, ...]:
     k = settings.skills
     return skill_roots(
         builtin_dir=_BUILTIN_SKILLS_DIR,
-        global_dir=global_dir or Path.home() / ".aegis" / "skills",
+        global_dir=global_dir or _default_global_skills_dir(),
         workspace_root=workspace_root,
         allow_builtin=k.allow_builtin,
         allow_global=k.allow_global,

@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from agent_runtime.core import AegisTool, ToolResult, Trust
+from agent_runtime.core import AgentTool, ToolResult, Trust
 from tools.core.registry import ToolRegistry
 
 #: (tool_call_id, 工具名, 参数)
@@ -54,7 +54,7 @@ class ToolDispatcher:
             result = result.model_copy(update={"duration_ms": elapsed})
         return DispatchedResult(call_id, name, result, result.trust or tool.trust)
 
-    async def _invoke(self, tool: AegisTool, args: Mapping[str, Any]) -> ToolResult:
+    async def _invoke(self, tool: AgentTool, args: Mapping[str, Any]) -> ToolResult:
         try:
             return await asyncio.wait_for(tool.invoke(args), timeout=tool.timeout_sec)
         except TimeoutError:

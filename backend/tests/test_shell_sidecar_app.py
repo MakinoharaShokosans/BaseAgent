@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
-from aegis_config.models import BashShellConfig
+from baseagent_config.models import BashShellConfig
 from services.bash_shell.app import ShellSettings, create_app
 from tools.builtin import BashTool
 from tools.core import SidecarClient

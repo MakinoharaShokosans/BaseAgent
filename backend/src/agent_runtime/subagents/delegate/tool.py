@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
-from agent_runtime.core import AegisTool, ToolResult
+from agent_runtime.core import AgentTool, ToolResult
 from agent_runtime.guardrails import BudgetLedger, ChildBudget
 from agent_runtime.subagents.delegate.render import render_report
 from agent_runtime.subagents.delegate.runner import SubagentRunner
@@ -20,7 +20,7 @@ _MAX_GOAL = 1200
 _DEADLINE_MARGIN_SEC = 15.0
 
 
-class SpawnSubagentTool(AegisTool):
+class SpawnSubagentTool(AgentTool):
     name = "spawn_subagent"
     description = (
         "临时组建一个受限的子劳动力，去完成一个需要阅读大量材料、但只需回流简短结论的子任务"
@@ -53,7 +53,7 @@ class SpawnSubagentTool(AegisTool):
     def __init__(
         self,
         runner_factory: Callable[[ToolRegistry], SubagentRunner],
-        parent_tools: Callable[[], Mapping[str, AegisTool]],
+        parent_tools: Callable[[], Mapping[str, AgentTool]],
         ledger: BudgetLedger,
         *,
         enabled: bool,
@@ -122,7 +122,7 @@ class SpawnSubagentTool(AegisTool):
             trust="untrusted",
         )
 
-    def _narrow(self, requested: object) -> list[AegisTool] | str:
+    def _narrow(self, requested: object) -> list[AgentTool] | str:
         """工具集收窄：全有或全无，不做静默收窄。"""
         if not isinstance(requested, list) or not requested:
             return "assigned_tools 不能为空：不提供默认授权，不给就是没有"

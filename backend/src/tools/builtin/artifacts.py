@@ -8,7 +8,7 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any, Final
 
-from agent_runtime.core import AegisTool, ToolResult, Trust
+from agent_runtime.core import AgentTool, ToolResult, Trust
 from tools.builtin.files import FileLimits, numbered, page_result, parse_range, read_page
 from tools.builtin.paths import text_arg
 
@@ -50,7 +50,7 @@ def producer_candidates(artifact_id: str) -> tuple[str, ...]:
     return (tail,) if stripped in ("", tail) else (tail, stripped)
 
 
-class ReadArtifactTool(AegisTool):
+class ReadArtifactTool(AgentTool):
     name = "read_artifact"
     description = (
         "读取本任务中被裁剪的完整输出，按 artifact_id 取回（句柄形如 artifact://obs_step_3_bash）。"

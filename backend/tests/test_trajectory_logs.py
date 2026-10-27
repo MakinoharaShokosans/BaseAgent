@@ -178,7 +178,7 @@ async def test_the_hub_feeds_the_recorder_and_a_failing_sink_does_not_stop_event
 
 @pytest.fixture
 def log_file(tmp_path: Path):  # type: ignore[no-untyped-def]
-    path = tmp_path / "logs" / "aegis.jsonl"
+    path = tmp_path / "logs" / "baseagent.jsonl"
     setup_logging(
         level="DEBUG", console=False, file=path, rotation_mb=1, retention_files=2, redactor=REDACTOR
     )

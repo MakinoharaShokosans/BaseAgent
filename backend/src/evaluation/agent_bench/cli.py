@@ -1,10 +1,10 @@
-"""``aegis-bench``：对一个运行中的 Aegis 服务跑评测。默认不运行，只有显式调用才会花 Token。
+"""``baseagent-bench``：对一个运行中的 BaseAgent 服务跑评测。默认不运行，只有显式调用才会花 Token。
 
-    aegis-bench --builtin --repeat 3 --label baseline
-    aegis-bench --cases my_cases.json --only fix_failing_test
-    aegis-bench --compare eval_reports/a.json eval_reports/b.json
+    baseagent-bench --builtin --repeat 3 --label baseline
+    baseagent-bench --cases my_cases.json --only fix_failing_test
+    baseagent-bench --compare eval_reports/a.json eval_reports/b.json
 
-服务需要已经启动（``aegis start``），并配好了模型密钥。评测在临时目录里建工作区，结束后清理。
+服务需要已经启动（``baseagent start``），并配好了模型密钥。评测在临时目录里建工作区，结束后清理。
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -20,6 +19,7 @@ from pathlib import Path
 
 import httpx
 
+from baseagent_config import env_value, pick_home
 from evaluation.agent_bench.cases import BUILTIN, Case, load_cases, select
 from evaluation.agent_bench.report import build_report, compare, save, to_markdown
 from evaluation.agent_bench.runner import BenchOptions, BenchRunner, CaseResult
@@ -29,15 +29,14 @@ API_PREFIX = "/api/v1"
 
 
 def _home() -> Path:
-    env = os.environ.get("AEGIS_HOME")
-    return Path(env).expanduser() if env else Path("~/.local/share/aegis").expanduser()
+    return pick_home()
 
 
 def read_token(explicit: str | None, token_file: Path | None) -> str:
-    """令牌来源：参数 → 环境变量 AEGIS_API_TOKEN → 令牌文件。永远不打印。"""
+    """令牌来源：参数 → 环境变量 BASEAGENT_API_TOKEN → 令牌文件。永远不打印。"""
     if explicit:
         return explicit
-    if value := os.environ.get("AEGIS_API_TOKEN", "").strip():
+    if value := (env_value("API_TOKEN") or "").strip():
         return value
     path = token_file or _home() / "api_token"
     try:
@@ -47,8 +46,8 @@ def read_token(explicit: str | None, token_file: Path | None) -> str:
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="aegis-bench", description=__doc__.split("\n\n")[0])
-    p.add_argument("--url", default=os.environ.get("AEGIS_URL", DEFAULT_URL), help="服务地址")
+    p = argparse.ArgumentParser(prog="baseagent-bench", description=__doc__.split("\n\n")[0])
+    p.add_argument("--url", default=env_value("URL") or DEFAULT_URL, help="服务地址")
     p.add_argument("--token", default=None, help="访问令牌（缺省读环境变量或令牌文件）")
     p.add_argument("--token-file", type=Path, default=None)
     src = p.add_mutually_exclusive_group()
@@ -94,14 +93,14 @@ async def run(args: argparse.Namespace, cases: Sequence[Case]) -> int:
             health = await client.get("/health/dependencies")
         except httpx.HTTPError as exc:
             print(
-                f"连不上 {args.url}：{type(exc).__name__}。先用 `aegis start` 启动服务。",
+                f"连不上 {args.url}：{type(exc).__name__}。先用 `baseagent start` 启动服务。",
                 file=sys.stderr,
             )
             return 2
         if health.status_code == 401:
-            print("访问令牌被拒绝，检查 --token / AEGIS_API_TOKEN。", file=sys.stderr)
+            print("访问令牌被拒绝，检查 --token / BASEAGENT_API_TOKEN。", file=sys.stderr)
             return 2
-        with tempfile.TemporaryDirectory(prefix="aegis-bench-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="baseagent-bench-") as tmp:
             runner = BenchRunner(client, Path(tmp), options=options)
             results = await runner.run(cases, repeat=args.repeat, progress=_announce)
     report = build_report(results, {"label": args.label, "url": args.url, "repeat": args.repeat})

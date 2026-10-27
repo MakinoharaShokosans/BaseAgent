@@ -89,7 +89,7 @@ async def test_saving_creates_new_files_atomically_and_keeps_permissions(rig: Ap
     target.chmod(0o755)
     await rig.client.put(url, json={"path": "new/dir/f.sh", "content": "echo 2"}, headers=HEADERS)
     assert target.stat().st_mode & 0o777 == 0o755
-    assert not [p for p in target.parent.iterdir() if p.name.startswith(".aegis-")]
+    assert not [p for p in target.parent.iterdir() if p.name.startswith(".baseagent-")]
 
 
 @pytest.mark.unit

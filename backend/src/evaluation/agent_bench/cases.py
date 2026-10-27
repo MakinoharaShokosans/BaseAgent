@@ -191,10 +191,10 @@ BUILTIN: Final[tuple[Case, ...]] = (
     Case(
         id="create_script",
         category="write",
-        goal="创建 hello.py，运行后打印 Hello, Aegis!，并运行它确认输出正确。",
+        goal="创建 hello.py，运行后打印 Hello, BaseAgent!，并运行它确认输出正确。",
         checks=(
             Check("file_exists", path="hello.py"),
-            Check("command_ok", cmd=("python", "hello.py"), text="Hello, Aegis!"),
+            Check("command_ok", cmd=("python", "hello.py"), text="Hello, BaseAgent!"),
         ),
     ),
     Case(

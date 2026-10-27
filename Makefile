@@ -1,4 +1,4 @@
-# Aegis 开发任务入口。包装 uv 与 pnpm 命令，细节见 docs/01_architecture/05_tech_stack.md §6。
+# BaseAgent 开发任务入口。包装 uv 与 pnpm 命令，细节见 docs/01_architecture/05_tech_stack.md §6。
 
 .DEFAULT_GOAL := help
 BACKEND := backend

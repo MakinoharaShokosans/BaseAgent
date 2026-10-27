@@ -38,15 +38,15 @@ from agent_runtime.core.state import (
 )
 from agent_runtime.core.suspend import ApprovalRequired
 from agent_runtime.core.taskctx import current_task_id
-from agent_runtime.core.tools import AegisTool, ToolResult, ToolSchema, Trust
+from agent_runtime.core.tools import AgentTool, ToolResult, ToolSchema, Trust
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
     "DONE",
     "MIGRATIONS",
     "MINIMUM_SCHEMA_VERSION",
-    "AegisTool",
     "AgentState",
+    "AgentTool",
     "ApprovalDecision",
     "ApprovalRequired",
     "AtomicPairError",

@@ -1,12 +1,12 @@
 # ==============================================================================
-# Aegis 配置文件 (config/config.toml)
+# BaseAgent 配置文件 (config/config.toml)
 #
 # 规则：
 #   1. 本文件可以入版本库，**不含任何密钥**。密钥只写环境变量名 (api_key_env 等)，
 #      真实值放在 .env，见 .env.example。
-#   2. 优先级（高覆盖低）：命令行参数 > 环境变量 AEGIS_<节>__<键> > 本文件 > 代码内置默认值。
-#      例：AEGIS_SERVER__PORT=8010 覆盖 [server] port。
-#   3. 路径类配置中的相对路径，相对数据目录 AEGIS_HOME 解析（见 [app]），不是当前目录。
+#   2. 优先级（高覆盖低）：命令行参数 > 环境变量 BASEAGENT_<节>__<键> > 本文件 > 代码内置默认值。
+#      例：BASEAGENT_SERVER__PORT=8010 覆盖 [server] port。
+#   3. 路径类配置中的相对路径，相对数据目录 BASEAGENT_HOME 解析（见 [app]），不是当前目录。
 #   4. 加载时强校验，不合法直接拒绝启动（例如监听非回环地址）。
 #   5. 标注“待验证”的值依据官方文档摘要，上线前需用真实密钥验证，见 docs/07_llm_gateway/04_deepseek.md。
 #
@@ -18,10 +18,12 @@
 # 1. 应用与数据目录
 # ------------------------------------------------------------------------------
 [app]
-# 数据目录。环境变量 AEGIS_HOME 优先。所有相对路径都相对它解析。
+# 数据目录。环境变量 BASEAGENT_HOME 优先。所有相对路径都相对它解析。
 # 这里必须是绝对路径或以 ~ 开头（相对路径会让不同目录启动得到不同数据集）。
-# 开发时想用仓库内的目录，设环境变量 AEGIS_HOME=./storage。
-home = "~/.local/share/aegis"
+# 开发时想用仓库内的目录，设环境变量 BASEAGENT_HOME=./storage。
+# 改名前的数据目录 ~/.local/share/aegis 还在、新目录还没建时，会自动沿用旧目录（启动时有提示）。
+# 旧的环境变量 AEGIS_* 仍然有效，同名的 BASEAGENT_* 优先。
+home = "~/.local/share/baseagent"
 
 
 # ------------------------------------------------------------------------------
@@ -30,7 +32,7 @@ home = "~/.local/share/aegis"
 [logging]
 level = "INFO"                      # 控制台最低级别；文件固定 DEBUG
 console = true
-file = "logs/aegis.jsonl"           # JSON Lines，含 task_id / span_id
+file = "logs/baseagent.jsonl"           # JSON Lines，含 task_id / span_id
 rotation_mb = 20
 retention_files = 10
 
@@ -39,7 +41,7 @@ retention_files = 10
 # 3. 存储与保留策略
 # ------------------------------------------------------------------------------
 [storage]
-metadata_db = "aegis_meta.db"       # 工作区、会话、对话流水、记忆
+metadata_db = "baseagent_meta.db"       # 工作区、会话、对话流水、记忆
 checkpoint_db = "checkpoints/state.db"   # 新库文件名，不与旧版 LangGraph 库混用
 events_db = "events/events.db"      # 任务事件持久化
 traces_dir = "traces"               # 轨迹、span、llm.call 外置内容
@@ -74,7 +76,7 @@ docs_enabled = true                 # /docs 与 /openapi.json；非开发环境�
 [server.auth]
 enabled = true                      # 令牌认证。除健康检查外所有接口都需要
 token_file = "api_token"            # 首次启动自动生成 256 位随机令牌，权限 0600
-token_env = "AEGIS_API_TOKEN"       # 可选：环境变量优先于文件（测试或容器场景）
+token_env = "BASEAGENT_API_TOKEN"       # 可选：环境变量优先于文件（测试或容器场景）
 fail_limit = 10                     # 同一来源连续失败达到次数后短暂拒绝
 fail_window_sec = 60
 
@@ -263,7 +265,7 @@ require_provenance = true           # 没有出处的事实丢弃
 [context.rules]
 allow_workspace = false             # 工作区规则文件（CLAUDE.md / AGENTS.md 等）。默认关闭，开启即视为用户授权
 max_chars = 8000
-candidates = ["CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".aegis/rules.md"]
+candidates = ["CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".baseagent/rules.md", ".aegis/rules.md"]
 
 [context.prompt]
 memory_role = "user"                # 记忆段以哪种消息角色渲染: user | system；默认 user 侧（待验证）
@@ -298,7 +300,7 @@ auto_start_sidecars = true          # 启动 Agent 时拉起并托管 sidecar；
 startup_timeout_sec = 10
 stop_grace_sec = 3
 # 传给 sidecar 子进程的环境变量白名单。其余（尤其是各类 *_KEY / *_TOKEN）一律不传。
-sidecar_env_allowlist = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "PYTHONPATH", "PYTHONUNBUFFERED", "AEGIS_CONFIG", "AEGIS_HOME"]
+sidecar_env_allowlist = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "PYTHONPATH", "PYTHONUNBUFFERED", "BASEAGENT_CONFIG", "BASEAGENT_HOME", "AEGIS_CONFIG", "AEGIS_HOME"]
 
 
 # ------------------------------------------------------------------------------
@@ -341,7 +343,7 @@ request_timeout_sec = 10
 total_timeout_sec = 30
 max_content_tokens = 1500           # 正文超过则落盘，只回预览
 preview_chars = 200
-user_agent = "Mozilla/5.0 (compatible; AegisBot/0.1)"
+user_agent = "Mozilla/5.0 (compatible; BaseAgentBot/0.1)"
 artifacts_dir = "artifacts"
 # 抓取安全（SSRF 防护）
 block_private_addresses = true      # 拒绝回环、私网、链路本地、元数据地址；每次请求与每次重定向都校验
@@ -398,8 +400,8 @@ denied_tools = ["spawn_subagent", "delegate_research"]
 # ------------------------------------------------------------------------------
 [skills]
 allow_builtin = true
-allow_global = true                 # ~/.aegis/skills
-allow_workspace = false             # <工作区>/.aegis/skills；默认拒绝（克隆恶意仓库即可注入）
+allow_global = true                 # ~/.baseagent/skills
+allow_workspace = false             # <工作区>/.baseagent/skills；默认拒绝（克隆恶意仓库即可注入）
 protect_trusted_names = true        # 低信任技能不得顶替同名的可信技能
 scan_untrusted_body = true          # 对不可信来源技能的正文也做注入样态扫描
 max_description_chars = 200

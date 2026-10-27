@@ -14,7 +14,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel, Field, ValidationError
 
-from aegis_config.models import Capabilities
 from agent_runtime.llm.structured import (
     StructuredSpec,
     choose_path,
@@ -22,6 +21,7 @@ from agent_runtime.llm.structured import (
     extract_json_object,
     strict_json_schema,
 )
+from baseagent_config.models import Capabilities
 
 # ==============================================================================
 # extract_json_object

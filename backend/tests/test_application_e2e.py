@@ -17,7 +17,6 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
-from aegis_config import load_settings
 from agent_runtime.api import create_app
 from agent_runtime.bootstrap import Application
 from agent_runtime.llm import LLMRequest, LLMResponse, Parsed, TokenUsage
@@ -27,6 +26,7 @@ from agent_runtime.loop.stages.contracts import (
     PlannerVerdict,
 )
 from api_support import HEADERS, REPO_ROOT, TOKEN
+from baseagent_config import load_settings
 from stage_support import call_response
 
 V1 = "/api/v1"

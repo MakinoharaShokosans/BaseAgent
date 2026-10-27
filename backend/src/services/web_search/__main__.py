@@ -8,14 +8,14 @@ from pathlib import Path
 
 import uvicorn
 
-from aegis_config import ConfigError, load_settings
+from baseagent_config import ConfigError, load_settings
 from services.web_search.app import WebServices, create_app
 from services.web_search.netguard import SafeFetcher
 from services.web_search.providers import DuckDuckGoProvider
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="aegis-web-search")
+    parser = argparse.ArgumentParser(prog="baseagent-web-search")
     parser.add_argument("--config", type=Path, default=None)
     args = parser.parse_args(argv)
     try:

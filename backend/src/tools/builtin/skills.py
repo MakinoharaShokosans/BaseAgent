@@ -10,7 +10,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Final, Protocol
 
-from agent_runtime.core import AegisTool, ToolResult, Trust
+from agent_runtime.core import AgentTool, ToolResult, Trust
 from tools.builtin.paths import text_arg
 
 _CLOSING: Final = re.compile(r"</\s*skill_sop", re.IGNORECASE)
@@ -52,7 +52,7 @@ def _defang(text: str) -> str:
     return _CLOSING.sub(lambda m: m.group(0).replace("</", "<\\/"), text)
 
 
-class LoadSkillTool(AegisTool):
+class LoadSkillTool(AgentTool):
     name = "load_skill"
     description = (
         "按名称载入一个技能的 SOP（怎样专业地完成某类任务的流程文档）。"

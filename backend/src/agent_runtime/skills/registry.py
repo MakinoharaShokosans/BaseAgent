@@ -74,7 +74,9 @@ def skill_roots(
     """按优先级从高到低；未授权的来源在这里就被排除，根本不会被扫描。"""
     roots: list[SkillRoot] = []
     if allow_workspace:
-        roots.append(SkillRoot(workspace_root / ".aegis" / "skills", "workspace"))
+        # 新目录名优先；旧的 .aegis 目录仍然识别（同名技能以靠前的为准）
+        for name in (".baseagent", ".aegis"):
+            roots.append(SkillRoot(workspace_root / name / "skills", "workspace"))
     if allow_builtin:
         roots.append(SkillRoot(builtin_dir, "builtin"))
     if allow_global:

@@ -26,8 +26,8 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.shared.exceptions import MCPError
 
-from aegis_config.models import McpConfig, McpServerConfig
 from agent_runtime.core import ToolResult
+from baseagent_config.models import McpConfig, McpServerConfig
 from mcps.naming import assign_names
 from mcps.vetting import Rejection, Vetted, vet_tool
 

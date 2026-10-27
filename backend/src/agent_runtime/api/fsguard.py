@@ -113,7 +113,7 @@ def save_workspace_file(
             raise FileHashConflictError(relative)
     target.parent.mkdir(parents=True, exist_ok=True)
     mode = target.stat().st_mode & 0o777 if target.exists() else 0o644
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".aegis-")
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".baseagent-")
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)

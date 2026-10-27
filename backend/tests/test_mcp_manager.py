@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from aegis_config.models import McpConfig, McpServerConfig
+from baseagent_config.models import McpConfig, McpServerConfig
 from mcps import McpManager, assign_names, resolve_env, unpinned_package, vet_tool
 from mcps.vetting import Rejection, Vetted
 

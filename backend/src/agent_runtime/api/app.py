@@ -20,7 +20,7 @@ API_PREFIX = "/api/v1"
 def create_app(services: ApiServices, *, token: str | None) -> FastAPI:
     server = services.settings.server
     app = FastAPI(
-        title="Aegis API",
+        title="BaseAgent API",
         version="1.0.0",
         docs_url="/docs" if server.docs_enabled else None,
         redoc_url=None,
@@ -33,7 +33,7 @@ def create_app(services: ApiServices, *, token: str | None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
-        return {"name": "Aegis", "api": API_PREFIX}
+        return {"name": "BaseAgent", "api": API_PREFIX}
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]

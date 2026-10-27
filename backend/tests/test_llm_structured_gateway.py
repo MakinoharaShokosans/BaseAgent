@@ -12,7 +12,6 @@ import httpx2
 import pytest
 from pydantic import BaseModel
 
-from aegis_config.models import Capabilities, Endpoint, LlmConfig
 from agent_runtime.core import Message
 from agent_runtime.llm import (
     Degraded,
@@ -22,6 +21,7 @@ from agent_runtime.llm import (
     Parsed,
     StructuredRecord,
 )
+from baseagent_config.models import Capabilities, Endpoint, LlmConfig
 from test_llm_gateway import OK_BODY, USER, World, status
 
 

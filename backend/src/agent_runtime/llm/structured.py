@@ -12,7 +12,6 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ValidationError
 
-from aegis_config.models import Capabilities
 from agent_runtime.llm.types import (
     LLMRequest,
     LLMResponse,
@@ -20,6 +19,7 @@ from agent_runtime.llm.types import (
     StructuredSpec,
     TokenUsage,
 )
+from baseagent_config.models import Capabilities
 
 #: 路径 3 里承载结果的工具名（见 §3.1）
 EMIT_TOOL: Final = "emit_result"

@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 
-from aegis_config.models import WebSearchConfig
+from baseagent_config.models import WebSearchConfig
 from services.web_search.app import WebServices, create_app, fingerprint, normalise_url
 from services.web_search.extract import extract_text
 from services.web_search.netguard import (

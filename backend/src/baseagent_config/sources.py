@@ -13,7 +13,9 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
 
 #: 当前这次加载所用的配置文件内容；由 loader 在构造 Settings 的前后设置与复位
-FILE_DATA: ContextVar[dict[str, Any] | None] = ContextVar("aegis_config_file_data", default=None)
+FILE_DATA: ContextVar[dict[str, Any] | None] = ContextVar(
+    "baseagent_config_file_data", default=None
+)
 
 
 class FileDataSource(PydanticBaseSettingsSource):

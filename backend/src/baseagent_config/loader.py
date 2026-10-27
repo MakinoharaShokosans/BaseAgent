@@ -1,6 +1,7 @@
 """配置加载：发现文件、合并来源、做依赖运行环境的校验，失败即拒绝启动。
 
-优先级（高覆盖低）：显式传入（命令行） > 环境变量 AEGIS_<节>__<键> > config.toml > 代码默认值。
+优先级（高覆盖低）：显式传入（命令行） > 环境变量 BASEAGENT_<节>__<键>
+（旧名 AEGIS_ 仍有效）> config.toml > 代码默认值。
 规则出处：docs/01_architecture/04_configuration.md §2、§6。
 """
 
@@ -17,10 +18,19 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ValidationError
 
-from aegis_config.models import LOOPBACK_HOSTS, Endpoint, Settings
-from aegis_config.sources import FILE_DATA
+from baseagent_config.envcompat import (
+    DEFAULT_HOME,
+    LEGACY_PREFIX,
+    PREFIX,
+    env_value,
+    legacy_env_notes,
+    legacy_home_note,
+    pick_home,
+)
+from baseagent_config.models import LOOPBACK_HOSTS, Endpoint, Settings
+from baseagent_config.sources import FILE_DATA
 
-ENV_PREFIX = "AEGIS_"
+ENV_PREFIX = PREFIX
 ENV_DELIMITER = "__"
 
 _HOME_MODE = 0o700
@@ -115,12 +125,14 @@ def load_settings(
     settings = _build(file_data, overrides or {}, path)
 
     problems: list[str] = []
-    home = _resolve_home(settings, problems)
+    home_notes: list[str] = []
+    home = _resolve_home(settings, problems, home_notes)
     paths = _resolve_paths(settings, home, problems) if home else None
     if home and create_home:
         _ensure_home(home, problems)
     endpoints, warnings = _usable_endpoints(settings, problems if require_models else [])
     warnings += _trust_warnings(settings)
+    warnings += home_notes + legacy_env_notes()
 
     if problems or home is None or paths is None:
         raise ConfigError(problems, path)
@@ -145,19 +157,18 @@ REPO_CONFIG = Path(__file__).resolve().parents[3] / "config" / "config.toml"
 def _find_config(explicit: Path | None) -> Path:
     if explicit is not None:
         return _must_exist(explicit, "指定的配置文件")
-    from_env = os.environ.get("AEGIS_CONFIG")
+    from_env = env_value("CONFIG")
     if from_env:
-        return _must_exist(Path(from_env).expanduser(), "AEGIS_CONFIG 指向的配置文件")
+        return _must_exist(Path(from_env).expanduser(), "BASEAGENT_CONFIG 指向的配置文件")
 
-    home_env = os.environ.get("AEGIS_HOME")
-    home = Path(home_env).expanduser() if home_env else Path("~/.local/share/aegis").expanduser()
+    home = pick_home()
     # 源码检出里，配置在仓库根的 config/：从 backend/ 目录启动时也要找得到
     candidates = [Path.cwd() / "config" / "config.toml", home / "config.toml", REPO_CONFIG]
     for candidate in candidates:
         if candidate.is_file():
             return candidate
     searched = "、".join(str(c) for c in candidates)
-    raise ConfigError([f"未找到配置文件。已查找：{searched}；也可用 AEGIS_CONFIG 指定"])
+    raise ConfigError([f"未找到配置文件。已查找：{searched}；也可用 BASEAGENT_CONFIG 指定"])
 
 
 def _must_exist(path: Path, what: str) -> Path:
@@ -201,18 +212,19 @@ def _format_validation(exc: ValidationError) -> list[str]:
 
 
 def _check_env_overrides(environ: Mapping[str, str]) -> list[str]:
-    """检查 AEGIS_ 前缀的变量是否指向存在的标量配置项。
+    """检查 BASEAGENT_（及旧名 AEGIS_）前缀的变量是否指向存在的标量配置项。
 
     pydantic-settings 会把指向数组或表的变量按 JSON 解析，文档约定这类只能改文件，
     所以在这里提前拒绝；拼写错误同样在这里报，错误信息里带上变量名。
     """
     problems = []
     for name in sorted(environ):
-        if not name.startswith(ENV_PREFIX):
+        prefix = next((p for p in (ENV_PREFIX, LEGACY_PREFIX) if name.startswith(p)), None)
+        if prefix is None:
             continue
-        parts = name[len(ENV_PREFIX) :].lower().split(ENV_DELIMITER)
+        parts = name[len(prefix) :].lower().split(ENV_DELIMITER)
         if len(parts) == 1 and parts[0] not in Settings.model_fields:
-            continue  # AEGIS_HOME、AEGIS_CONFIG、AEGIS_API_TOKEN 等不是配置项覆盖
+            continue  # BASEAGENT_HOME、BASEAGENT_CONFIG、BASEAGENT_API_TOKEN 等不是配置项覆盖
         problem = _check_env_path(parts)
         if problem:
             problems.append(f"环境变量 {name}：{problem}")
@@ -259,16 +271,21 @@ def _classify(annotation: Any) -> tuple[str, type[BaseModel] | None]:
 # ==============================================================================
 
 
-def _resolve_home(settings: Settings, problems: list[str]) -> Path | None:
-    env_home = os.environ.get("AEGIS_HOME")
+def _resolve_home(settings: Settings, problems: list[str], notes: list[str]) -> Path | None:
+    env_home = env_value("HOME")
     if env_home:
         # 环境变量由使用者在当前目录显式给出，相对路径按当前目录取绝对
         return Path(os.path.abspath(Path(env_home).expanduser()))
     configured = Path(settings.app.home).expanduser()
+    if settings.app.home == DEFAULT_HOME:
+        chosen = pick_home({})  # 默认值：旧目录还在、新目录还没建时沿用旧目录
+        if note := legacy_home_note(chosen):
+            notes.append(note)
+        return chosen
     if not configured.is_absolute():
         problems.append(
             f"app.home：{settings.app.home!r} 必须是绝对路径（或以 ~ 开头）；"
-            "相对路径会让不同目录启动得到不同数据集，开发时请用环境变量 AEGIS_HOME"
+            "相对路径会让不同目录启动得到不同数据集，开发时请用环境变量 BASEAGENT_HOME"
         )
         return None
     return Path(os.path.normpath(configured))
@@ -314,7 +331,7 @@ def _resolve_paths(settings: Settings, home: Path, problems: list[str]) -> Resol
         return None
     return ResolvedPaths(
         logging_file=resolved["logging.file"],
-        metadata_db=resolved["storage.metadata_db"],
+        metadata_db=_legacy_db_if_present(resolved["storage.metadata_db"], home),
         checkpoint_db=resolved["storage.checkpoint_db"],
         events_db=resolved["storage.events_db"],
         traces_dir=resolved["storage.traces_dir"],
@@ -325,6 +342,14 @@ def _resolve_paths(settings: Settings, home: Path, problems: list[str]) -> Resol
         canary_salt=resolved["security.canary_salt_file"],
         eval_report_dir=resolved["evaluation.report_dir"],
     )
+
+
+def _legacy_db_if_present(path: Path, home: Path) -> Path:
+    """沿用旧名的元数据库：只在默认文件名、新库还没有、旧库在的时候，才指向旧文件。"""
+    legacy = home / "aegis_meta.db"
+    if path == home / "baseagent_meta.db" and not path.exists() and legacy.exists():
+        return legacy
+    return path
 
 
 # ==============================================================================

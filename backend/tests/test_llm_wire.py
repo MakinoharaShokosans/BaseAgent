@@ -11,10 +11,10 @@ from typing import Any
 import pytest
 from openai.types.chat import ChatCompletion
 
-from aegis_config.models import Capabilities, Endpoint
 from agent_runtime.core import Message, ToolCall, ToolSchema
 from agent_runtime.llm import LLMRequest, estimate_tokens
 from agent_runtime.llm.wire import build_request_kwargs, parse_completion
+from baseagent_config.models import Capabilities, Endpoint
 
 
 def endpoint(**caps: Any) -> Endpoint:

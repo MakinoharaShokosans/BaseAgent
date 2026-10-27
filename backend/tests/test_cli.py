@@ -1,4 +1,4 @@
-"""统一入口 aegis：服务装配、环境白名单、进程收尾。出处：docs/01_architecture/05_tech_stack.md。"""
+"""统一入口 baseagent：服务装配、环境白名单、进程收尾（docs/01_architecture/05_tech_stack.md）。"""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from aegis_config import load_settings
 from agent_runtime.cli import Service, build_services, dashboard, filtered_env, main, stop_all
 from api_support import REPO_ROOT
+from baseagent_config import load_settings
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def test_sidecars_never_inherit_secrets(loaded) -> None:  # type: ignore[no-unty
     }
     shell = services["bash_shell"].env
     assert "DEEPSEEK_API_KEY" not in shell and "GITHUB_TOKEN" not in shell
-    assert shell["PATH"] == "/usr/bin" and shell["AEGIS_HOME"] == str(loaded.home)
+    assert shell["PATH"] == "/usr/bin" and shell["BASEAGENT_HOME"] == str(loaded.home)
     assert services["backend"].env["DEEPSEEK_API_KEY"] == "sk-secret"  # 后端要调用模型
 
 
@@ -116,7 +116,7 @@ def test_token_command_prints_the_path_and_rotates(
     loaded, tmp_path: Path, capsys, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
     config = REPO_ROOT / "config" / "config.toml"
-    monkeypatch.setenv("AEGIS_APP__HOME", str(tmp_path / "h2"))
+    monkeypatch.setenv("BASEAGENT_APP__HOME", str(tmp_path / "h2"))
     assert main(["--config", str(config), "token"]) == 0
     printed = capsys.readouterr().out.strip()
     assert printed.endswith("api_token")

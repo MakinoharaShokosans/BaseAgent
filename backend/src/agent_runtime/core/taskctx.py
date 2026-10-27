@@ -7,4 +7,4 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 
-current_task_id: ContextVar[str | None] = ContextVar("aegis_current_task_id", default=None)
+current_task_id: ContextVar[str | None] = ContextVar("baseagent_current_task_id", default=None)

@@ -58,7 +58,7 @@ class ToolResult(BaseModel):
         return not self.ok or (self.exit_code is not None and self.exit_code != 0)
 
 
-class AegisTool(ABC):
+class AgentTool(ABC):
     """所有工具（内置、MCP 转译、子智能体包装）的基类。
 
     业务失败返回 ``ToolResult.failure``，不抛异常；派发器会兜底，但不应依赖它。

@@ -9,11 +9,11 @@ from typing import Any
 
 import pytest
 
-from agent_runtime.core import AegisTool, ToolResult
+from agent_runtime.core import AgentTool, ToolResult
 from tools.core import ToolDispatcher, ToolRegistry, ToolRegistryError
 
 
-class Fake(AegisTool):
+class Fake(AgentTool):
     def __init__(
         self,
         name: str,

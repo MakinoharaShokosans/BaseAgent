@@ -1,7 +1,7 @@
 [project]
-name = "aegis"
+name = "baseagent"
 version = "0.1.0"
-description = "Aegis: 本机代码工程 Agent，自研 Agent Runtime（无 LangGraph、无 RAG）"
+description = "BaseAgent: 自研 Agent 运行时底座（无 LangGraph、无 RAG），给想自己做 Agent 的开发者当起点"
 readme = "README.md"
 requires-python = ">=3.12"
 # 版本只写下限；实际版本由 uv.lock 固定，升级是显式动作（uv lock --upgrade-package <name>）。
@@ -30,6 +30,10 @@ dependencies = [
 ]
 
 [project.scripts]
+baseagent = "agent_runtime.cli:main"
+baseagent-server = "agent_runtime.server:main"
+baseagent-bench = "evaluation.agent_bench.cli:main"
+# 改名前的命令名，保留为别名
 aegis = "agent_runtime.cli:main"
 aegis-server = "agent_runtime.server:main"
 aegis-bench = "evaluation.agent_bench.cli:main"
@@ -65,7 +69,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [
-    "src/aegis_config",
+    "src/baseagent_config",
     "src/agent_runtime",
     "src/tools",
     "src/mcps",
@@ -131,7 +135,7 @@ strict = [
 # ------------------------------------------------------------------------------
 [tool.importlinter]
 root_packages = [
-    "aegis_config",
+    "baseagent_config",
     "agent_runtime",
     "tools",
     "mcps",
@@ -173,7 +177,7 @@ forbidden_modules = [
     "agent_runtime.skills",
     "agent_runtime.guardrails",
     "agent_runtime.observability",
-    "aegis_config",
+    "baseagent_config",
     "tools",
     "mcps",
     "services",
@@ -240,7 +244,7 @@ forbidden_modules = [
 [[tool.importlinter.contracts]]
 name = "配置包零项目内依赖"
 type = "forbidden"
-source_modules = ["aegis_config"]
+source_modules = ["baseagent_config"]
 forbidden_modules = [
     "agent_runtime",
     "tools",

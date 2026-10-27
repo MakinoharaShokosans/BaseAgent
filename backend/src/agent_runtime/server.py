@@ -15,10 +15,10 @@ from pathlib import Path
 import uvicorn
 from loguru import logger
 
-from aegis_config import ConfigError, LoadedSettings, load_settings
 from agent_runtime.api import create_app, provision_token
 from agent_runtime.bootstrap import Application, configure_logging
 from agent_runtime.cli import REPO_ROOT, load_dotenv
+from baseagent_config import ConfigError, LoadedSettings, load_settings
 
 
 async def serve(loaded: LoadedSettings) -> None:
@@ -35,7 +35,7 @@ async def serve(loaded: LoadedSettings) -> None:
         config = uvicorn.Config(
             app, host=server_cfg.host, port=server_cfg.port, log_level="warning"
         )
-        logger.info("Aegis 后端：http://{}:{}", server_cfg.host, server_cfg.port)
+        logger.info("BaseAgent 后端：http://{}:{}", server_cfg.host, server_cfg.port)
         await uvicorn.Server(config).serve()
     finally:
         await application.aclose()
@@ -43,7 +43,7 @@ async def serve(loaded: LoadedSettings) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv(REPO_ROOT / ".env")
-    parser = argparse.ArgumentParser(prog="aegis-server")
+    parser = argparse.ArgumentParser(prog="baseagent-server")
     parser.add_argument("--config", type=Path, default=None, help="config.toml 的路径")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)

@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from agent_runtime.core import AegisTool, ToolResult
+from agent_runtime.core import AgentTool, ToolResult
 from agent_runtime.guardrails import BudgetLedger, ChildBudget
 from agent_runtime.subagents.research.models import ResearchRequest
 from agent_runtime.subagents.research.render import render_failure, render_report
@@ -25,7 +25,7 @@ _MAX_QUESTIONS = 5
 _DEADLINE_MARGIN_SEC = 15.0
 
 
-class DelegateResearchTool(AegisTool):
+class DelegateResearchTool(AgentTool):
     name = "delegate_research"
     description = (
         "把需要联网查资料的问题委派给隔离的研究子智能体，返回带来源的结构化结论。"

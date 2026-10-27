@@ -63,8 +63,12 @@ def test_roots_are_gated_by_config_and_the_workspace_is_off_by_default(tmp_path:
     default = skill_roots(allow_builtin=True, allow_global=True, allow_workspace=False, **kw)
     assert [r.source for r in default] == ["builtin", "global"]
     everything = skill_roots(allow_builtin=True, allow_global=True, allow_workspace=True, **kw)
-    assert [r.source for r in everything] == ["workspace", "builtin", "global"]
-    assert everything[0].path == tmp_path / "w" / ".aegis" / "skills"
+    # 工作区里新旧两个目录名都认，新的靠前
+    assert [r.source for r in everything] == ["workspace", "workspace", "builtin", "global"]
+    assert [r.path for r in everything[:2]] == [
+        tmp_path / "w" / ".baseagent" / "skills",
+        tmp_path / "w" / ".aegis" / "skills",
+    ]
     none = skill_roots(allow_builtin=False, allow_global=False, allow_workspace=False, **kw)
     assert none == ()
 

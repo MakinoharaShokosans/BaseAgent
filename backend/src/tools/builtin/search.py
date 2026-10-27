@@ -14,7 +14,7 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any, Final
 
-from agent_runtime.core import AegisTool, ToolResult
+from agent_runtime.core import AgentTool, ToolResult
 from tools.builtin.paths import PathEscapeError, int_arg, resolve_within_root, text_arg
 
 _SNIFF: Final = 8192
@@ -29,7 +29,7 @@ def _visible(entry: os.DirEntry[str], ignored: Collection[str]) -> bool:
     return not (entry.name.startswith(".") and entry.name not in {".github", ".env.example"})
 
 
-class ListDirTool(AegisTool):
+class ListDirTool(AgentTool):
     name = "list_dir"
     description = (
         "列出工作区内目录的结构（默认深度 2），自动忽略 .git、node_modules 等噪音目录。"
@@ -107,7 +107,7 @@ def _inside(root: Path, path: Path) -> bool:
         return False
 
 
-class GrepTool(AegisTool):
+class GrepTool(AgentTool):
     name = "grep"
     description = (
         "在工作区内按正则搜索文本，输出 路径:行号:内容。可用 glob 限定文件（如 *.py）、"

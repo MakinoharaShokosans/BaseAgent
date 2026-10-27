@@ -41,7 +41,7 @@ def err(response: Any) -> dict[str, Any]:
 async def test_workspace_lifecycle(rig: ApiRig) -> None:
     created = await rig.client.post(
         f"{V1}/workspaces",
-        json={"name": "Aegis", "root_path": str(rig.root), "description": "d"},
+        json={"name": "BaseAgent", "root_path": str(rig.root), "description": "d"},
         headers=HEADERS,
     )
     assert created.status_code == 201

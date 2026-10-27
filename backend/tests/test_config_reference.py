@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from aegis_config import Settings
+from baseagent_config import Settings
 
 
 @pytest.fixture(scope="module")

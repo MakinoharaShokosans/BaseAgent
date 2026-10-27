@@ -8,12 +8,12 @@ from pathlib import Path
 
 import uvicorn
 
-from aegis_config import ConfigError, load_settings
+from baseagent_config import ConfigError, load_settings
 from services.bash_shell.app import ShellSettings, create_app
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="aegis-bash-shell")
+    parser = argparse.ArgumentParser(prog="baseagent-bash-shell")
     parser.add_argument("--config", type=Path, default=None)
     args = parser.parse_args(argv)
     try:

@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from aegis_config import Settings
 from agent_runtime.guardrails import BudgetLimits
 from agent_runtime.runtime import (
     FullPermissionsNotConfirmedError,
@@ -17,6 +16,7 @@ from agent_runtime.runtime import (
     max_concurrent_tasks,
     resolve_permission_level,
 )
+from baseagent_config import Settings
 
 
 @pytest.fixture
@@ -215,7 +215,7 @@ def test_skill_roots_follow_the_source_switches(raw: dict[str, Any], tmp_path: P
     data["skills"]["allow_workspace"] = True
     opened = skill_roots_from_settings(Settings.model_validate(data), tmp_path)
     assert next(iter(opened)).source == "workspace"
-    assert opened[0].path == tmp_path / ".aegis" / "skills"
+    assert opened[0].path == tmp_path / ".baseagent" / "skills"
 
 
 @pytest.mark.unit

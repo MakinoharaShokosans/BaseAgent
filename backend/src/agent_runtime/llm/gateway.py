@@ -20,7 +20,6 @@ from loguru import logger
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from aegis_config.models import Endpoint, LlmConfig
 from agent_runtime.core import Message
 from agent_runtime.llm.errors import (
     EndpointFailure,
@@ -58,9 +57,10 @@ from agent_runtime.llm.types import (
     TokenUsage,
 )
 from agent_runtime.llm.wire import ParsedCompletion, build_request_kwargs, parse_completion
+from baseagent_config.models import Endpoint, LlmConfig
 
 if TYPE_CHECKING:
-    from aegis_config import LoadedSettings
+    from baseagent_config import LoadedSettings
 
 ClientFactory = Callable[[Endpoint], AsyncOpenAI]
 Redactor = Callable[[str], str]

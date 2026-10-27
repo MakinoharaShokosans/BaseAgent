@@ -1,4 +1,4 @@
-"""注册表与派发器。工具协议（``AegisTool``、``ToolResult``）在 agent_runtime.core。
+"""注册表与派发器。工具协议（``AgentTool``、``ToolResult``）在 agent_runtime.core。
 
 设计文档：docs/04_tools/01_tool_system.md
 """

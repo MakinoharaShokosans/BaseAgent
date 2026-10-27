@@ -8,8 +8,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel
 
-from aegis_config.models import Endpoint
 from agent_runtime.core import Message, ToolSchema
+from baseagent_config.models import Endpoint
 
 Tier = Literal["reasoning", "fast"]
 Effort = Literal["low", "medium", "high", "max"]

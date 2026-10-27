@@ -15,7 +15,6 @@ from typing import Any, Self
 import httpx
 from loguru import logger
 
-from aegis_config import LoadedSettings
 from agent_runtime.api import ApiServices, Introspection
 from agent_runtime.checkpoint import CheckpointStore, scan_for_recovery
 from agent_runtime.context import PromptLibrary
@@ -40,6 +39,7 @@ from agent_runtime.runtime.factory import RuntimeFactory
 from agent_runtime.runtime.run import RunnerDeps
 from agent_runtime.runtime.runner import TaskRunner
 from agent_runtime.runtime.service import TaskService
+from baseagent_config import LoadedSettings
 from mcps import McpManager
 from tools.core import SidecarClient
 

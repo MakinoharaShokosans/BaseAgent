@@ -490,12 +490,12 @@ def test_the_token_comes_from_argument_then_env_then_file_and_is_never_printed(
 ) -> None:
     file = tmp_path / "tok"
     file.write_text("from-file\n")
-    monkeypatch.delenv("AEGIS_API_TOKEN", raising=False)
+    monkeypatch.delenv("BASEAGENT_API_TOKEN", raising=False)
     assert read_token(None, file) == "from-file"
-    monkeypatch.setenv("AEGIS_API_TOKEN", "from-env")
+    monkeypatch.setenv("BASEAGENT_API_TOKEN", "from-env")
     assert read_token(None, file) == "from-env"
     assert read_token("explicit", file) == "explicit"
-    monkeypatch.delenv("AEGIS_API_TOKEN")
+    monkeypatch.delenv("BASEAGENT_API_TOKEN")
     with pytest.raises(SystemExit) as exc:
         read_token(None, tmp_path / "missing")
     assert "from-file" not in str(exc.value)
@@ -507,6 +507,6 @@ def test_the_token_comes_from_argument_then_env_then_file_and_is_never_printed(
 def test_the_cli_exits_with_a_hint_when_the_service_is_down(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("AEGIS_API_TOKEN", "t")
+    monkeypatch.setenv("BASEAGENT_API_TOKEN", "t")
     code = main(["--url", "http://127.0.0.1:9", "--only", "create_script", "--out", str(tmp_path)])
-    assert code == 2 and "aegis start" in capsys.readouterr().err
+    assert code == 2 and "baseagent start" in capsys.readouterr().err

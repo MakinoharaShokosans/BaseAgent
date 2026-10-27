@@ -41,7 +41,7 @@ def test_every_package_is_importable(name: str) -> None:
 def test_expected_top_level_packages_exist() -> None:
     top = {n.split(".")[0] for n in _package_names()}
     assert top == {
-        "aegis_config",
+        "baseagent_config",
         "agent_runtime",
         "tools",
         "mcps",

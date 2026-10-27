@@ -14,7 +14,6 @@ import httpx2
 import pytest
 from openai import AsyncOpenAI
 
-from aegis_config.models import Capabilities, Endpoint, LlmConfig
 from agent_runtime.core import Message, ToolCall, ToolSchema
 from agent_runtime.llm import (
     CallRecord,
@@ -25,6 +24,7 @@ from agent_runtime.llm import (
     LLMRequest,
     LLMUnavailableError,
 )
+from baseagent_config.models import Capabilities, Endpoint, LlmConfig
 
 SECRET = "sk-super-secret-key-0123456789"
 USER = Message(role="user", content="hi")
@@ -757,12 +757,12 @@ async def test_construction_rejects_opaque_passback_until_it_is_implemented() ->
 
 @pytest.fixture
 def loaded(tmp_path: Any, config_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
-    from aegis_config import load_settings
+    from baseagent_config import load_settings
 
     for name in list(__import__("os").environ):
-        if name.startswith("AEGIS_"):
+        if name.startswith(("BASEAGENT_", "AEGIS_")):
             monkeypatch.delenv(name)
-    monkeypatch.setenv("AEGIS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BASEAGENT_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("DEEPSEEK_API_KEY", SECRET)
     return load_settings(config_path=config_path, create_home=False)
 

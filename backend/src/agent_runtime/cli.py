@@ -1,6 +1,6 @@
-"""统一入口 ``aegis``：一条命令拉起沙箱 sidecar、后端和前端，并一起收掉。
+"""统一入口 ``baseagent``：一条命令拉起沙箱 sidecar、后端和前端，并一起收掉。
 
-``aegis start`` 先加载配置（任何问题直接拒绝启动），按白名单给 sidecar 传环境（不继承密钥），
+``baseagent start`` 先加载配置（任何问题直接拒绝启动），按白名单给 sidecar 传环境（不继承密钥），
 等各服务健康后打印看板。令牌不会打印，只显示文件路径。
 """
 
@@ -22,8 +22,8 @@ from pathlib import Path
 
 import httpx
 
-from aegis_config import ConfigError, LoadedSettings, load_settings
 from agent_runtime.api import provision_token
+from baseagent_config import ConfigError, LoadedSettings, load_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -77,7 +77,7 @@ def build_services(
     backend_dir = REPO_ROOT / "backend"
     sidecar_env = filtered_env(settings.services.sidecar_env_allowlist, source)
     sidecar_env["PYTHONPATH"] = str(backend_dir / "src")
-    sidecar_env["AEGIS_HOME"] = str(loaded.home)
+    sidecar_env["BASEAGENT_HOME"] = str(loaded.home)
 
     services: list[Service] = []
     if settings.services.auto_start_sidecars:
@@ -112,8 +112,10 @@ def build_services(
     )
     if with_frontend and shutil.which("pnpm"):
         frontend_env = filtered_env(["PATH", "HOME", "LANG", "TERM", "NODE_OPTIONS"], source)
-        frontend_env["AEGIS_HOME"] = str(loaded.home)
-        frontend_env["AEGIS_PROXY_TARGET"] = f"http://{settings.server.host}:{settings.server.port}"
+        frontend_env["BASEAGENT_HOME"] = str(loaded.home)
+        frontend_env["BASEAGENT_PROXY_TARGET"] = (
+            f"http://{settings.server.host}:{settings.server.port}"
+        )
         services.append(
             Service(
                 "frontend",
@@ -179,7 +181,7 @@ def stop_all(services: Sequence[Service], grace_sec: float) -> None:
 
 def dashboard(loaded: LoadedSettings, health: Mapping[str, bool], frontend: bool) -> str:
     s = loaded.settings
-    lines = ["", "  Aegis 已启动"]
+    lines = ["", "  BaseAgent 已启动"]
     if frontend:
         lines.append("  控制台    http://127.0.0.1:5173")
     lines += [
@@ -245,7 +247,7 @@ def cmd_token(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     load_dotenv(REPO_ROOT / ".env")  # 密钥放在仓库根的 .env（已被 .gitignore 忽略）
-    parser = argparse.ArgumentParser(prog="aegis")
+    parser = argparse.ArgumentParser(prog="baseagent")
     parser.add_argument("--config", type=Path, default=None, help="config.toml 的路径")
     sub = parser.add_subparsers(dest="command", required=True)
     start = sub.add_parser("start", help="启动沙箱 sidecar、后端与前端")

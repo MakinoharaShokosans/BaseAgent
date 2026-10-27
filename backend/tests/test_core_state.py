@@ -308,8 +308,8 @@ def test_permission_levels_agree_with_the_configuration_schema() -> None:
     """core 不能依赖配置包，所以两边各有一份取值；这里保证它们不漂移。"""
     from typing import get_args
 
-    from aegis_config.models import PermissionLevel as ConfigLevel
     from agent_runtime.core.state import PERMISSION_LEVELS
+    from baseagent_config.models import PermissionLevel as ConfigLevel
 
     assert set(PERMISSION_LEVELS) == set(get_args(ConfigLevel))
 

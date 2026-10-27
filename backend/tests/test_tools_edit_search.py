@@ -91,7 +91,7 @@ async def test_permissions_are_preserved_and_a_backup_is_taken(root: Path, tmp_p
     assert result.ok and "已备份" in result.content
     assert script.stat().st_mode & 0o777 == 0o755
     assert (backups / "run.sh").read_text() == "echo old\n"
-    assert not [p for p in root.iterdir() if p.name.startswith(".aegis-")]  # noqa: ASYNC240
+    assert not [p for p in root.iterdir() if p.name.startswith(".baseagent-")]  # noqa: ASYNC240
 
 
 @pytest.mark.unit

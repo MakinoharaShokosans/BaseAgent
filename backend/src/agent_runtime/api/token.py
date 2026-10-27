@@ -19,8 +19,13 @@ _TOKEN_BYTES: Final = 32  # 256 位
 
 def provision_token(path: Path, *, env: Mapping[str, str] | None = None, env_name: str = "") -> str:
     """优先用环境变量里的令牌；否则读文件；文件不存在就生成。删除文件并重启即轮换。"""
-    if env_name and env is not None and (value := env.get(env_name, "").strip()):
-        return value
+    if env_name and env is not None:
+        names = [env_name]
+        if env_name.startswith("BASEAGENT_"):  # 改名前的变量仍然有效
+            names.append("AEGIS_" + env_name.removeprefix("BASEAGENT_"))
+        for name in names:
+            if value := env.get(name, "").strip():
+                return value
     path.parent.mkdir(parents=True, exist_ok=True)
     path.parent.chmod(0o700)
     if path.is_file():

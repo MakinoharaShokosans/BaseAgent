@@ -17,10 +17,9 @@ from typing import Final
 
 from loguru import logger
 
-from aegis_config import LoadedSettings
 from agent_runtime.checkpoint import CheckpointStore
 from agent_runtime.context import ObservationGovernor, ObservationStore, PromptLibrary, RulesCache
-from agent_runtime.core import AegisTool, AgentState
+from agent_runtime.core import AgentState, AgentTool
 from agent_runtime.guardrails import BudgetLedger, PhysicalBudgetGuard
 from agent_runtime.guardrails.envelope import observation_envelope
 from agent_runtime.llm import LLMGateway, PreferredEndpoint
@@ -68,6 +67,7 @@ from agent_runtime.subagents.research import (
     ResearchRunner,
     SidecarSearchClient,
 )
+from baseagent_config import LoadedSettings
 from mcps import McpManager
 from tools.builtin import ShellBinding, TaskArtifacts, build_builtin_tools
 from tools.core import SidecarClient, ToolDispatcher, ToolRegistry
@@ -241,7 +241,7 @@ class RuntimeFactory:
             events=events,
         )
 
-    async def _mcp_tools(self) -> list[AegisTool]:
+    async def _mcp_tools(self) -> list[AgentTool]:
         """MCP 是增强项：任何故障都只是少几个工具，绝不让任务起不来。"""
         if self.mcp is None:
             return []
@@ -295,7 +295,7 @@ class RuntimeFactory:
         state: AgentState,
         ledger: BudgetLedger,
         events: TaskEvents,
-        parent_tools: Mapping[str, AegisTool],
+        parent_tools: Mapping[str, AgentTool],
     ) -> SpawnSubagentTool | None:
         cfg = self.loaded.settings.subagent
         if not cfg.enabled:

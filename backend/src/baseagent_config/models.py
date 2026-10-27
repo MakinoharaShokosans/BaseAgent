@@ -10,9 +10,15 @@ import re
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
-from aegis_config.sources import FileDataSource
+from baseagent_config.envcompat import LEGACY_PREFIX
+from baseagent_config.sources import FileDataSource
 
 PosInt = Annotated[int, Field(gt=0)]
 NonNegInt = Annotated[int, Field(ge=0)]
@@ -56,13 +62,13 @@ class _Section(BaseModel):
 
 
 class AppConfig(_Section):
-    home: str = "~/.local/share/aegis"
+    home: str = "~/.local/share/baseagent"
 
 
 class LoggingConfig(_Section):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     console: bool = True
-    file: str = "logs/aegis.jsonl"
+    file: str = "logs/baseagent.jsonl"
     rotation_mb: PosInt = 20
     retention_files: PosInt = 10
 
@@ -77,7 +83,7 @@ class RetentionConfig(_Section):
 
 
 class StorageConfig(_Section):
-    metadata_db: str = "aegis_meta.db"
+    metadata_db: str = "baseagent_meta.db"
     checkpoint_db: str = "checkpoints/state.db"
     events_db: str = "events/events.db"
     traces_dir: str = "traces"
@@ -93,7 +99,7 @@ class StorageConfig(_Section):
 class AuthConfig(_Section):
     enabled: bool = True
     token_file: str = "api_token"
-    token_env: str = "AEGIS_API_TOKEN"
+    token_env: str = "BASEAGENT_API_TOKEN"
     fail_limit: PosInt = 10
     fail_window_sec: PosInt = 60
 
@@ -383,7 +389,13 @@ class MemoryConfig(_Section):
 class RulesConfig(_Section):
     allow_workspace: bool = False
     max_chars: PosInt = 8000
-    candidates: list[str] = ["CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".aegis/rules.md"]
+    candidates: list[str] = [
+        "CLAUDE.MD",
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".baseagent/rules.md",
+        ".aegis/rules.md",
+    ]
 
 
 class PromptConfig(_Section):
@@ -459,6 +471,8 @@ class ServicesConfig(_Section):
         "TZ",
         "PYTHONPATH",
         "PYTHONUNBUFFERED",
+        "BASEAGENT_CONFIG",
+        "BASEAGENT_HOME",
         "AEGIS_CONFIG",
         "AEGIS_HOME",
     ]
@@ -513,7 +527,7 @@ class WebSearchConfig(_Section):
     total_timeout_sec: PosInt = 30
     max_content_tokens: PosInt = 1500
     preview_chars: PosInt = 200
-    user_agent: str = "Mozilla/5.0 (compatible; AegisBot/0.1)"
+    user_agent: str = "Mozilla/5.0 (compatible; BaseAgentBot/0.1)"
     artifacts_dir: str = "artifacts"
     block_private_addresses: bool = True
     allowed_ports: list[Port] = [80, 443]
@@ -755,14 +769,15 @@ class EvaluationConfig(_Section):
 class Settings(BaseSettings):
     """整份配置。
 
-    来源优先级（高覆盖低）：显式传入 > 环境变量 ``AEGIS_<节>__<键>`` > config.toml > 默认值。
-    实际装配在 :func:`aegis_config.load_settings`，直接实例化只会读环境变量和默认值。
+    来源优先级（高覆盖低）：显式传入 > 环境变量 ``BASEAGENT_<节>__<键>``
+    （旧名 ``AEGIS_`` 前缀仍然有效）> config.toml > 默认值。
+    实际装配在 :func:`baseagent_config.load_settings`，直接实例化只会读环境变量和默认值。
     """
 
     model_config = SettingsConfigDict(
         extra="forbid",
         frozen=True,
-        env_prefix="AEGIS_",
+        env_prefix="BASEAGENT_",
         env_nested_delimiter="__",
         case_sensitive=False,
     )
@@ -776,8 +791,10 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # 显式传入 > 环境变量 > config.toml；不读 .env 文件（.env 由启动脚本加载进环境）
-        return (init_settings, env_settings, FileDataSource(settings_cls))
+        # 显式传入 > 环境变量（新前缀 > 旧前缀）> config.toml；
+        # 不读 .env 文件（.env 由启动脚本加载进环境）
+        legacy = EnvSettingsSource(settings_cls, env_prefix=LEGACY_PREFIX)
+        return (init_settings, env_settings, legacy, FileDataSource(settings_cls))
 
     app: AppConfig = AppConfig()
     logging: LoggingConfig = LoggingConfig()

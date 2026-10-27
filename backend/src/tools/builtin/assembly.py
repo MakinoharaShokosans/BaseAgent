@@ -10,7 +10,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_runtime.core import AegisTool
+from agent_runtime.core import AgentTool
 from tools.builtin.artifacts import ReadArtifactTool, TaskArtifacts
 from tools.builtin.files import EditFileTool, FileLimits, ViewFileTool, WriteFileTool
 from tools.builtin.search import GrepTool, ListDirTool
@@ -43,8 +43,8 @@ def build_builtin_tools(
     skills: SkillCatalog | None = None,
     ignored_dirs: Collection[str] = (),
     list_dir_max_entries: int = 200,
-) -> list[AegisTool]:
-    tools: list[AegisTool] = [
+) -> list[AgentTool]:
+    tools: list[AgentTool] = [
         ViewFileTool(workspace_root, files),
         WriteFileTool(workspace_root, files, backup_dir=backup_dir),
         EditFileTool(workspace_root, files, backup_dir=backup_dir),

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from agent_runtime.core import AegisTool, ToolResult
+from agent_runtime.core import AgentTool, ToolResult
 from agent_runtime.guardrails import BudgetLedger, ChildBudget
 from agent_runtime.llm import Degraded, LLMRequest, Parsed, TokenUsage
 from agent_runtime.subagents.delegate import (
@@ -169,7 +169,7 @@ class Gateway:
         )
 
 
-def tools(*extra: AegisTool) -> ToolRegistry:
+def tools(*extra: AgentTool) -> ToolRegistry:
     base = [Fake("view_file", idempotent=True), Fake("write_file"), Fake("bash"), *extra]
     return ToolRegistry(base, allow_untrusted=True)
 
@@ -359,7 +359,7 @@ async def test_every_failure_degrades_to_a_report_never_an_exception() -> None:
 
 
 def spawn_tool(
-    ledger: BudgetLedger | None = None, parent: dict[str, AegisTool] | None = None, **kw: Any
+    ledger: BudgetLedger | None = None, parent: dict[str, AgentTool] | None = None, **kw: Any
 ) -> SpawnSubagentTool:
     parent_tools = (
         parent
@@ -519,5 +519,5 @@ async def test_concurrent_spawns_never_over_reserve() -> None:
 def test_schema_requires_an_explicit_tool_list_and_the_child_gets_independent_registry() -> None:
     tool = spawn_tool()
     assert tool.schema().parameters["required"] == ["role", "goal", "assigned_tools"]
-    parent: Mapping[str, AegisTool] = {"view_file": Fake("view_file")}
+    parent: Mapping[str, AgentTool] = {"view_file": Fake("view_file")}
     assert tool._narrow(["view_file"]) is not parent  # pyright: ignore[reportPrivateUsage]

@@ -12,7 +12,7 @@ from agent_runtime.context import MemoryEntry, ProjectRules, PromptAssembler, Pr
 from agent_runtime.core import FailedAttempt, Message, Milestone, ToolCall
 from stage_support import MakeState, with_state
 
-SYSTEM = "你是 Aegis。"
+SYSTEM = "你是 BaseAgent。"
 INSTRUCTION = "【阶段指令】做规划"
 
 

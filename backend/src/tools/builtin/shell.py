@@ -12,7 +12,7 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from agent_runtime.core import AegisTool, ToolResult
+from agent_runtime.core import AgentTool, ToolResult
 from tools.core import DependencyUnavailableError, SidecarClient
 
 _EXECUTE: Final = "/api/v1/shell/execute"
@@ -40,7 +40,7 @@ class ShellResponse(BaseModel):
     estimated_wait_sec: float | None = None
 
 
-class BashTool(AegisTool):
+class BashTool(AgentTool):
     name = "bash"
     description = (
         "在工作区根目录执行一条 Shell 命令，返回蒸馏后的输出与退出码。"

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-from agent_runtime.core import AegisTool, ToolResult
+from agent_runtime.core import AgentTool, ToolResult
 from tools.builtin.diagnostics import check_syntax
 from tools.builtin.paths import PathEscapeError, int_arg, resolve_within_root, text_arg
 
@@ -84,7 +84,7 @@ def parse_range(args: Mapping[str, Any]) -> tuple[int, int | None]:
     return start, end
 
 
-class ViewFileTool(AegisTool):
+class ViewFileTool(AgentTool):
     name = "view_file"
     description = (
         "带行号读取工作区内文件的指定行范围。"
@@ -145,7 +145,7 @@ class ViewFileTool(AegisTool):
         return page_result(page)
 
 
-class WriteFileTool(AegisTool):
+class WriteFileTool(AgentTool):
     name = "write_file"
     description = (
         "整文件写入（覆盖）工作区内的文件，自动创建父目录。"
@@ -225,7 +225,7 @@ class WriteFileTool(AegisTool):
     @staticmethod
     def _replace(path: Path, data: bytes, mode: int | None) -> None:
         """先写同目录临时文件再 ``os.replace``：写到一半失败不会留下残缺的目标文件。"""
-        fd, tmp_name = tempfile.mkstemp(prefix=".aegis-", dir=path.parent)
+        fd, tmp_name = tempfile.mkstemp(prefix=".baseagent-", dir=path.parent)
         tmp = Path(tmp_name)
         try:
             with os.fdopen(fd, "wb") as handle:
