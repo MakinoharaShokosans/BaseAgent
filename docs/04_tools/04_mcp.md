@@ -37,6 +37,9 @@ vetting（消毒）──通过──► MCPToolDefinition ──► MCPToolAdap
 [mcp]
 enabled = true                  # 总开关
 connection_timeout_sec = 30
+index_max_listed = 60          # deferred 索引条数上限，超出时只列服务器
+index_desc_chars = 80
+exposure = "deferred"          # 全局默认，可被服务器覆盖
 call_timeout_sec = 50          # 须小于 [tools.dispatch] default_timeout_sec，让管理器先咬合
 max_description_chars = 1000
 reject_on_injection = true
@@ -46,6 +49,7 @@ rlimit_cpu_sec = 300
 
 [mcp.servers.github]
 enabled = false                 # 每个服务器默认关闭，须显式开启
+exposure = "pinned"             # 覆盖全局默认
 transport = "stdio"             # stdio | sse
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
@@ -89,6 +93,35 @@ POSIX 下不直接启动目标程序，而是通过一个同解释器的包装�
 ## 5. 命名空间
 
 工具一律暴露为 `mcp__{server}__{tool}`，避免不同服务器的同名工具互相冲突，也避免与内置工具撞名。解析时命名不合法直接报错，不做猜测性路由。
+
+### 5.1 暴露方式：`pinned` 与 `deferred`
+
+决策见 [0007](../12_decisions/0007-capability-mounting.md)。通过消毒的工具按服务器的 `exposure` 进入模型视野：
+
+| | `pinned` | `deferred`（默认） |
+|---|---|---|
+| Schema | 直接进请求的 `tools` | 不进 `tools` |
+| 常驻内容 | 完整 Schema | 索引里一行：`mcp__{server}__{tool}` + 一句话 |
+| 调用 | 直接调用 | `mcp_describe` 取 Schema，再 `mcp_call` |
+| 适合 | 少量高频工具 | 工具多、使用稀疏 |
+
+**索引**（第 2 段，技能清单之后的独立 `user` 信封，见 [提示词装配 §3.5](../03_context/03_prompt_assembly.md)）：
+
+- 一行一个工具，描述取消毒后的首句，截断到 `index_desc_chars`（默认 80）。整段包不可信信封：描述来自第三方，位于稳定前缀里。
+- 条数超过 `index_max_listed`（默认 60）时，只列服务器名与工具数，工具名经 `mcp_describe("mcp__{server}")` 取得。
+- 由各服务器**最近一次成功的**消毒列表生成，按名称排序。服务器暂时不可用不改索引，调用时返回失败；重新列出成功且内容有差异才改，下个任务生效。
+
+**`mcp_describe(names)`**：参数为工具名或服务器名（`mcp__{server}`）的列表，返回对应的完整定义（名称、描述、`inputSchema`）或服务器的工具清单。只读；结果追加为 `tool` 消息，折叠豁免、观察值阈值放宽（同 `load_skill`）；不可信，包信封。未知名字返回失败并给出相近的索引名。
+
+**`mcp_call(name, arguments)`**：
+
+- 包装层先解析为目标工具，之后一切按目标处理：权限级别、审批卡片（显示目标名与参数）、指纹、`idempotent_tools`、信封、超时。`mcp_call` 自身不参与权限判定。
+- 解析失败的情形，各合成失败结果，不派发，计入连续错误：目标不在索引内；目标是 `pinned`（应直接调用）；本任务 transcript 里还没有该工具的 `mcp_describe` 结果；`arguments` 不是对象。
+- 参数是否符合 `inputSchema` 由服务器校验，错误以 `isError` 返回，这里不引入 JSON Schema 校验。
+
+**子智能体**不用代理：授予它的 MCP 工具一律直接进它自己的 `tools`。
+
+**挂载集的变化**（服务器启停、重新列出、`exposure` 改动）只在下一个任务的准备阶段生效，任务内索引与 `tools` 冻结，见 [工具系统 §10.1](01_tool_system.md)。
 
 ## 6. 消毒（数据面治理）
 
@@ -160,6 +193,7 @@ allow_tools = ["create_issue", "get_issue"]   # 空表示全部
 ## 11. 不变量
 
 1. 默认不启动任何 MCP 子进程。
+1a. 任务内不改 `tools`；`mcp_call` 的权限判定对象恒为目标工具。
 2. MCP 工具永远是 `untrusted`，不会出现在没有逐名授权的主工具表里。
 3. 单个服务器故障不影响其他服务器与主流程。
 4. 消毒未通过的工具不会被注册，且原因可审计。
@@ -180,6 +214,8 @@ allow_tools = ["create_issue", "get_issue"]   # 空表示全部
 
 ## 13. 待定
 
+- `listChanged` 目前只考虑当作"需要刷新"的信号，不在任务内生效，见 [0007](../12_decisions/0007-capability-mounting.md)。
+- 是否按 transcript 位置而不是"本任务取过 Schema"来判定 `mcp_call` 的前置条件，以允许续跑后沿用旧 Schema。
 - 是否支持 MCP 的资源与提示词能力。目前明确不支持。
 - 对 SSE 远端服务器的鉴权与 TLS 校验要求。目前配置里只有 URL。
 - 是否把 MCP 工具默认放进研究隔离区那样的独立工具表，而不是主工具表，以进一步缩小影响面。
@@ -197,5 +233,5 @@ allow_tools = ["create_issue", "get_issue"]   # 空表示全部
 - **供应链**：启用的 `npx`/`uvx` 等启动方式若包名没有固定版本，启动时告警。
 - **装配**：`Application` 在 `[mcp].enabled` 时创建管理器，任务构建时取工具（任何故障只是少几个工具，不让任务起不来），应用关闭时先回收全部子进程；前端右侧栏有只读的“MCP 服务器”卡片。
 
-**未做**：SSE 传输只有连接代码，没有对应的端到端测试，也没有鉴权与 TLS 校验要求（§13）；`listChanged` 订阅（用“每任务重新列出”代替）；资源、提示词、采样能力。
+**未做**：`exposure`、`mcp_describe`、`mcp_call` 与索引（[0007](../12_decisions/0007-capability-mounting.md)，目前所有通过消毒的工具直接进 `tools`）；SSE 传输只有连接代码，没有对应的端到端测试，也没有鉴权与 TLS 校验要求（§13）；`listChanged` 订阅（用“每任务重新列出”代替）；资源、提示词、采样能力。
 

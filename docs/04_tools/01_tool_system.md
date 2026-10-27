@@ -171,6 +171,7 @@ async def dispatch(calls: Sequence[tuple[str, str, Mapping]]) -> list[Dispatched
 | `bash` | 传入了 shell 客户端 |
 | `view_file`、`write_file` | 始终 |
 | `load_skill` | 传入了技能注册表 |
+| `mcp_describe`、`mcp_call` | 至少有一个 `deferred` 的 MCP 工具（[MCP §5.1](04_mcp.md)） |
 
 原则：缺少某个依赖时，**对应工具不注册**，模型根本看不到它，也就不会误调用一个不存在的能力。
 
@@ -181,12 +182,13 @@ async def dispatch(calls: Sequence[tuple[str, str, Mapping]]) -> list[Dispatched
 工具 Schema 是请求的 `tools` 字段，多数模型服务把它排在提示词最前面，属于前缀缓存的一部分。工具集一变，其后整段缓存全部失效。所以：
 
 - 主 Agent 的工具集**在一个会话内应当固定**。装配发生在任务启动时，不要在任务中途增减工具。
-- MCP 工具的出现与消失（服务器连接失败、恢复后重试、`listChanged`）会改变工具集。变化只在**任务边界**生效，并把它视为一个新的缓存起点，不要频繁切换。
+- MCP 工具的出现与消失（服务器连接失败、恢复后重试、`listChanged`）会改变工具集。变化只在**任务边界**生效，并把它视为一个新的缓存起点，不要频繁切换。`deferred` 的工具不在 `tools` 里，它们的变化落在提示词的索引段，只在成功刷新后变化，见 [0007](../12_decisions/0007-capability-mounting.md)。
+- 任务内没有热挂载：激活（`load_skill`、`mcp_describe`）只追加消息，不改 `tools`。
 - 子智能体按任务授予不同工具，它们有**独立的上下文与请求**，工具集不同不影响主 Agent 的缓存。
 - 工具的**顺序**也是前缀的一部分：注册表导出 Schema 时按名称排序，保证确定。
 - 工具描述文本不得包含随任务变化的内容（路径、时间、计数）。
 
-对应的测试：同一会话内两次导出的 `tools` 序列化逐字节相同；MCP 工具集变化只在下一个任务生效。
+对应的测试：同一会话内两次导出的 `tools` 序列化逐字节相同；MCP 工具集变化只在下一个任务生效；`deferred` 服务器暂时不可用，索引与 `tools` 字节不变。
 
 ## 11. 文件工具的路径安全
 

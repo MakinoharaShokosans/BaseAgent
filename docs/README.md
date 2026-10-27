@@ -20,7 +20,7 @@
 | [09_api](09_api/) | HTTP API 与 SSE 事件契约 | 已写初稿 |
 | [10_frontend](10_frontend/) | 控制台前端 | 已写初稿 |
 | [11_testing](11_testing/) | 测试策略、测试矩阵、现有测试迁移 | 已写初稿 |
-| [12_decisions](12_decisions/) | 架构决策记录（ADR） | 0001–0006（0001 已被 0006 取代） |
+| [12_decisions](12_decisions/) | 架构决策记录（ADR） | 0001–0007（0001 已被 0006 取代） |
 
 ## 约定
 
