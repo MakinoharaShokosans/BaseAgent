@@ -340,8 +340,9 @@ user_agent = "Mozilla/5.0 (compatible; BaseAgentBot/0.1)"
 artifacts_dir = "artifacts"
 # 抓取安全（SSRF 防护）
 block_private_addresses = true      # 拒绝回环、私网、链路本地、元数据地址；每次请求与每次重定向都校验
-allow_fake_ip = true                # 放行 198.18.0.0/15：本机代理（Clash 等）用 fake-ip DNS 时必须开，否则所有页面都被当内网拒绝。
-                                    # 代价：真实解析在代理端，防护看不到页面实际指向的 IP；不用 fake-ip 代理请设 false
+allow_fake_ip = false               # 放行 198.18.0.0/15。本机代理（Clash 等）用 fake-ip DNS 时，所有域名都解析到这个网段，
+                                    # 不开则每个页面都被当内网拒绝。代价：真实解析在代理端，防护看不到页面实际指向的 IP。
+                                    # 只在需要的机器上开，用 .env：BASEAGENT_WEB_SEARCH__ALLOW_FAKE_IP=true
 allowed_ports = [80, 443]
 max_redirects = 5
 max_download_bytes = 2_000_000
