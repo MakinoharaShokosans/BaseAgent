@@ -13,7 +13,9 @@ interface AppState {
   run: RunState | null;
   connection: ConnectionState;
   /** 最近一次操作的错误（含 trace_id），界面提示后可清除 */
-  notice: { message: string; traceId?: string } | null;
+  notice: { message: string; traceId?: string; tone?: 'error' | 'info' } | null;
+  /** 轻量提示：info 是成功反馈（如“已复制”），自动消失；error 需要手动关闭 */
+  notify: (message: string, tone?: 'error' | 'info') => void;
   selectWorkspace: (id: string | null) => void;
   selectSession: (id: string | null) => void;
   submit: (goal: string, level: PermissionLevel, confirmFull: boolean) => Promise<void>;
@@ -120,6 +122,7 @@ export const useAppStore = create<AppState>((set, get) => {
         await api.tasks.cancel(run.taskId);
       }),
     clearNotice: () => set({ notice: null }),
+    notify: (message, tone = 'info') => set({ notice: { message, tone } }),
     detach: () => {
       stop();
       set({ connection: 'closed' });

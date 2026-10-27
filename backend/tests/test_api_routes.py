@@ -151,6 +151,34 @@ async def test_workspace_memory_add_dedupe_and_delete(rig: ApiRig) -> None:
 
 
 @pytest.mark.unit
+async def test_fork_a_session_whole_or_from_a_turn(rig: ApiRig) -> None:
+    sid = await rig.create_session()
+    ids = [await rig.services.memory.append_turn(sid, "t", "user", f"m{i}", 1) for i in range(3)]
+    whole = await rig.client.post(f"{V1}/sessions/{sid}/fork", headers=HEADERS)
+    assert whole.status_code == 201 and whole.json()["session_id"] != sid
+    part = await rig.client.post(
+        f"{V1}/sessions/{sid}/fork", json={"from_turn_id": ids[1]}, headers=HEADERS
+    )
+    assert part.status_code == 201
+    for fork, expected in ((whole, ["m0", "m1", "m2"]), (part, ["m0", "m1"])):
+        turns = await rig.client.get(
+            f"{V1}/sessions/{fork.json()['session_id']}/turns", headers=HEADERS
+        )
+        assert [t["content"] for t in turns.json()] == expected
+    assert fork_workspace(whole) == fork_workspace(part)
+    bad = await rig.client.post(
+        f"{V1}/sessions/{sid}/fork", json={"from_turn_id": 999999}, headers=HEADERS
+    )
+    assert err(bad)["code"] == "TURN_NOT_FOUND"
+    ghost = await rig.client.post(f"{V1}/sessions/nope/fork", headers=HEADERS)
+    assert err(ghost)["code"] == "SESSION_NOT_FOUND"
+
+
+def fork_workspace(response: Any) -> str:
+    return str(response.json()["workspace_id"])
+
+
+@pytest.mark.unit
 async def test_session_lifecycle_and_turn_paging(rig: ApiRig) -> None:
     sid = await rig.create_session()
     assert (await rig.client.get(f"{V1}/sessions/{sid}", headers=HEADERS)).json()[

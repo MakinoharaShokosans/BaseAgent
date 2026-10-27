@@ -50,6 +50,12 @@ export function createApi(client: HttpClient = http) {
       create: (workspaceId: string) =>
         client.post<Session>(`/workspaces/${enc(workspaceId)}/sessions`),
       remove: (id: string) => client.delete<void>(`/sessions/${enc(id)}`),
+      /** 复制会话为新会话；给出 fromTurnId 时只复制到该轮（含）为止 */
+      fork: (id: string, fromTurnId?: number) =>
+        client.post<Session>(
+          `/sessions/${enc(id)}/fork`,
+          fromTurnId === undefined ? undefined : { from_turn_id: fromTurnId },
+        ),
       turns: (id: string, limit = 50, beforeId?: number) =>
         client.get<Turn[]>(
           `/sessions/${enc(id)}/turns?limit=${limit}${beforeId ? `&before_id=${beforeId}` : ''}`,

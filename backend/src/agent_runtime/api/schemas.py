@@ -58,6 +58,11 @@ class WorkspaceMemoryOut(_Response):
 # ------------------------------------------------------------------ 会话
 
 
+class ForkRequest(_Request):
+    #: 只复制到这一轮（含）为止；省略则复制整个会话
+    from_turn_id: int | None = Field(default=None, ge=1)
+
+
 class SessionOut(_Response):
     session_id: str
     workspace_id: str

@@ -52,6 +52,13 @@ function useShortcuts(): void {
 function NoticeBar() {
   const notice = useAppStore((s) => s.notice);
   const clear = useAppStore((s) => s.clearNotice);
+  const info = notice?.tone === 'info';
+  // 成功反馈自动消失；错误提示留着，直到用户关掉
+  useEffect(() => {
+    if (!notice || !info) return;
+    const timer = setTimeout(clear, 2200);
+    return () => clearTimeout(timer);
+  }, [notice, info, clear]);
   return (
     <AnimatePresence>
       {notice && (
@@ -63,7 +70,11 @@ function NoticeBar() {
           transition={SPRING}
           className="absolute left-1/2 top-3 z-50 flex max-w-xl items-center gap-3 rounded-2xl bg-raised/95 py-2 pl-4 pr-2 text-sm text-bad shadow-float backdrop-blur-xl"
         >
-          <span className="h-2 w-2 shrink-0 rounded-full bg-bad" />
+          <span
+            className={
+              info ? 'h-2 w-2 shrink-0 rounded-full bg-ok' : 'h-2 w-2 shrink-0 rounded-full bg-bad'
+            }
+          />
           <span className="min-w-0 flex-1 text-ink">{notice.message}</span>
           {notice.traceId && (
             <button

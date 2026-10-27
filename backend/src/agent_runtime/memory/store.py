@@ -341,6 +341,57 @@ class MemoryStore:
         )
         return list(reversed(turns))
 
+    async def fork_session(
+        self, source_id: str, new_id: str, *, upto_turn_id: int | None = None
+    ) -> int:
+        """从 ``source_id`` 的对话复制出新会话，返回复制的轮次数。
+
+        ``upto_turn_id`` 给出时只复制 id 不超过它的轮次（从某条消息处分支），否则复制全部。
+        记忆只带“分支点之前确实成立”的部分：摘要的水位线超过分支点时它已混入分支点之后的内容，
+        不能带，分支里的对话保持逐字；事实与失败记录只带分支点之前出现过的任务产生的。
+        任何一步失败都删除半成品，源会话不受影响。
+        """
+        info = await self.get_session(source_id)
+        bound = upto_turn_id if upto_turn_id is not None else 2**62
+        turns = await self._turns(
+            "SELECT id, session_id, task_id, role, content, token_count, created_at "
+            "FROM session_turns WHERE session_id = ? AND id <= ? ORDER BY id",
+            (source_id, bound),
+        )
+        if upto_turn_id is not None and not any(t.id == upto_turn_id for t in turns):
+            raise MemoryError_(f"轮次 {upto_turn_id} 不属于会话 {source_id}")
+        source_memory = await self.load_memory(source_id)
+        settings = await self.get_session_settings(source_id)
+        await self.create_session(new_id, info.workspace_id)
+        try:
+            mapped: dict[int, int] = {}
+            for t in turns:
+                mapped[t.id] = await self.append_turn(
+                    new_id, t.task_id, t.role, t.content, t.token_count
+                )
+            kept_tasks = {t.task_id for t in turns}
+            keep_summary = source_memory.watermark <= (turns[-1].id if turns else 0)
+
+            def carry(_: SessionMemory) -> SessionMemory:
+                return SessionMemory(
+                    watermark=mapped.get(source_memory.watermark, 0) if keep_summary else 0,
+                    summary=source_memory.summary if keep_summary else "",
+                    facts=tuple(f for f in source_memory.facts if f.task_id in kept_tasks)
+                    if keep_summary
+                    else (),
+                    failures=tuple(f for f in source_memory.failures if f.task_id in kept_tasks)
+                    if keep_summary
+                    else (),
+                )
+
+            await self.update_memory(new_id, carry)
+            if settings:
+                await self.set_session_settings(new_id, settings)
+        except BaseException:
+            await self.delete_session(new_id)
+            raise
+        return len(turns)
+
     async def delete_session(self, session_id: str) -> None:
         await self._write("DELETE FROM sessions WHERE session_id = ?", (session_id,))
 

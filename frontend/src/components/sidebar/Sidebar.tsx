@@ -5,23 +5,30 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import {
+  Copy,
+  CopyPlus,
   FolderPlus,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   Settings,
+  Trash2,
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../api/endpoints';
 import { useAppStore } from '../../stores/useAppStore';
 import { useUiStore } from '../../stores/useUiStore';
-import { TERMINAL_STATUSES } from '../../types/api';
+import { TERMINAL_STATUSES, type Session, type Workspace } from '../../types/api';
 import { cn } from '../../utils/text';
 import { FolderGlyph } from '../icons/Glyphs';
 import { ThemeToggle } from '../layout/ThemeToggle';
+import { ConfirmDialog } from '../modals/ConfirmDialog';
+import { RenameWorkspaceModal } from '../modals/RenameWorkspaceModal';
 import { WorkspaceModal } from '../modals/WorkspaceModal';
 import { SettingsModal } from '../settings/SettingsModal';
+import { MoreMenu } from '../ui/MoreMenu';
 import { Chevron, IconButton, Reveal, SPRING } from '../ui/primitives';
 
 export function Sidebar() {
@@ -34,6 +41,12 @@ export function Sidebar() {
   const toggle = useUiStore((s) => s.toggleSidebar);
   const [adding, setAdding] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [renaming, setRenaming] = useState<Workspace | null>(null);
+  const [removingWorkspace, setRemovingWorkspace] = useState<Workspace | null>(null);
+  const [removingSession, setRemovingSession] = useState<{
+    session: Session;
+    label: string;
+  } | null>(null);
 
   const workspaces = useQuery({ queryKey: ['workspaces'], queryFn: api.workspaces.list });
   const sessions = useQuery({
@@ -50,6 +63,35 @@ export function Sidebar() {
       selectSession(s.session_id);
     },
   });
+
+  const forkSession = useMutation({
+    mutationFn: (id: string) => api.sessions.fork(id),
+    onSuccess: async (s) => {
+      await client.invalidateQueries({ queryKey: ['sessions', s.workspace_id] });
+      selectSession(s.session_id);
+      useAppStore.getState().notify('已创建副本');
+    },
+    onError: (e) => useAppStore.getState().notify((e as Error).message, 'error'),
+  });
+
+  const copyPath = (path: string) => {
+    const done = () => useAppStore.getState().notify('路径已复制');
+    const failed = () => useAppStore.getState().notify('复制失败，浏览器不允许访问剪贴板', 'error');
+    if (!navigator.clipboard) return failed();
+    navigator.clipboard.writeText(path).then(done, failed);
+  };
+
+  const removeSession = async (s: Session) => {
+    await api.sessions.remove(s.session_id);
+    if (useAppStore.getState().sessionId === s.session_id) selectSession(null);
+    await client.invalidateQueries({ queryKey: ['sessions', s.workspace_id] });
+  };
+
+  const removeWorkspace = async (w: Workspace) => {
+    await api.workspaces.remove(w.workspace_id);
+    if (useAppStore.getState().workspaceId === w.workspace_id) selectWorkspace(null);
+    await client.invalidateQueries({ queryKey: ['workspaces'] });
+  };
 
   const live = !!run && !TERMINAL_STATUSES.includes(run.status);
   const waiting = run?.status === 'waiting_for_approval';
@@ -130,7 +172,7 @@ export function Sidebar() {
                 <button
                   aria-current={open}
                   title={w.root_path}
-                  className="nav-item pr-9"
+                  className="nav-item pr-[3.75rem]"
                   onClick={() => !open && selectWorkspace(w.workspace_id)}
                 >
                   <Chevron open={open} size={12} />
@@ -141,7 +183,7 @@ export function Sidebar() {
                   label={`在 ${w.name} 中新建会话`}
                   disabled={newSession.isPending}
                   className={cn(
-                    'absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 transition-opacity',
+                    'absolute right-8 top-1/2 h-6 w-6 -translate-y-1/2 transition-opacity',
                     open
                       ? 'opacity-100'
                       : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100',
@@ -150,13 +192,42 @@ export function Sidebar() {
                 >
                   <Plus size={15} />
                 </IconButton>
+                <MoreMenu
+                  label={`${w.name} 的更多操作`}
+                  className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 aria-expanded:opacity-100"
+                  items={[
+                    {
+                      label: '新建会话',
+                      icon: <Plus size={15} />,
+                      onSelect: () => newSession.mutate(w.workspace_id),
+                    },
+                    {
+                      label: '重命名',
+                      icon: <Pencil size={15} />,
+                      onSelect: () => setRenaming(w),
+                    },
+                    {
+                      label: '复制路径',
+                      icon: <Copy size={15} />,
+                      onSelect: () => copyPath(w.root_path),
+                    },
+                    {
+                      label: '移除工作区',
+                      icon: <Trash2 size={15} />,
+                      danger: true,
+                      separated: true,
+                      onSelect: () => setRemovingWorkspace(w),
+                    },
+                  ]}
+                />
               </div>
               <Reveal open={open}>
                 <ul className="relative ml-[1.15rem] space-y-0.5 py-0.5 pl-2">
                   {list?.map((s, index) => {
                     const active = s.session_id === sessionId;
+                    const label = `会话 ${list.length - index}`;
                     return (
-                      <li key={s.session_id} className="relative">
+                      <li key={s.session_id} className="group/session relative">
                         {active && (
                           <motion.span
                             layoutId="session-indicator"
@@ -166,12 +237,12 @@ export function Sidebar() {
                         )}
                         <button
                           aria-current={active}
-                          className="nav-item py-1.5"
+                          className="nav-item py-1.5 pr-8"
                           onClick={() => selectSession(s.session_id)}
                         >
                           <MessageSquare size={14} strokeWidth={1.6} className="shrink-0" />
                           <span className="min-w-0 flex-1 truncate">
-                            会话 {list.length - index}
+                            {label}
                             <span className="ml-1.5 text-2xs font-normal tabular-nums text-mute/70">
                               {new Date(s.created_at * 1000).toLocaleDateString()}
                             </span>
@@ -186,6 +257,25 @@ export function Sidebar() {
                             />
                           )}
                         </button>
+                        <MoreMenu
+                          label={`${label} 的更多操作`}
+                          className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/session:opacity-100 aria-expanded:opacity-100"
+                          items={[
+                            {
+                              label: '创建副本',
+                              icon: <CopyPlus size={15} />,
+                              disabled: forkSession.isPending,
+                              onSelect: () => forkSession.mutate(s.session_id),
+                            },
+                            {
+                              label: '删除会话',
+                              icon: <Trash2 size={15} />,
+                              danger: true,
+                              separated: true,
+                              onSelect: () => setRemovingSession({ session: s, label }),
+                            },
+                          ]}
+                        />
                       </li>
                     );
                   })}
@@ -226,6 +316,28 @@ export function Sidebar() {
       </div>
 
       {adding && <WorkspaceModal onClose={() => setAdding(false)} />}
+      {renaming && <RenameWorkspaceModal workspace={renaming} onClose={() => setRenaming(null)} />}
+      {removingWorkspace && (
+        <ConfirmDialog
+          title="移除工作区"
+          confirmLabel="移除"
+          onConfirm={() => removeWorkspace(removingWorkspace)}
+          onClose={() => setRemovingWorkspace(null)}
+        >
+          将移除「{removingWorkspace.name}」，并删除它下面的所有会话、对话记录和记忆。
+          磁盘上的项目文件不会被删除。此操作无法撤销。
+        </ConfirmDialog>
+      )}
+      {removingSession && (
+        <ConfirmDialog
+          title="删除会话"
+          confirmLabel="删除"
+          onConfirm={() => removeSession(removingSession.session)}
+          onClose={() => setRemovingSession(null)}
+        >
+          将删除「{removingSession.label}」的对话记录、记忆和任务记录。此操作无法撤销。
+        </ConfirmDialog>
+      )}
       {settings && <SettingsModal onClose={() => setSettings(false)} />}
     </motion.aside>
   );

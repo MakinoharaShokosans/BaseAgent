@@ -317,3 +317,101 @@ async def test_deleting_a_workspace_cascades_everything_beneath_it(
     }
     with pytest.raises(WorkspaceNotFound):
         await store.get_workspace_memory("w1")
+
+
+# ==============================================================================
+# 分支（fork）
+# ==============================================================================
+
+
+async def turns_of(store: MemoryStore, sid: str) -> list[tuple[str, str, str]]:
+    return [(t.task_id, t.role, t.content) for t in await store.turns_page(sid, 100)]
+
+
+@pytest.mark.unit
+async def test_forking_at_a_turn_copies_only_up_to_it_and_leaves_the_source_alone(
+    store: MemoryStore, root: Path
+) -> None:
+    sid = await session(store, root)
+    ids = [
+        await store.append_turn(sid, f"t{i // 2}", r, f"c{i}", 5)
+        for i, r in enumerate(["user", "assistant", "user", "assistant"])
+    ]
+    copied = await store.fork_session(sid, "fork", upto_turn_id=ids[1])
+    assert copied == 2
+    assert await turns_of(store, "fork") == [("t0", "user", "c0"), ("t0", "assistant", "c1")]
+    assert len(await turns_of(store, sid)) == 4
+    assert (await store.get_session("fork")).workspace_id == "w1"
+    new_ids = [t.id for t in await store.turns_page("fork", 10)]
+    assert set(new_ids).isdisjoint(ids)
+
+
+@pytest.mark.unit
+async def test_forking_everything_copies_summary_facts_and_settings(
+    store: MemoryStore, root: Path
+) -> None:
+    sid = await session(store, root)
+    ids = [await store.append_turn(sid, "t1", "user", f"c{i}", 5) for i in range(3)]
+    await store.update_memory(
+        sid,
+        lambda m: dataclasses.replace(
+            m, watermark=ids[1], summary="摘要", facts=(fact("事实", "t1"),)
+        ),
+    )
+    await store.set_session_settings(sid, {"model": "x"})
+    await store.fork_session(sid, "fork")
+    memory = await store.load_memory("fork")
+    new_ids = [t.id for t in await store.turns_page("fork", 10)]
+    assert (memory.summary, memory.watermark) == ("摘要", new_ids[1])
+    assert [f.text for f in memory.facts] == ["事实"]
+    assert await store.get_session_settings("fork") == {"model": "x"}
+
+
+@pytest.mark.unit
+async def test_a_summary_that_covers_past_the_branch_point_is_not_carried_over(
+    store: MemoryStore, root: Path
+) -> None:
+    sid = await session(store, root)
+    ids = [await store.append_turn(sid, f"t{i}", "user", f"c{i}", 5) for i in range(4)]
+    await store.update_memory(
+        sid,
+        lambda m: dataclasses.replace(
+            m, watermark=ids[2], summary="混入了后面的内容", facts=(fact("后来的事实", "t3"),)
+        ),
+    )
+    await store.fork_session(sid, "fork", upto_turn_id=ids[1])
+    memory = await store.load_memory("fork")
+    assert (memory.summary, memory.watermark, memory.facts) == ("", 0, ())
+    assert len(await turns_of(store, "fork")) == 2
+
+
+@pytest.mark.unit
+async def test_facts_from_tasks_after_the_branch_point_are_dropped(
+    store: MemoryStore, root: Path
+) -> None:
+    sid = await session(store, root)
+    ids = [await store.append_turn(sid, f"t{i}", "user", f"c{i}", 5) for i in range(3)]
+    await store.update_memory(
+        sid,
+        lambda m: dataclasses.replace(
+            m, watermark=ids[0], summary="早期摘要", facts=(fact("早", "t0"), fact("晚", "t2"))
+        ),
+    )
+    await store.fork_session(sid, "fork", upto_turn_id=ids[1])
+    memory = await store.load_memory("fork")
+    assert memory.summary == "早期摘要" and [f.text for f in memory.facts] == ["早"]
+
+
+@pytest.mark.unit
+async def test_forking_with_a_foreign_turn_or_missing_session_leaves_nothing_behind(
+    store: MemoryStore, root: Path
+) -> None:
+    a = await session(store, root, "a")
+    b = await session(store, root, "b")
+    await store.append_turn(a, "t", "user", "A", 1)
+    foreign = await store.append_turn(b, "t", "user", "B", 1)
+    with pytest.raises(MemoryError_):
+        await store.fork_session(a, "fork", upto_turn_id=foreign)
+    assert not await store.session_exists("fork")
+    with pytest.raises(SessionNotFound):
+        await store.fork_session("ghost", "fork")

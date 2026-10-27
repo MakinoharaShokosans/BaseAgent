@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Response
@@ -13,12 +14,14 @@ from agent_runtime.api.schemas import (
     CompactionOut,
     FactOut,
     FailureOut,
+    ForkRequest,
     SessionMemoryOut,
     SessionOut,
     TaskOut,
     TurnOut,
 )
 from agent_runtime.memory import Fact, Failure
+from agent_runtime.memory.errors import MemoryError_, SessionNotFound
 from agent_runtime.runtime.service import TaskStateConflictError
 
 router = APIRouter(tags=["sessions"])
@@ -45,6 +48,25 @@ def _failure(f: Failure) -> FailureOut:
 @router.get("/sessions/{session_id}", response_model=SessionOut)
 async def get_session(session_id: SessionId, svc: Services) -> SessionOut:
     info = await svc.memory.get_session(session_id)
+    return SessionOut(
+        session_id=info.session_id, workspace_id=info.workspace_id, created_at=info.created_at
+    )
+
+
+@router.post("/sessions/{session_id}/fork", response_model=SessionOut, status_code=201)
+async def fork_session(
+    session_id: SessionId, svc: Services, body: ForkRequest | None = None
+) -> SessionOut:
+    """复制会话的对话与记忆为新会话；``from_turn_id`` 给出时只复制到该轮（含）为止。"""
+    upto = body.from_turn_id if body else None
+    new_id = "sess_" + uuid.uuid4().hex[:12]
+    try:
+        await svc.memory.fork_session(session_id, new_id, upto_turn_id=upto)
+    except MemoryError_ as exc:
+        if isinstance(exc, SessionNotFound):
+            raise
+        raise ApiError(404, "TURN_NOT_FOUND", "该轮次不属于这个会话") from exc
+    info = await svc.memory.get_session(new_id)
     return SessionOut(
         session_id=info.session_id, workspace_id=info.workspace_id, created_at=info.created_at
     )

@@ -40,11 +40,14 @@ POST /workspaces
 | `GET /workspaces/{id}/sessions` | 列出会话 | 已有 |
 | `GET /sessions/{id}` | 查询会话 | 已有 |
 | `DELETE /sessions/{id}` | 删除会话及其流水与记忆 | 已有 |
+| `POST /sessions/{id}/fork` | 复制会话为新会话（同工作区）；请求体可选 `{from_turn_id}`，只复制到该轮（含）为止；返回 201 与新会话 | **新增**，见下 |
 | `GET /sessions/{id}/turns?limit&before_id` | 分页查询对话流水 | 已有 |
 | `GET /sessions/{id}/memory` | 读取会话已压缩记忆 | 已有 |
 | `POST /sessions/{id}/memory/compact` | 手动压缩会话记忆（输入台的“压缩记忆”按钮） | 已有，见下 |
 | `GET /sessions/{id}/context` | 上下文检视：各层装配结果与 Token 估算 | 已有，见 [提示词装配 §6](../03_context/03_prompt_assembly.md) |
 | `GET /sessions/{id}/tasks` | 列出会话下的任务 | **新增**，见下 |
+
+**分支。** `POST /sessions/{id}/fork` 复制对话流水（轮次 id 重新分配）与会话设置，不复制任务、检查点与产物。记忆只带分支点之前确实成立的部分：摘要水位线不超过分支点时带摘要与水位线，事实和失败记录只保留分支点之前出现过的任务产生的；水位线超过分支点则摘要已混入之后的内容，不带摘要与事实，分支里的对话保持逐字。`from_turn_id` 不属于该会话 → `404 TURN_NOT_FOUND`；源会话不存在 → `404 SESSION_NOT_FOUND`。源会话在运行任务时也可以分支（只读源）。
 
 **手动压缩。** `POST /sessions/{id}/memory/compact`（无请求体）：忽略水位线与失败退避，除最近 `active_window_turns` 条外，把较早的对话并入摘要；原始流水不删除。与收尾自动压缩共用同一把会话锁，不会并发提炼。返回 `{status, turns, memory}`，`status` 为 `compacted` 或 `nothing_to_compact`（没有可并入的轮次也没有待合并的近期新增时直接返回，不调用模型）。有任务在运行 → `409 TASK_STATE_CONFLICT`；提炼失败 → `502 COMPACTION_FAILED`，记忆与水位线保持不变；装配层没有提供压缩器 → `503 DEPENDENCY_UNAVAILABLE`。
 

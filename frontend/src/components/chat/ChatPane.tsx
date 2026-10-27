@@ -2,9 +2,18 @@
  * 对话区：每一轮（用户消息 + 回复）是一个节点，右缘的节点轨道可点击跳转；
  * 滚动条隐藏但滚轮照常可用。设计见 docs/10_frontend/03_visual_design.md §6。
  */
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
-import { Bug, GitPullRequest, Map as MapIcon, RotateCcw, Square } from 'lucide-react';
+import {
+  Bug,
+  Check,
+  Copy,
+  GitBranch,
+  GitPullRequest,
+  Map as MapIcon,
+  RotateCcw,
+  Square,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../api/endpoints';
 import { useAppStore } from '../../stores/useAppStore';
@@ -12,7 +21,7 @@ import { TERMINAL_STATUSES, type Task, type Turn } from '../../types/api';
 import { statusMeta } from '../../utils/status';
 import { HitlApprovalCard } from '../domain/HitlApprovalCard';
 import { SafeMarkdown } from '../common/SafeMarkdown';
-import { Button, Chevron, EASE_OUT, Reveal, StatusPill } from '../ui/primitives';
+import { Button, Chevron, EASE_OUT, IconButton, Reveal, StatusPill } from '../ui/primitives';
 import { CompactButton } from './CompactButton';
 import { InputConsole } from './InputConsole';
 import { ModelPicker } from './ModelPicker';
@@ -35,6 +44,8 @@ interface Round {
   id: string;
   user: string;
   replies: Turn[];
+  /** 这一轮最后一条流水的 id：从此处分支时，分支包含到它为止 */
+  lastTurnId: number;
 }
 
 /** 把对话流水按"用户消息 + 其后的回复"切成轮次 */
@@ -42,10 +53,17 @@ function toRounds(turns: Turn[]): Round[] {
   const rounds: Round[] = [];
   for (const t of turns) {
     if (t.role === 'user' || !rounds.length) {
-      rounds.push({ id: `turn-${t.id}`, user: t.role === 'user' ? t.content : '', replies: [] });
+      rounds.push({
+        id: `turn-${t.id}`,
+        user: t.role === 'user' ? t.content : '',
+        replies: [],
+        lastTurnId: t.id,
+      });
       if (t.role === 'user') continue;
     }
-    (rounds[rounds.length - 1] as Round).replies.push(t);
+    const round = rounds[rounds.length - 1] as Round;
+    round.replies.push(t);
+    round.lastTurnId = t.id;
   }
   return rounds;
 }
@@ -89,6 +107,37 @@ function UserBubble({ children }: { children: ReactNode }) {
   );
 }
 
+/** 一轮对话下方的操作：复制这一轮的回复、从这里分出一个新会话 */
+function RoundActions({
+  text,
+  onBranch,
+  branching,
+}: {
+  text: string;
+  onBranch: () => void;
+  branching: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const fail = () => useAppStore.getState().notify('复制失败，浏览器不允许访问剪贴板', 'error');
+    if (!navigator.clipboard) return fail();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }, fail);
+  };
+  return (
+    <div className="-mt-2 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/round:opacity-100">
+      <IconButton label={copied ? '已复制' : '复制回复'} onClick={copy}>
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </IconButton>
+      <IconButton label="从此处分支" disabled={branching} onClick={onBranch}>
+        <GitBranch size={14} />
+      </IconButton>
+    </div>
+  );
+}
+
 function Thinking() {
   return (
     <span className="inline-flex items-center gap-1 text-sm text-mute" aria-label="正在处理">
@@ -117,6 +166,17 @@ export function ChatPane() {
   const [draft, setDraft] = useState('');
   const [traceOpen, setTraceOpen] = useState(true);
   const [active, setActive] = useState<string | null>(null);
+  const { selectSession, notify } = useAppStore.getState();
+
+  const branch = useMutation({
+    mutationFn: (fromTurnId: number) => api.sessions.fork(sessionId as string, fromTurnId),
+    onSuccess: async (s) => {
+      await client.invalidateQueries({ queryKey: ['sessions', s.workspace_id] });
+      selectSession(s.session_id);
+      notify('已从此处创建分支会话');
+    },
+    onError: (e) => notify((e as Error).message, 'error'),
+  });
 
   const turns = useQuery({
     queryKey: ['turns', sessionId],
@@ -286,12 +346,19 @@ export function ChatPane() {
               ref={register(r.id)}
               data-round={r.id}
               {...enter}
-              className="scroll-mt-6 space-y-5"
+              className="group/round scroll-mt-6 space-y-5"
             >
               {r.user && <UserBubble>{r.user}</UserBubble>}
               {r.replies.map((t) => (
                 <SafeMarkdown key={t.id} text={t.content} />
               ))}
+              {r.replies.length > 0 && (
+                <RoundActions
+                  text={r.replies.map((t) => t.content).join('\n\n')}
+                  branching={branch.isPending}
+                  onBranch={() => branch.mutate(r.lastTurnId)}
+                />
+              )}
             </motion.section>
           ))}
 
