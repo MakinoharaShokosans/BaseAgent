@@ -38,8 +38,8 @@
 
 - 首次启动生成 256 位随机令牌，写入 `storage/api_token`，权限 0600，目录 0700。`.gitignore` 已包含该路径。
 - 令牌**不写日志，不进事件，不出现在启动看板里**（只显示文件路径）。
-- 轮换：删除文件并重启即可；提供 `aegis token rotate` 命令。
-- 启动器 `aegis` 起前端时，把令牌通过安全的方式交给前端（环境变量注入到开发服务器的代理层，见 §3.3），不要写进前端的静态文件。
+- 轮换：删除文件并重启即可；提供 `baseagent token rotate` 命令。
+- 启动器 `baseagent` 起前端时，把令牌通过安全的方式交给前端（环境变量注入到开发服务器的代理层，见 §3.3），不要写进前端的静态文件。
 
 ### 3.2 校验
 
@@ -164,7 +164,7 @@
 
 接入闸门是纯 ASGI 中间件（`agent_runtime.api.security.AccessGate`），错误信封与领域异常映射在 `agent_runtime.api.errors`，令牌在 `agent_runtime.api.token`。与上文的差异与补充：
 
-- **令牌**：`aegis token` 打印令牌文件路径，`aegis token --rotate` 轮换；环境变量 `AEGIS_API_TOKEN`（`server.auth.token_env`）优先于文件。令牌不出现在日志、事件、错误体、启动看板（只显示路径）。
+- **令牌**：`baseagent token` 打印令牌文件路径，`baseagent token --rotate` 轮换；环境变量 `BASEAGENT_API_TOKEN`（`server.auth.token_env`）优先于文件。令牌不出现在日志、事件、错误体、启动看板（只显示路径）。
 - **失败限速**：窗口内失败达到阈值后返回 429 `AUTH_RATE_LIMITED`（连正确的令牌也暂时拒绝，直到窗口滑出）。
 - **请求体上限**：声明的 `Content-Length` 超限直接 413；流式超限时让应用看到断开、由闸门给 413（框架会把读体失败包装成 400）。文件保存接口放宽到 `tools.files.write_max_bytes` 的两倍加一点余量。
 - **trace id**：沿用请求头里合规（`[A-Za-z0-9._-]{1,64}`）的值，否则生成；响应头与错误体一致。

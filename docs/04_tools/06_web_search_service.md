@@ -56,7 +56,7 @@ request_timeout_sec = 10
 total_timeout_sec = 30
 max_content_tokens = 1500     # 超过则落盘，只回预览
 preview_chars = 200
-user_agent = "Mozilla/5.0 (compatible; AegisBot/0.1)"
+user_agent = "Mozilla/5.0 (compatible; BaseAgentBot/0.1)"
 artifacts_dir = "storage/artifacts"
 ```
 
@@ -128,7 +128,7 @@ artifacts_dir = "storage/artifacts"
 
 ## 10. 实现状态
 
-代码在 `backend/src/services/web_search/`（`netguard`、`extract`、`providers`、`app`），`python -m services.web_search` 启动，或由 `aegis start` 拉起。
+代码在 `backend/src/services/web_search/`（`netguard`、`extract`、`providers`、`app`），`python -m services.web_search` 启动，或由 `baseagent start` 拉起。
 
 - **SSRF（§4 第 1、4 项已修）**：`check_url` 对**每个解析结果**判断（任何一个落在回环、私网、链路本地、`100.64/10`、保留段、组播、未指定地址，或 IPv4 映射的 IPv6 写法，整个主机名都被拒绝）；十进制、十六进制、八进制的 IP 字面量先交给标准库规范化；只允许 `http`/`https`、端口白名单、拒绝带用户信息的 URL。
 - **DNS 重绑定**：校验过的 IP 被「钉」进连接 URL（`Host` 头和 SNI 仍是原主机名），解析只发生一次，连接时不会再二次解析。

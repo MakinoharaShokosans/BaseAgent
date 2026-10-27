@@ -15,16 +15,16 @@
 ## 2. 优先级
 
 ```
-命令行参数  >  环境变量 AEGIS_<节>__<键>  >  config.toml  >  代码内置默认值
+命令行参数  >  环境变量 BASEAGENT_<节>__<键>  >  config.toml  >  代码内置默认值
 ```
 
-- 环境变量覆盖的写法：前缀 `AEGIS_`，层级分隔符 `__`（双下划线）。`AEGIS_SERVER__PORT=8010` 覆盖 `[server] port`；`AEGIS_RUNTIME__GUARDRAILS__MAX_STEPS=40` 覆盖 `[runtime.guardrails] max_steps`。
+- 环境变量覆盖的写法：前缀 `BASEAGENT_`，层级分隔符 `__`（双下划线）。`BASEAGENT_SERVER__PORT=8010` 覆盖 `[server] port`；`BASEAGENT_RUNTIME__GUARDRAILS__MAX_STEPS=40` 覆盖 `[runtime.guardrails] max_steps`。
 - 数组与表（如端点列表）不支持环境变量覆盖，只能改文件。
-- 配置文件位置：`AEGIS_CONFIG` 指定，否则依次查找 `./config/config.toml` 与 `$AEGIS_HOME/config.toml`。
-- 相对路径一律相对 `AEGIS_HOME` 解析，不相对当前目录，避免不同目录启动得到不同数据集。解析后必须仍在数据目录之内（`..` 逃逸被拒绝）；绝对路径原样使用。
-- 数据目录本身：环境变量 `AEGIS_HOME` 优先于文件里的 `app.home`。文件里的 `app.home` 必须是绝对路径或以 `~` 开头；环境变量里给相对值时，在加载时按当前目录取绝对（这是使用者当下显式的选择）。开发时想用仓库内的目录，设 `AEGIS_HOME=./storage`。
-- 只有以 `AEGIS_<节>__` 形式指向**存在的标量**的变量才是覆盖项。`AEGIS_HOME`、`AEGIS_CONFIG`、`AEGIS_API_TOKEN`、`AEGIS_PROXY_TARGET` 是普通变量，不是覆盖项。指向数组、表、整节、未知键的变量，加载时报错并带上变量名。
-- 实现在 [`aegis_config`](../../backend/src/aegis_config/)，见 [路线图 阶段 -0.5](03_code_layout_and_roadmap.md)。
+- 配置文件位置：`BASEAGENT_CONFIG` 指定，否则依次查找 `./config/config.toml` 与 `$BASEAGENT_HOME/config.toml`。
+- 相对路径一律相对 `BASEAGENT_HOME` 解析，不相对当前目录，避免不同目录启动得到不同数据集。解析后必须仍在数据目录之内（`..` 逃逸被拒绝）；绝对路径原样使用。
+- 数据目录本身：环境变量 `BASEAGENT_HOME` 优先于文件里的 `app.home`。文件里的 `app.home` 必须是绝对路径或以 `~` 开头；环境变量里给相对值时，在加载时按当前目录取绝对（这是使用者当下显式的选择）。开发时想用仓库内的目录，设 `BASEAGENT_HOME=./storage`。
+- 只有以 `BASEAGENT_<节>__` 形式指向**存在的标量**的变量才是覆盖项。`BASEAGENT_HOME`、`BASEAGENT_CONFIG`、`BASEAGENT_API_TOKEN`、`BASEAGENT_PROXY_TARGET` 是普通变量，不是覆盖项。指向数组、表、整节、未知键的变量，加载时报错并带上变量名。
+- 实现在 [`baseagent_config`](../../backend/src/baseagent_config/)，见 [路线图 阶段 -0.5](03_code_layout_and_roadmap.md)。
 
 ## 3. 环境变量：什么该放，什么不该放
 
@@ -45,15 +45,15 @@
 | 变量 | 必需 | 含义 |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | 是 | 模型密钥。推理档与快速档共用；由 `api_key_env` 引用 |
-| `AEGIS_HOME` | 否 | 数据目录。数据库、轨迹、产物、日志、令牌、金丝雀盐都在其下 |
-| `AEGIS_CONFIG` | 否 | 配置文件路径 |
-| `AEGIS_API_TOKEN` | 否 | 固定 API 令牌，优先于令牌文件。仅测试或容器需要 |
+| `BASEAGENT_HOME` | 否 | 数据目录。数据库、轨迹、产物、日志、令牌、金丝雀盐都在其下 |
+| `BASEAGENT_CONFIG` | 否 | 配置文件路径 |
+| `BASEAGENT_API_TOKEN` | 否 | 固定 API 令牌，优先于令牌文件。仅测试或容器需要 |
 | `GITHUB_TOKEN` 等 | 否 | MCP 服务器凭据，配置中以 `"env:VAR"` 引用，只在启用该服务器时需要 |
 | `OTLP_HEADERS` | 否 | OTLP 导出的认证头，仅开启远程追踪时 |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | 否 | 仅开启 Langfuse 导出时 |
 | `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` | 否 | 标准代理变量；同时影响模型调用与 `web_search`。务必把回环地址放进 `NO_PROXY` |
-| `AEGIS_<节>__<键>` | 否 | 覆盖任意标量配置项 |
-| `AEGIS_PROXY_TARGET` | 否 | 前端开发服务器代理的后端地址，无 `VITE_` 前缀，不进打包产物 |
+| `BASEAGENT_<节>__<键>` | 否 | 覆盖任意标量配置项 |
+| `BASEAGENT_PROXY_TARGET` | 否 | 前端开发服务器代理的后端地址，无 `VITE_` 前缀，不进打包产物 |
 
 ### 3.3 有意不放进环境变量的
 
@@ -71,7 +71,7 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 
 ## 4. 运行时自动生成的文件
 
-位于 `AEGIS_HOME` 下，权限 0600（目录 0700），**不入库**：
+位于 `BASEAGENT_HOME` 下，权限 0600（目录 0700），**不入库**：
 
 | 文件 | 内容 | 说明 |
 |---|---|---|
@@ -139,7 +139,7 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 |---|---|
 | 删除 | `services.rag_url`、`[code_search]`、权限名单里的 `rag_search`、`delegate_code_search`，以及子智能体黑名单里的 `delegate_code_search` |
 | 删除 | `context.compaction_trigger_turns`：旧版配置存在但从未被读取 |
-| 新增 | `[app]` 数据目录；所有路径改为相对 `AEGIS_HOME` |
+| 新增 | `[app]` 数据目录；所有路径改为相对 `BASEAGENT_HOME` |
 | 新增 | `server.auth`、`server.filesystem`、`server.workspace`：令牌、目录浏览边界、工作区路径校验 |
 | 新增 | 端点级的 `context_window`、`max_output_tokens`、`reasoning_effort` 与 `capabilities` |
 | 新增 | `[llm.*]`：退避上限与抖动、熔断、并发、截止时间、用量估算、结构化输出 |
@@ -161,3 +161,23 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 - 配置的 JSON Schema 导出，用于编辑器补全与校验。
 - `max_total_tokens` 的默认值是否随所选模型与价格调整。当前沿用旧版的 200000。
 - `context.task.soft_tokens` 与 `hard_tokens` 的默认值（100000 与 160000）只是起点，应依据实测的成本与延迟调整，见 [DeepSeek §9](../07_llm_gateway/04_deepseek.md) 的验证清单。
+
+## 9. 改名与兼容（Aegis → BaseAgent）
+
+项目由 Aegis 改名为 BaseAgent。原则：**旧的永远还能用，新的永远优先，从不替用户搬数据。** 实现在 `backend/src/baseagent_config/envcompat.py`。
+
+| 旧 | 新 | 兼容方式 |
+|---|---|---|
+| 环境变量 `AEGIS_*`（`AEGIS_HOME`、`AEGIS_CONFIG`、`AEGIS_API_TOKEN`、`AEGIS_<节>__<键>` 等） | `BASEAGENT_*` | 两个前缀都认，同一个变量新旧都设了用新的；旧名生效时启动会给一条改名提示（只写变量名，不写值）。旧名的拼写错误同样会被校验报出 |
+| 数据目录 `~/.local/share/aegis` | `~/.local/share/baseagent` | 没有显式配置、旧目录在而新目录不存在时沿用旧目录，并提示迁移命令（`mv`）。新目录一旦存在就用新的。从不自动移动或复制数据 |
+| 元数据库 `aegis_meta.db` | `baseagent_meta.db` | 使用默认文件名、新库不存在而旧库在时，继续用旧库，不另起一个空库 |
+| 命令 `aegis`、`aegis-server`、`aegis-bench` | `baseagent`、`baseagent-server`、`baseagent-bench` | 旧命令保留为别名，指向同一个入口 |
+| 全局技能目录 `~/.aegis/skills` | `~/.baseagent/skills` | 旧目录在而新目录不在时沿用旧的 |
+| 工作区技能 `.aegis/skills`、规则 `.aegis/rules.md` | `.baseagent/skills`、`.baseagent/rules.md` | 新旧名都识别，新的靠前 |
+| 前端本地偏好的存储键 `aegis.ui.v2` | `baseagent.ui.v2` | 读不到新键时读旧键，下次保存写到新键；开发服务器的代理对数据目录与环境变量遵循同样的规则 |
+| `config.toml` 里写死的 `app.home = "~/.local/share/aegis"` | — | 照旧生效 |
+
+**没有改名的：** 内部包名 `agent_runtime`、`services`、`tools`、`mcps`、`evaluation`（本来就是通用名）。Python 配置包由 `aegis_config` 改为 `baseagent_config`，工具基类由 `AegisTool` 改为 `AgentTool`；这两个是代码层的改名，没有保留旧名（项目内部使用，没有外部调用方）。HTTP API 路径不变。
+
+想迁移到新目录：停掉服务，`mv ~/.local/share/aegis ~/.local/share/baseagent`，数据库文件名会在下次启动时继续沿用旧名（`aegis_meta.db`），想统一再手动改名。
+

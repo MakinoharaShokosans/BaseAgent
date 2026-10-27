@@ -12,7 +12,7 @@ flowchart LR
     FE -->|同源代理 + 令牌| API
     subgraph AG[AegisAgent 进程 :8000]
         API[HTTP API] --> RT[Agent Runtime]
-        RT --> MEM[(元数据库 aegis_meta.db)]
+        RT --> MEM[(元数据库 baseagent_meta.db)]
         RT --> CK[(检查点库)]
         RT --> TR[轨迹 / 事件 / 日志文件]
         RT --> MCPM[MCP 管理器]
@@ -50,13 +50,13 @@ flowchart LR
 
 | 存储 | 位置 | 内容 | 写入方 |
 |---|---|---|---|
-| 元数据库 | `storage/aegis_meta.db` | 工作区、会话、对话流水、会话记忆、工作区记忆 | 记忆管理器 |
+| 元数据库 | `storage/baseagent_meta.db` | 工作区、会话、对话流水、会话记忆、工作区记忆 | 记忆管理器 |
 | 检查点库 | `storage/checkpoints/…` | 每个任务最新的 `AgentState` 快照（新版自有表） | 主循环 |
 | 事件库（新版） | `storage/…/events.db` | 任务事件，供时间线与重放 | 任务注册表 |
 | 轨迹 | `storage/traces/{task_id}.jsonl` | 每步因果记录 | 轨迹记录器 |
 | 大块内容 | `storage/traces/{task_id}/llm/` | `llm.call` 的完整消息体 | 网关 |
 | 产物 | `storage/artifacts/{task_id}/` | 被裁剪的观察值、命令全量日志、网页正文 | 裁剪器、沙箱、web_search |
-| 日志 | `storage/logs/aegis.jsonl` | 结构化运行日志 | Loguru |
+| 日志 | `storage/logs/baseagent.jsonl` | 结构化运行日志 | Loguru |
 | 令牌 | `storage/api_token` | API 访问令牌（新版） | 启动流程 |
 
 全部是本地文件，SQLite 使用 WAL。没有外部数据库依赖。
@@ -65,7 +65,7 @@ flowchart LR
 
 配置里的路径是**相对路径**，相对启动时的当前目录解析。现状仓库里同时存在根目录的 `storage/` 与 `AegisAgent/storage/`，里面各有一份数据库、令牌与日志，说明在不同目录启动会得到不同的数据集，用户的历史"消失"而没有任何提示。
 
-新版：引入 `AEGIS_HOME`（默认 `~/.local/share/aegis`，可由环境变量或配置覆盖），所有相对路径相对它解析，并在启动看板里打印实际路径。开发时仍可指向仓库内的 `storage/`。
+新版：引入 `BASEAGENT_HOME`（默认 `~/.local/share/baseagent`，可由环境变量或配置覆盖），所有相对路径相对它解析，并在启动看板里打印实际路径。开发时仍可指向仓库内的 `storage/`。
 
 ## 4. 配置
 
@@ -120,7 +120,7 @@ flowchart LR
 
 ## 7. 统一启动器
 
-`aegis` 命令一键管理多个进程：
+`baseagent` 命令一键管理多个进程：
 
 - 启动 AegisAgent 与前端，聚合输出并按进程打上带颜色的标签。
 - 每个进程放在独立的进程组，退出时级联发 `SIGTERM`、超时后 `SIGKILL`，绝不残留孤儿进程。

@@ -1,4 +1,4 @@
-# Aegis 文档
+# BaseAgent 文档
 
 自研 Agent Runtime 版本（无 LangGraph、无 RAG）的全新文档集。旧文档仍在 `documents/`，仅作迁移参考，不再维护。
 

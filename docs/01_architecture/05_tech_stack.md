@@ -34,7 +34,7 @@
 | HTTP 客户端 | **httpx** | sidecar 调用、抓取 | 异步、连接池、统一超时 | aiohttp（无必要换） |
 | 模型 SDK | 官方 **`openai`** SDK，**`max_retries=0`** | 调用 DeepSeek（OpenAI 兼容协议） | 类型完整、错误分类清楚、日后要流式也现成。重试交给自己的网关，否则 SDK 的重试会与之叠加 | 直接用 httpx 调用（控制力最强、依赖更少，但要自己维护请求与响应类型） |
 | 数据模型 | **pydantic v2** | 状态、DTO、结构化输出契约 | 校验与序列化一体；结构化输出的契约直接由它导出 Schema | dataclass + 手写校验（失去 Schema 导出） |
-| 配置 | **pydantic-settings**，TOML 来源 | 加载 `config.toml`，`AEGIS_` 前缀与 `__` 嵌套覆盖 | 与 [配置](04_configuration.md) 的优先级规则一一对应 | 自写加载器（可行，但要重复造校验） |
+| 配置 | **pydantic-settings**，TOML 来源 | 加载 `config.toml`，`BASEAGENT_` 前缀与 `__` 嵌套覆盖 | 与 [配置](04_configuration.md) 的优先级规则一一对应 | 自写加载器（可行，但要重复造校验） |
 | 持久化 | **SQLite（WAL）** + **`aiosqlite`**，手写 SQL，小型版本化迁移器 | 元数据、检查点、事件 | 本机单用户，零运维；表很少，不值得 ORM | SQLAlchemy（过重）、SQLModel、直接 `sqlite3` 加线程池 |
 | 重试与熔断 | **自己实现** | 网关弹性 | 需要与截止时间、抖动、`Retry-After`、熔断联动 | `tenacity`（不好表达截止时间与熔断，不再依赖） |
 | 日志 | **loguru** | 结构化日志 | `contextualize` 与 `patcher` 可自动注入 `task_id`、`span_id` | stdlib `logging` + `structlog`（更标准，但迁移成本高，收益有限） |
@@ -211,7 +211,7 @@ Fedora 带 SELinux，开启 `bwrap` 或 cgroup 时要核对策略是否放行。
 选型里有几处依赖库行为的假设，要用小脚本验证，不要凭文档：
 
 1. ~~`openai` SDK 能读到 `reasoning_content` 与缓存用量字段；`extra_body` 能发出 `thinking`；`max_retries=0` 生效。~~ **离线部分已验证**，见 §10；仍需用真实密钥确认服务端行为。
-2. ~~`pydantic-settings` 的 TOML 来源与 `AEGIS_` 前缀、`__` 嵌套覆盖行为符合 [配置](04_configuration.md)，未知键能报错。~~ **已验证并落地**（阶段 -0.5 的配置加载器及其测试）。
+2. ~~`pydantic-settings` 的 TOML 来源与 `BASEAGENT_` 前缀、`__` 嵌套覆盖行为符合 [配置](04_configuration.md)，未知键能报错。~~ **已验证并落地**（阶段 -0.5 的配置加载器及其测试）。
 3. `tiktoken` 在预置缓存目录后完全离线可用。
 4. ~~`mcp` SDK 在“专用后台任务”模式下建立与关闭连接无残留子进程。~~ **已验证**（用本地 stdio 服务器），见 §10。接真实的第三方服务器（npx 类）时仍要再确认进程树被回收。
 5. `trafilatura` 对常见技术文档页面的提取质量，以及对恶意或超大页面的行为。

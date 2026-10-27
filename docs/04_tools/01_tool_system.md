@@ -24,7 +24,7 @@ tools/
 所有工具（内置、MCP 转译、子智能体包装）继承同一个抽象基类。
 
 ```python
-class AegisTool(ABC):
+class AgentTool(ABC):
     name: str                      # 全局唯一，注入模型 function calling 的 name
     description: str               # 给模型看的能力描述，直接影响调用准确率
     parameters: dict               # JSON Schema
@@ -215,7 +215,7 @@ async def dispatch(calls: Sequence[tuple[str, str, Mapping]]) -> list[Dispatched
 
 ## 13.1 实现状态
 
-协议（`AegisTool`、`ToolResult`）在 `agent_runtime.core`，注册表与派发器在 `tools.core`，行为与本文一致（注册表构造期校验、按名排序导出、并发派发且顺序一致、独立硬超时、失败降级、信任级解析），见 [executor 与 tool_runner §3](../02_runtime/06_executor_tool_runner.md)。`ToolResult.failed` 是连续错误计数的依据（`ok` 为假或退出码非零；没有再回退到关键字启发式，因为 `ok` 总是有值）。内置工具与 sidecar 客户端已实现，见 [内置工具 §11](02_builtin_tools.md)：`build_builtin_tools` 缺依赖则不注册（无 shell 绑定就没有 `bash`，无技能目录就没有 `load_skill`），`read_artifact` 与两个文件工具始终在；同配置两次装配导出的 Schema 逐字节相同。`SidecarClient` 在 `tools.core`：延迟创建并共享连接池，`aclose()` 可重复调用且关闭后可再用，网络错误、超时、非预期状态码、非 JSON 对象一律是 `DependencyUnavailableError`；它还允许调用方声明额外接受的状态码（`bash` 用它接收 403 与 422），这样策略拒绝的原因不会丢。
+协议（`AgentTool`、`ToolResult`）在 `agent_runtime.core`，注册表与派发器在 `tools.core`，行为与本文一致（注册表构造期校验、按名排序导出、并发派发且顺序一致、独立硬超时、失败降级、信任级解析），见 [executor 与 tool_runner §3](../02_runtime/06_executor_tool_runner.md)。`ToolResult.failed` 是连续错误计数的依据（`ok` 为假或退出码非零；没有再回退到关键字启发式，因为 `ok` 总是有值）。内置工具与 sidecar 客户端已实现，见 [内置工具 §11](02_builtin_tools.md)：`build_builtin_tools` 缺依赖则不注册（无 shell 绑定就没有 `bash`，无技能目录就没有 `load_skill`），`read_artifact` 与两个文件工具始终在；同配置两次装配导出的 Schema 逐字节相同。`SidecarClient` 在 `tools.core`：延迟创建并共享连接池，`aclose()` 可重复调用且关闭后可再用，网络错误、超时、非预期状态码、非 JSON 对象一律是 `DependencyUnavailableError`；它还允许调用方声明额外接受的状态码（`bash` 用它接收 403 与 422），这样策略拒绝的原因不会丢。
 **未做**：参数 Schema 校验、`edit_file`、`list_dir`、`grep`。
 
 ## 14. 待定

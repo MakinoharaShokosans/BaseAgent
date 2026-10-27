@@ -58,7 +58,7 @@ planner 与 evaluator 见 [05](05_planner_evaluator.md)。这里是另外两个�
 
 ## 3. 工具层（`tools.core`）与协议（`agent_runtime.core`）
 
-- 协议在 `core`：`AegisTool`（`name`、`description`、`parameters`、`timeout_sec`、`trust`、`idempotent`、`invoke`）、`ToolResult`（冻结的 pydantic 模型，`failure()` 与 `failed`）。
+- 协议在 `core`：`AgentTool`（`name`、`description`、`parameters`、`timeout_sec`、`trust`、`idempotent`、`invoke`）、`ToolResult`（冻结的 pydantic 模型，`failure()` 与 `failed`）。
 - `ToolRegistry`：构造期校验空名、重名（不覆盖）、不可信工具（默认拒绝；`allow_untrusted` 时若给了逐名清单，清单外也拒绝）。`schemas()` **按名称排序**，保证请求前缀稳定；`is_idempotent` 对未知工具返回假。
 - `ToolDispatcher`：`asyncio.gather` 并发，返回顺序与输入一致；每个调用独立硬超时；超时、异常、未知工具都变成失败结果；信任级 = 结果的调用期覆盖 > 工具的静态声明 > 未知工具取 `untrusted`；`CancelledError` 不吞。
 

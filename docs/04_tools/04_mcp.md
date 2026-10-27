@@ -1,6 +1,6 @@
 # MCP 接入
 
-MCP（Model Context Protocol）让 Aegis 使用第三方实现的外部工具。本文只覆盖**工具**这一项能力，不涉及 MCP 的资源、提示词与采样（客户端不支持服务端发起的请求）。
+MCP（Model Context Protocol）让 BaseAgent 使用第三方实现的外部工具。本文只覆盖**工具**这一项能力，不涉及 MCP 的资源、提示词与采样（客户端不支持服务端发起的请求）。
 
 ## 1. 要解决的问题
 

@@ -15,7 +15,7 @@
 
 ## 2. 存储
 
-SQLite（WAL），`aiosqlite`，默认 `storage/aegis_meta.db`。
+SQLite（WAL），`aiosqlite`，默认 `storage/baseagent_meta.db`。
 
 | 表 | 主键 | 说明 |
 |---|---|---|

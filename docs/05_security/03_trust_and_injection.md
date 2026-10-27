@@ -32,8 +32,8 @@
 |---|---|---|
 | 用户输入的任务目标 | trusted | 用户本人 |
 | 系统提示词、内置技能 | trusted | 随发行版交付 |
-| 用户全局技能（`~/.aegis/skills`） | trusted | 用户自己的 |
-| 工作区技能（`<repo>/.aegis/skills`） | **untrusted**，且默认拒绝加载 | 克隆恶意仓库即可注入 |
+| 用户全局技能（`~/.baseagent/skills`） | trusted | 用户自己的 |
+| 工作区技能（`<repo>/.baseagent/skills`） | **untrusted**，且默认拒绝加载 | 克隆恶意仓库即可注入 |
 | `bash`、`view_file`、`write_file` 的输出 | trusted（见 §2.2） | 本地受控工具 |
 | MCP 外部工具的输出与描述 | **untrusted** | 第三方进程 |
 | `web_search` 的输出 | **untrusted**，只允许在隔离区出现 | 外部网页 |

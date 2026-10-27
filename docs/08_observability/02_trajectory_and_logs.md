@@ -6,7 +6,7 @@
 |---|---|---|---|
 | 受众 | 前端用户，实时 | 审计、评测 harness | 开发者、运维 |
 | 粒度 | 阶段与工具 | 每步的因果记录 | 每个模块的运行细节 |
-| 存储 | 内存加事件表（新版） | `storage/traces/{task_id}.jsonl` | `storage/logs/aegis.jsonl` |
+| 存储 | 内存加事件表（新版） | `storage/traces/{task_id}.jsonl` | `storage/logs/baseagent.jsonl` |
 | 稳定性 | 对外契约 | **数据契约**，评测直接消费 | 不保证 |
 
 ## 1. 轨迹
@@ -107,7 +107,7 @@ Loguru，**双 sink**：
 | sink | 级别 | 格式 | 用途 |
 |---|---|---|---|
 | 控制台 | INFO | 彩色文本 | 开发时看 |
-| 文件 `storage/logs/aegis.jsonl` | DEBUG | JSON Lines，`serialize=True` | 离线解析、按 `task_id` 聚合 |
+| 文件 `storage/logs/baseagent.jsonl` | DEBUG | JSON Lines，`serialize=True` | 离线解析、按 `task_id` 聚合 |
 
 文件 sink 的设置：后台线程写入（`enqueue=True`，不让磁盘抖动阻塞事件循环）；20 MB 轮转，保留 10 份；`backtrace=True` 但 **`diagnose=False`**，不打印局部变量，避免密钥等敏感值进日志。`setup_logging` 幂等。
 

@@ -136,13 +136,13 @@ cfg = make_config(tmp_path, max_steps=5, permissions=…)
 
 评测结果输出为统一格式的报告（Markdown 加 JSON），可跨版本对比。
 
-**实现（`backend/src/evaluation/agent_bench/`，命令 `aegis-bench`）：** 黑盒，只通过公开的 HTTP API 向一个运行中的服务提交任务、轮询、按用例决定批准还是拒绝审批、读事件流，所以评测的就是用户实际会用到的那一套。
+**实现（`backend/src/evaluation/agent_bench/`，命令 `baseagent-bench`）：** 黑盒，只通过公开的 HTTP API 向一个运行中的服务提交任务、轮询、按用例决定批准还是拒绝审批、读事件流，所以评测的就是用户实际会用到的那一套。
 
 ```bash
-aegis-bench --list                                  # 看内置用例
-aegis-bench --repeat 3 --label baseline             # 内置 7 个用例，每个跑 3 次
-aegis-bench --cases my_cases.json --only fix_failing_test
-aegis-bench --compare eval_reports/a.json eval_reports/b.json
+baseagent-bench --list                                  # 看内置用例
+baseagent-bench --repeat 3 --label baseline             # 内置 7 个用例，每个跑 3 次
+baseagent-bench --cases my_cases.json --only fix_failing_test
+baseagent-bench --compare eval_reports/a.json eval_reports/b.json
 ```
 
 - **用例**：工作区初始文件、目标、权限级别、一组由评测端机械判定的检查（文件存在/不存在/含有/不含/未改动、命令退出码与输出、交付里含有）。成功 = 终态在预期集合里 **且** 全部检查通过，不依赖模型自评。内置 11 个用例：只读问答、新建脚本、修测试、重命名重构、局部配置修改、实现一个有规格的函数、同一模块里的两个 bug、跨模块追根因、缺信息时不编造（应当询问或受阻结束），以及两个安全用例（文件里的注入指令不能被照做；只读权限下写文件不能成功）。做事类用例有自检：初始工作区必须通不过检查，并且每个新用例都有一份参考解答能让检查全部通过。

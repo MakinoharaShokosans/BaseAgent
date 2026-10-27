@@ -1,32 +1,71 @@
-# Aegis
+# BaseAgent
 
-本机运行的代码工程 Agent。在浏览器控制台里给定工作区和目标，Agent 自主规划、调用工具（读写文件、执行命令、联网研究、委派子智能体），在受控的权限与预算内完成任务，并实时呈现全过程。
+一个自研的 Agent 运行时底座，给想自己做 Agent、又不想被现成框架绑住的开发者，当作 vibe coding 的起点。
 
-自研 Agent Runtime：**不依赖 LangGraph / LangChain，不含 RAG**。
+> 项目原名 Aegis。命令行、环境变量、数据目录等已经全部改成 BaseAgent；旧名字仍然兼容（`aegis` 命令、`AEGIS_*` 变量、`~/.local/share/aegis` 数据目录），不需要你手动迁移，细节见 [配置 §9](docs/01_architecture/04_configuration.md)。
 
-> **当前状态：核心可用。** 自研运行时（主循环、检查点与审批、上下文与记忆）、内置工具、`bash` 沙箱 sidecar、HTTP API 与 SSE 事件流、前端控制台、统一入口 `aegis` 已实现并有测试覆盖；联网研究（`web_search` 服务与隔离的研究子智能体）也已实现；动态委派、MCP 外部工具接入、内置技能包也已实现，详见 [`docs/01_architecture/03_code_layout_and_roadmap.md`](docs/01_architecture/03_code_layout_and_roadmap.md)。
+## 为什么有这个项目
 
-## 文档
+我想做的是"能放进自己产品里的 Agent"，找下来发现两头都不太合适：
 
-从 [`docs/README.md`](docs/README.md) 开始。几个入口：
+- **工作流编排类框架（LangGraph 之类）**：擅长把流程画成图。但 Agent 的难点不在"画图"，而在审批挂起与续跑、预算与终止、上下文越来越长之后怎么办、工具输出里的注入怎么防。这些往往要自己在框架外面补，补完发现框架只剩一层胶水。
+- **Claude Code 一类成品的重型 Agent**：能力强，但提示词、工具和上下文都偏大，每一步的 Token 消耗高，也很难拆开改成自己的垂直场景。
 
-| 想了解 | 看 |
+BaseAgent 想走中间：**自己掌握主循环，把这些共性问题做成可读、可测、可改的代码**，让你在上面用 vibe coding 的方式（让 AI 编码助手读文档、改代码、跑测试）快速长出自己的 Agent。
+
+它适合：
+- 想从零做自己的 Agent，希望主循环、状态、工具、权限都是看得见摸得着的代码；
+- 对 Token 成本敏感，愿意自己调规划和验收的策略；
+- 会用 AI 编码助手协作开发，需要一份写得清楚的设计文档和一套能兜底的测试。
+
+它不适合：
+- 想要开箱即用的产品，或者拖拽式的流程编排；
+- 需要对抗恶意代码的强隔离（见下面的安全提示）；
+- 需要很多现成的集成。目前内置能力很少，靠 MCP 和自己扩展。
+
+## 它是什么，不是什么
+
+**是**：一个可以直接跑起来的最小完整 Agent，包括运行时、HTTP API、事件流、两个独立的 sidecar 服务、评测工具，以及一个用来观察运行过程的控制台。它默认的用法是"给一个工作区和目标，让 Agent 写代码"，但这只是第一个场景，不是边界。
+
+**不是**：不依赖 LangGraph / LangChain，也不含 RAG。前端控制台是调试和观察用的，不是产品界面。
+
+## 设计取向
+
+- **主循环是一张很小的状态机**（`planner → executor → tool_runner → evaluator`），路由全是纯函数，每个阶段结束都落检查点。进程崩了、等审批等了一晚上，都能从上一个提交点继续。
+- **默认少调用模型。** 工具批次之后直接继续执行，不会每一步都回规划；只在开头、定期复核、连续失败、循环、被人工拒绝时才重新规划。验收只在结论出来时跑一次，并且带着由代码得出的证据（比如"改完文件后最近一条命令失败了"），而不只是让模型再读一遍。
+- **做不到要能体面地停。** 被拒绝、缺信息时，任务带着已完成的部分结束，说明卡在哪，而不是反复重试到预算用完。
+- **上下文有预算。** 旧的工具输出会折叠成存根，完整内容落盘按需读；会话级有摘要压缩，也可以手动触发。
+- **安全按"外部内容是数据，不是指令"设计。** 网页和 MCP 返回的内容走不可信信封；外部信息只能经过隔离的研究子智能体进来；高风险操作按权限级别要求人工审批；提示词里埋了金丝雀，泄露就终止。
+- **所有模型都走一个网关**，分"推理 / 快速"两档，各档有按顺序降级的端点列表。当前配置用的是 DeepSeek（OpenAI 兼容协议）。
+
+## 目前的状态
+
+诚实地说：
+
+- **做完并有测试覆盖**：运行时、检查点与审批、记忆与压缩、内置工具、`bash` 和 `web_search` 两个 sidecar、子智能体（研究与动态委派）、MCP 接入、HTTP API 与 SSE、评测框架。后端约 2100 个测试，另有前端测试，`import-linter` 约束层间依赖。
+- **验证过的真实模型数据很少。** 只在 DeepSeek 上跑过一轮基线评测：最初的 7 个内置用例（读代码问答、新建脚本、修测试、重命名重构、改配置、两个安全用例）全部通过，约 19.6 万 Token。每个用例只跑了 1 次，用例也偏简单。后来又补了 4 个更难的用例，还没在真实模型上跑过。
+- **没有做过横向对比。** 我没有拿它和别的框架比过成功率或 Token 消耗，所以"省 Token"只是设计取向，不是测出来的结论。想知道在你的任务上表现怎样，用 `baseagent-bench` 自己量。
+- **只验证了 DeepSeek。** 别的 OpenAI 兼容端点理论上改配置就能用，但没验证过。
+
+## 在它上面做自己的 Agent
+
+这些是你最可能动的地方，都是普通代码和文本：
+
+| 想改什么 | 去哪 |
 |---|---|
-| 项目是什么、范围、术语 | [`docs/00_overview`](docs/00_overview/) |
-| 整体架构与实现路线 | [`docs/01_architecture`](docs/01_architecture/) |
-| 技术选型 | [`docs/01_architecture/05_tech_stack.md`](docs/01_architecture/05_tech_stack.md) |
-| 配置 | [`docs/01_architecture/04_configuration.md`](docs/01_architecture/04_configuration.md) |
-| 为什么这么定 | [`docs/12_decisions`](docs/12_decisions/) |
+| 规划、执行、验收的指令和行为 | `backend/src/agent_runtime/loop/stages/`（指令文本在 `prompts.py`） |
+| 系统提示词与子智能体提示词 | `backend/src/agent_runtime/prompts/*.md` |
+| 加自己的工具 | 继承 `AgentTool`，在 `runtime/factory.py` 的 `build` 里加进工具表。**目前没有插件式入口，需要改这一处** |
+| 接现成的外部工具 | 在 `config/config.toml` 的 `[mcp.servers.*]` 配置，每个服务器默认关闭 |
+| 可复用的做事流程 | `backend/src/skills/<名字>/SKILL.md`，也支持全局和工作区里的技能 |
+| 权限、预算、回路形状 | `config/config.toml`（`[runtime.*]`、`[tools.*]`） |
+| 换模型或加降级端点 | `config/config.toml` 的 `[models.*]` |
 
-## 目录
+用 AI 编码助手协作时，几个实用的做法：
 
-```
-backend/     Python 后端：运行时、API、sidecar 服务
-frontend/    React 前端控制台
-config/      config.toml（可入库，不含密钥）
-docs/        设计文档
-.env.example 环境变量示例，复制为 .env 后填写
-```
+- 先让它读 [`docs/`](docs/README.md)。文档描述的是代码的真实行为，是改动的"合约"；和代码不一致时以代码为准并修正文档。
+- 改完跑 `make check`（lint、类型检查、依赖方向、测试）。这套测试是兜底的，改主循环或权限相关的代码尤其要靠它。
+- 改了提示词或规划策略，用 `baseagent-bench` 前后各跑一次再 `--compare`，别凭感觉。
 
 ## 快速开始
 
@@ -43,22 +82,58 @@ make check               # lint + 类型检查 + 离线测试
 启动（沙箱 sidecar、后端、前端一起拉起，Ctrl+C 一起收掉）：
 
 ```bash
-cd backend && uv run aegis start      # 控制台在 http://127.0.0.1:5173
-uv run aegis token                     # 显示访问令牌文件的路径（令牌不会被打印）
+cd backend && uv run baseagent start      # 控制台在 http://127.0.0.1:5173，后端在 11328
+uv run baseagent token                     # 显示访问令牌文件的路径（令牌不会被打印）
 ```
 
-前端通过同源代理访问 API，令牌由代理在服务端侧注入，浏览器代码里没有它。
+前端通过同源代理访问 API，令牌由代理在服务端侧注入，浏览器代码里没有它。后端端口在 `config/config.toml` 的 `[server] port` 配置。
 
 评测（会花 Token，默认不运行；服务需要已启动）：
 
 ```bash
-cd backend && uv run aegis-bench --list              # 内置用例
-uv run aegis-bench --repeat 3 --label baseline       # 跑并生成 eval_reports/*.md|json
-uv run aegis-bench --compare eval_reports/a.json eval_reports/b.json
+cd backend && uv run baseagent-bench --list              # 内置用例
+uv run baseagent-bench --repeat 3 --label baseline       # 跑并生成 eval_reports/*.md|json
+uv run baseagent-bench --compare eval_reports/a.json eval_reports/b.json
 ```
+
+## 目录
+
+```
+backend/     Python 后端：运行时、API、sidecar 服务、MCP、评测
+frontend/    React 前端控制台
+config/      config.toml（可入库，不含密钥）
+docs/        设计文档
+.env.example 环境变量示例，复制为 .env 后填写
+```
+
+## 文档
+
+从 [`docs/README.md`](docs/README.md) 开始。几个入口：
+
+| 想了解 | 看 |
+|---|---|
+| 项目是什么、范围、术语 | [`docs/00_overview`](docs/00_overview/) |
+| 整体架构与实现路线 | [`docs/01_architecture`](docs/01_architecture/) |
+| 主循环、状态、审批 | [`docs/02_runtime`](docs/02_runtime/) |
+| 工具、MCP、技能 | [`docs/04_tools`](docs/04_tools/) |
+| 配置 | [`docs/01_architecture/04_configuration.md`](docs/01_architecture/04_configuration.md) |
+| 评测 | [`docs/11_testing/01_strategy.md`](docs/11_testing/01_strategy.md) |
+| 为什么这么定 | [`docs/12_decisions`](docs/12_decisions/) |
+
+## 接下来
+
+会持续优化，目前明确还没做的：
+
+- 任务内的摘要压缩（现在只有旧观察值折叠）、会话压缩改为异步；
+- 规划和验收只带精简上下文，进一步省 Token；
+- 把验收通过的做法沉淀成工作区经验；
+- 工具的插件式注册入口，让加工具不用改装配代码；
+- 更多、更难的评测用例，以及在不同模型上的数据；
+- 前端的生产形态托管（现在只有开发服务器）。
 
 ## 安全提示
 
 - 服务只监听回环地址（`127.0.0.1`），配置里改成其他地址会拒绝启动。
-- Agent 具备执行命令和写文件的能力，当前沙箱是“防失控”的资源限制，**不是**对抗恶意代码的隔离环境，详见 [`docs/05_security`](docs/05_security/)。
+- Agent 具备执行命令和写文件的能力。当前沙箱是"防失控"的资源限制，**不是**对抗恶意代码的隔离环境，详见 [`docs/05_security`](docs/05_security/)。
+- 第三方 MCP 服务器（stdio 类型）本质上是在本机运行的任意程序，所以默认全部关闭，开启前请确认来源。
 - `.env`、`storage/`、令牌文件都已在 `.gitignore` 中，请勿提交。

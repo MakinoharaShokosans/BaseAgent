@@ -22,7 +22,7 @@
 
 ```json
 POST /workspaces
-{ "name": "Aegis Core", "root_path": "/home/u/Projects/Aegis", "description": "", "workspace_id": null }
+{ "name": "BaseAgent Core", "root_path": "/home/u/Projects/BaseAgent", "description": "", "workspace_id": null }
 ```
 
 `root_path` 是**安全边界**：它决定工具的 cwd、文件接口的根、路径沙箱的根。当前实现不校验它。新版必须校验：
@@ -82,7 +82,7 @@ PUT /sessions/{id}/settings
 
 ```json
 GET /settings
-{ "system_prompt": null, "system_prompt_default": "你是 Aegis……", "system_prompt_max_chars": 20000 }
+{ "system_prompt": null, "system_prompt_default": "你是 BaseAgent……", "system_prompt_max_chars": 20000 }
 
 PUT /settings
 { "system_prompt": "……" }

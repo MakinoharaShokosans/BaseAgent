@@ -38,9 +38,9 @@ required_tools: [bash, view_file]          # 依赖的工具，用于标注，�
 
 | 来源 | 位置 | 信任 | 默认 |
 |---|---|---|---|
-| `workspace` | `<工作区>/.aegis/skills/` | **不可信** | **拒绝** |
+| `workspace` | `<工作区>/.baseagent/skills/` | **不可信** | **拒绝** |
 | `builtin` | 随发行版的 `src/skills/` | 可信 | 允许 |
-| `global` | `~/.aegis/skills/` | 可信 | 允许 |
+| `global` | `~/.baseagent/skills/` | 可信 | 允许 |
 
 为什么按**来源**而不是按**内容**分级：内容里出现"忽略"之类的词是正常的，按内容判断会误杀。而来源是一个结构性事实：工作区技能来自"被指向的仓库"，克隆一个恶意仓库就能让它进入系统，是用户零交互就可能中招的路径，所以默认拒绝，启用要显式配置 `skills.allow_workspace = true`。
 
