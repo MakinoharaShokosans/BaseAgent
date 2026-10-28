@@ -10,26 +10,26 @@ from typing import Any
 import pytest
 
 from agent_runtime.llm import Degraded, LLMRequest, Parsed, TokenUsage
-from agent_runtime.subagents.research import (
-    DelegateResearchTool,
+from agent_runtime.subagents.usage import ChildUsage
+from agent_runtime.websearch import (
     Evidence,
     QueryPlan,
     RawReport,
     ReportLimits,
-    ResearchLimits,
-    ResearchRequest,
-    ResearchRunner,
+    WebSearchLimits,
+    WebSearchRequest,
+    WebSearchRunner,
+    WebSearchTool,
     build_report,
     render_failure,
     render_report,
 )
-from agent_runtime.subagents.research.models import (
+from agent_runtime.websearch.models import (
     RawCodeExample,
     RawFinding,
     RawVersionFact,
 )
-from agent_runtime.subagents.research.search_client import SearchOutcome
-from agent_runtime.subagents.usage import ChildUsage
+from agent_runtime.websearch.search_client import SearchOutcome
 from stage_support import degraded, parsed
 
 LIMITS = ReportLimits(
@@ -212,7 +212,7 @@ def test_rendering_is_wrapped_untrusted_and_cannot_be_closed_early_by_content() 
     )
     text = render_report(build(raw), max_chars=4000)
     assert text.startswith(
-        '<external_content source="research" trust="untrusted" authoritative="false">'
+        '<external_content source="websearch" trust="untrusted" authoritative="false">'
     )
     assert text.count("</external_content>") == 1 and text.rstrip().endswith("</external_content>")
     assert text.count("<external_content") == 1
@@ -262,7 +262,7 @@ class Gateway:
 
     async def invoke_structured(self, request: LLMRequest, model: Any) -> Any:
         self.requests.append(request)
-        if request.purpose == "research_plan":
+        if request.purpose == "websearch_plan":
             item = self.plans.pop(0) if self.plans else QueryPlan(enough=True)
         else:
             item = self.extract
@@ -310,21 +310,21 @@ def page(url: str, text: str = "正文", status: str = "OK") -> Evidence:
     return Evidence(url, "T " + url, text, status)
 
 
-RUN_LIMITS = ResearchLimits(max_rounds=3, max_sources=3, max_source_chars=50, report=LIMITS)
+RUN_LIMITS = WebSearchLimits(max_rounds=3, max_sources=3, max_source_chars=50, report=LIMITS)
 
 
 def runner(
     gateway: Gateway,
     search: Search,
     events: list | None = None,
-    limits: ResearchLimits = RUN_LIMITS,
+    limits: WebSearchLimits = RUN_LIMITS,
     **kw: Any,
-) -> ResearchRunner:  # type: ignore[type-arg]
+) -> WebSearchRunner:  # type: ignore[type-arg]
     async def emit(name: str, data: Any) -> None:
         if events is not None:
             events.append((name, dict(data)))
 
-    return ResearchRunner(
+    return WebSearchRunner(
         gateway,
         search,
         limits,
@@ -336,7 +336,7 @@ def runner(
     )
 
 
-REQ = ResearchRequest("django 迁移", ("怎么回滚迁移？",))
+REQ = WebSearchRequest("django 迁移", ("怎么回滚迁移？",))
 GOOD = RawReport(
     findings=[
         RawFinding(
@@ -360,11 +360,11 @@ async def test_a_round_plans_searches_collects_extracts_and_sanitises() -> None:
     assert (
         report.total_tokens == budget.used == 300
     )  # 规划两次（第二次判定够了）加提炼，用量取自响应
-    extract_request = next(r for r in gateway.requests if r.purpose == "research_extract")
+    extract_request = next(r for r in gateway.requests if r.purpose == "websearch_extract")
     body = extract_request.messages[1].content
     assert '<web_page url="https://docs.example/a" trust="untrusted">' in body
     assert body.count("x") <= 50 + 20  # 正文被截到 max_source_chars
-    assert [e[0] for e in events] == ["research.started", "research.round", "research.finished"]
+    assert [e[0] for e in events] == ["websearch.started", "websearch.round", "websearch.finished"]
 
 
 @pytest.mark.security
@@ -385,7 +385,7 @@ async def test_page_text_cannot_forge_the_evidence_envelope() -> None:
     await runner(gateway, Search({"q": [page("https://docs.example/a", hostile)]})).run(
         REQ, ChildUsage(60)
     )
-    body = next(r for r in gateway.requests if r.purpose == "research_extract").messages[1].content
+    body = next(r for r in gateway.requests if r.purpose == "websearch_extract").messages[1].content
     assert body.count("</web_page>") == 1 and body.count("<web_page ") == 1
 
 
@@ -395,7 +395,7 @@ async def test_sources_are_deduplicated_capped_and_the_request_cannot_raise_the_
         page("https://docs.example/p0")
     ]
     gateway = Gateway([QueryPlan(queries=["q"])], GOOD)
-    asked = ResearchRequest("t", ("q",), max_sources=99)
+    asked = WebSearchRequest("t", ("q",), max_sources=99)
     report = await runner(gateway, Search({"q": pages})).run(asked, ChildUsage(60))
     assert len(report.sources) == 3
 
@@ -412,7 +412,7 @@ async def test_further_rounds_run_until_enough_or_the_limits() -> None:
         GOOD,
     )
     search = Search({q: [page(f"https://docs.example/{q}")] for q in "abcd"})
-    limits = ResearchLimits(max_rounds=2, max_sources=9, max_source_chars=50, report=LIMITS)
+    limits = WebSearchLimits(max_rounds=2, max_sources=9, max_source_chars=50, report=LIMITS)
     report = await runner(gateway, search, limits=limits).run(REQ, ChildUsage(60))
     assert report.rounds_used == 2 and search.calls == ["a", "b"]
     done = Gateway([QueryPlan(queries=["a"]), QueryPlan(enough=True)], GOOD)
@@ -469,7 +469,7 @@ async def test_search_errors_are_reported_not_mistaken_for_no_results() -> None:
     report = await runner(Gateway([QueryPlan(queries=["q"])], GOOD), search, events).run(
         REQ, ChildUsage(60)
     )
-    round_event = next(data for name, data in events if name == "research.round")
+    round_event = next(data for name, data in events if name == "websearch.round")
     assert round_event["errors"] == ["搜索被拦截：所有搜索后端都失败"]
     assert any("检索失败：搜索被拦截" in w for w in report.warnings)
 
@@ -479,7 +479,7 @@ async def test_the_planner_is_told_what_came_back_and_never_repeats_a_query() ->
     gateway = Gateway([QueryPlan(queries=["a"]), QueryPlan(queries=["a", "b"])], GOOD)
     search = Search({"b": [page("https://docs.example/b")]}, errors={"a": "被拦截"})
     await runner(gateway, search).run(REQ, ChildUsage(60))
-    second = [r for r in gateway.requests if r.purpose == "research_plan"][1]
+    second = [r for r in gateway.requests if r.purpose == "websearch_plan"][1]
     assert "「a」→ 0 条（被拦截）" in second.messages[1].content
     assert sorted(set(search.calls)) == ["a", "b"]  # 第二轮的 "a" 被去掉，只搜了 "b"
     assert search.calls.count("a") == 2  # 第一轮的那次加一次重试
@@ -592,8 +592,8 @@ async def test_snippet_only_sources_are_not_citable_as_fetched_pages() -> None:
 # ==============================================================================
 
 
-def tool_for(gateway: Gateway, search: Search, calls: int = 3) -> DelegateResearchTool:
-    return DelegateResearchTool(
+def tool_for(gateway: Gateway, search: Search, calls: int = 3) -> WebSearchTool:
+    return WebSearchTool(
         runner(gateway, search),
         task_id="task_1",
         max_wall_time_sec=30,
@@ -622,7 +622,7 @@ async def test_the_tool_returns_an_untrusted_rendered_report() -> None:
 async def test_a_cancelled_run_propagates_the_cancellation() -> None:
     class Slow(Gateway):
         async def invoke_structured(self, request: LLMRequest, model: Any) -> Any:
-            if request.purpose == "research_extract":
+            if request.purpose == "websearch_extract":
                 await asyncio.sleep(30)
             return await super().invoke_structured(request, model)
 

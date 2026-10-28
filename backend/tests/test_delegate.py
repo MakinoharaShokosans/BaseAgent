@@ -374,7 +374,7 @@ def spawn_tool(parent: dict[str, AgentTool] | None = None, **kw: Any) -> SpawnSu
                 Fake("view_file", idempotent=True),
                 Fake("grep", idempotent=True),
                 Fake("write_file"),
-                Fake("delegate_research"),
+                Fake("websearch"),
             )
         }
     )
@@ -392,7 +392,7 @@ def spawn_tool(parent: dict[str, AgentTool] | None = None, **kw: Any) -> SpawnSu
             "enabled": True,
             "depth": 0,
             "max_depth": 1,
-            "denied_tools": ["spawn_subagent", "delegate_research"],
+            "denied_tools": ["spawn_subagent", "websearch"],
             "max_assigned_tools": 3,
             "max_steps": 4,
             "max_wall_time_sec": 30,
@@ -423,7 +423,7 @@ async def test_a_valid_spawn_returns_an_untrusted_rendered_report() -> None:
     [
         ["view_file", "nonexistent"],
         ["spawn_subagent"],
-        ["view_file", "delegate_research"],
+        ["view_file", "websearch"],
         ["view_file", "grep", "write_file", "extra"],
         [],
         None,

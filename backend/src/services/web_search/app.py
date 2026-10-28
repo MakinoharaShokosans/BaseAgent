@@ -1,7 +1,7 @@
 """web_search sidecar 的 HTTP 应用。设计文档：docs/04_tools/06_web_search_service.md。
 
 页面正文是不可信数据：这里不做任何信任判断，只负责安全地取、清洗、限量、落盘。
-信任隔离由研究隔离区负责。任何失败都以状态表达，不抛业务异常。
+信任隔离由websearch 工具负责。任何失败都以状态表达，不抛业务异常。
 """
 
 from __future__ import annotations

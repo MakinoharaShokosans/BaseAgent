@@ -12,6 +12,7 @@ Agent Runtime 负责把一个任务目标推进到交付：循环调模型、执
 | [04_approval.md](04_approval.md) | 权限闸门、挂起与恢复协议、审批决策的作用域 |
 | [05_plan_and_scratch.md](05_plan_and_scratch.md) | 会话草稿：`update_plan`、`note`、证据提醒、任务结束的沉淀 |
 | [06_tool_execution.md](06_tool_execution.md) | 工具执行：权限、指纹拦截、派发、后处理、失败判定 |
+| [07_working_method.md](07_working_method.md) | 工作方式：先确认需求、判断是否规划、逐个子任务推进、每一步汇报与进度 |
 
 决策依据见 [12_decisions](../12_decisions/)：
 

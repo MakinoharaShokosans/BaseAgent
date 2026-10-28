@@ -114,7 +114,7 @@ PermissionDecision(
 动态子智能体的权限在派发前一次性收窄，**只降不升**，派发后不可扩张：
 
 - 子级权限级别不高于父级当前级别。
-- 子级工具集是父级工具集的子集，且排除 `denied_tools`（`spawn_subagent`、`delegate_research`，防止套娃和模型嵌套循环）。
+- 子级工具集是父级工具集的子集，且排除 `denied_tools`（`spawn_subagent`、`websearch`，防止套娃和模型嵌套循环）。
 - 子级遇到越级操作**直接失败**，把失败观察值回给父级，不挂起、不审批。理由见 [审批 §7](../02_runtime/04_approval.md)。
 - 子级每次调用都按父级权限重新判定，而不是继承一次性结论。
 

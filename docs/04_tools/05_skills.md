@@ -4,7 +4,7 @@
 
 | | 回答的问题 | 形态 |
 |---|---|---|
-| 工具 Tool | **能做什么**：`bash`、`view_file`、`delegate_research` | 可执行的能力，有 Schema |
+| 工具 Tool | **能做什么**：`bash`、`view_file`、`websearch` | 可执行的能力，有 Schema |
 | 技能 Skill | **如何专业地做**：怎样勘测一个陌生工程、怎样做网络调研并综合 | 一份领域 SOP 目录包，是给模型读的流程文档 |
 
 技能不赋予任何能力，也不构成任何授权。它只是把一类任务的最佳做法，按需放进模型的上下文。
@@ -103,7 +103,7 @@ required_tools: [bash, view_file]          # 依赖的工具，用于标注，�
 | 技能 | 用途 |
 |---|---|
 | `workspace_explorer` | 勘测工作区结构、文件职责、技术栈；强调排除构建噪音目录、小文件批量读取、先宏观后局部 |
-| `web_research_synthesizer` | 指导通过研究隔离区做网络调研并综合 |
+| `web_research_synthesizer` | 指导通过websearch 工具做网络调研并综合 |
 
 去掉 RAG 后，技能正文需要同步改写：凡是"先用 `rag_search` 核实"的措辞改为 `grep`、`rg`、`view_file`。当前内置技能正文里没有出现 `rag` 字样，但系统提示词、研究报告模板与子智能体协议里有，见各自文档。
 

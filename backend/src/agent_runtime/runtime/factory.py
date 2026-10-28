@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import platform
 import time
 from collections import defaultdict
@@ -13,13 +14,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from loguru import logger
 
 from agent_runtime.checkpoint import CheckpointStore
 from agent_runtime.context import ObservationGovernor, ObservationStore, PromptLibrary, RulesCache
-from agent_runtime.core import AgentState, AgentTool, ToolSchema
+from agent_runtime.core import AgentState, AgentTool, Message, ToolSchema, new_state
 from agent_runtime.guardrails.envelope import observation_envelope
 from agent_runtime.llm import LLMGateway, PreferredEndpoint
 from agent_runtime.llm.tokens import estimate_tokens
@@ -55,12 +56,12 @@ from agent_runtime.subagents.delegate import (
     SpawnSubagentTool,
     SubagentRunner,
 )
-from agent_runtime.subagents.research import (
-    DelegateResearchTool,
+from agent_runtime.websearch import (
     ReportLimits,
-    ResearchLimits,
-    ResearchRunner,
     SidecarSearchClient,
+    WebSearchLimits,
+    WebSearchRunner,
+    WebSearchTool,
 )
 from baseagent_config import LoadedSettings
 from mcps import McpCallTool, McpDescribeTool, McpManager, McpTool, render_index
@@ -71,6 +72,25 @@ from tools.core import SidecarClient, ToolDispatcher, ToolRegistry
 _IDEMPOTENT: Final = frozenset(
     {"view_file", "list_dir", "grep", "read_artifact", "load_skill", "update_plan", "mcp_describe"}
 )
+
+
+@dataclass(slots=True)
+class _Assembled:
+    """``RuntimeFactory._assemble`` 的结果：一个任务发给模型的东西，不含运行时。"""
+
+    events: TaskEvents
+    artifacts: TaskArtifacts
+    registry: ToolRegistry
+    deferred: list[str]
+    pinned: list[str]
+    context: Any  # SessionContext
+    gateway: Any
+    assets: Any  # PromptAssets
+    assembler: Any  # PromptAssembler
+
+
+#: 检视用的占位需求：只是让装配器把会话里的历史对话放进请求里，它自己不计入任何一段
+_PROBE_GOAL: Final = "（占位）"
 
 
 @dataclass(slots=True)
@@ -119,7 +139,8 @@ class RuntimeFactory:
 
     # ------------------------------------------------------------------ 构建
 
-    async def build(self, state: AgentState) -> TaskRuntime:
+    async def _assemble(self, state: AgentState) -> _Assembled:
+        """任务的工具表与冻结的提示词资产。真实任务（``build``）与上下文检视共用同一套装配。"""
         settings = self.loaded.settings
         paths = self.loaded.paths
         workspace = await self.memory.get_workspace(state.workspace_id)
@@ -151,9 +172,9 @@ class RuntimeFactory:
             skills=skills,
         )
         tools.extend(scratch_tools())
-        research = self._research_tool(state, events)
-        if research is not None:
-            tools.append(research)
+        websearch = self._websearch_tool(state, events)
+        if websearch is not None:
+            tools.append(websearch)
         mcp_tools = await self._mcp_tools()
         tools.extend(mcp_tools)
         deferred = [t.name for t in mcp_tools if self._is_deferred(t)]
@@ -175,7 +196,7 @@ class RuntimeFactory:
         if spawn is not None:
             tools.append(spawn)
         # 不可信工具必须逐名授权：研究工具，加上用户在配置里启用的 MCP 服务器通过消毒的工具
-        untrusted = [t.name for t in (research, *mcp_tools) if t is not None] + extra_untrusted
+        untrusted = [t.name for t in (websearch, *mcp_tools) if t is not None] + extra_untrusted
         registry = ToolRegistry(
             tools,
             allow_untrusted=bool(untrusted),
@@ -210,6 +231,24 @@ class RuntimeFactory:
         assembler = assembler_from_settings(
             settings, assets, self.count_tokens, context_window=self._context_window()
         )
+        return _Assembled(
+            events=events,
+            artifacts=artifacts,
+            registry=registry,
+            deferred=deferred,
+            pinned=pinned,
+            context=context,
+            gateway=gateway,
+            assets=assets,
+            assembler=assembler,
+        )
+
+    async def build(self, state: AgentState) -> TaskRuntime:
+        settings = self.loaded.settings
+        paths = self.loaded.paths
+        a = await self._assemble(state)
+        events, artifacts, registry = a.events, a.artifacts, a.registry
+        deferred, pinned, gateway, assembler = a.deferred, a.pinned, a.gateway, a.assembler
 
         loop_cfg = settings.runtime.loop
         limits = loop_limits_from_settings(settings)
@@ -248,6 +287,66 @@ class RuntimeFactory:
             max_consecutive_blocks=limits.max_consecutive_blocks,
         )
 
+    async def inspect_context(self, session_id: str) -> Mapping[str, Any]:
+        """会话下一次请求里各段提示词占多少 Token。
+
+        与真实任务同一套装配（``_assemble``）与同一个装配器，所以数字就是实际会发给模型的内容，
+        不是前端另外估的。系统提示词被用户改写后、记忆变化后、工具或技能变化后，再取一次就是新的。
+        """
+        info = await self.memory.get_session(session_id)
+        workspace = await self.memory.get_workspace(info.workspace_id)
+        probe = new_state(
+            workspace_id=info.workspace_id,
+            workspace_path=workspace.root_path,
+            session_id=session_id,
+            task_id="inspect",
+            task_goal=_PROBE_GOAL,
+            permission_level="read_only",
+            canary_token=self.make_canary(session_id, "inspect"),
+        )
+        a = await self._assemble(probe)
+        state = replace(
+            probe, messages=[*a.context.history, Message(role="user", content=_PROBE_GOAL)]
+        )
+        layers = a.assembler.describe(state)
+        count = self.count_tokens
+        system_message = a.assembler(state)[0]
+        tools_json = json.dumps(
+            [
+                {"name": t.name, "description": t.description, "parameters": dict(t.parameters)}
+                for t in a.registry.schemas()
+            ],
+            ensure_ascii=False,
+        )
+        history = sum(count(m.content) for m in a.context.history)
+        override = await self.memory.get_app_setting(SYSTEM_PROMPT_KEY)
+
+        def seg(sid: str, tokens: int, **extra: object) -> dict[str, object]:
+            return {"id": sid, "tokens": tokens, **extra}
+
+        segments = [
+            seg("system", count(system_message.content), customized=bool(override)),
+            seg("tools", count(tools_json), count=layers["tools"]["count"]),
+            seg("skills", layers["skills"]["tokens"]),
+            seg("mcp_index", layers["mcp_index"]["tokens"]),
+            seg(
+                "project_rules",
+                layers["project_rules"]["tokens"],
+                status=layers["project_rules"]["status"],
+            ),
+            seg("workspace", count(_workspace_text(layers))),
+            seg("workspace_memory", layers["workspace_memory"]["tokens"]),
+            seg("session_memory", layers["session_memory"]["tokens"]),
+            seg("task_data", layers["task_data"]["tokens"]),
+            seg("history", history, turns=len(a.context.history)),
+        ]
+        return {
+            "segments": segments,
+            "total_tokens": sum(int(str(x["tokens"])) for x in segments),
+            "context_window": self._context_window(),
+            "skipped": layers["skipped"],
+        }
+
     def _is_deferred(self, tool: McpTool) -> bool:
         return self.mcp is not None and self.mcp.exposure_of(tool.server) == "deferred"
 
@@ -261,17 +360,17 @@ class RuntimeFactory:
             logger.warning("准备 MCP 工具失败，本任务不带外部工具：{!r}", exc)
             return []
 
-    def _research_tool(self, state: AgentState, events: TaskEvents) -> DelegateResearchTool | None:
+    def _websearch_tool(self, state: AgentState, events: TaskEvents) -> WebSearchTool | None:
         """研究是主 Agent 获取外部信息的唯一入口；关闭或没有 sidecar 客户端时根本不注册。"""
-        cfg = self.loaded.settings.research
+        cfg = self.loaded.settings.websearch
         if not cfg.enabled or self.web is None:
             return None
-        runner = ResearchRunner(
+        runner = WebSearchRunner(
             self.gateway,
             SidecarSearchClient(
                 self.web, self.loaded.paths.web_artifacts_dir, max_source_chars=cfg.max_source_chars
             ),
-            ResearchLimits(
+            WebSearchLimits(
                 cfg.max_rounds,
                 cfg.max_sources,
                 cfg.max_source_chars,
@@ -283,13 +382,13 @@ class RuntimeFactory:
                     cfg.max_report_chars,
                 ),
             ),
-            plan_prompt=self.library.get("research_plan"),
-            extract_prompt=self.library.get("research_extract"),
+            plan_prompt=self.library.get("websearch_plan"),
+            extract_prompt=self.library.get("websearch_extract"),
             tier=cfg.model_tier,
             emit=events.emit,
             extract_reserve_sec=float(cfg.extract_reserve_sec),
         )
-        return DelegateResearchTool(
+        return WebSearchTool(
             runner,
             task_id=state.task_id,
             max_wall_time_sec=float(cfg.max_wall_time_sec),
@@ -417,3 +516,9 @@ def _hidden_schema(
 ) -> ToolSchema | None:
     tool = tools.get(name)
     return tool.schema() if tool is not None and name in deferred else None
+
+
+def _workspace_text(layers: Mapping[str, Any]) -> str:
+    """“工作区”一段只有名称与路径，按它们的文字估算。"""
+    workspace = layers["workspace"]
+    return f"{workspace['name']}{workspace['path']}"

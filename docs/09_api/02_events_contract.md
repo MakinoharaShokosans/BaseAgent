@@ -81,7 +81,7 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 
 | 事件 | 载荷 | 取代 |
 |---|---|---|
-| `model.reply` | `turn`、`content`、`tool_calls[]`（只含 id 与工具名）、`reasoning?`（截断） | — |
+| `model.reply` | `turn`、`content`、`tool_calls[]`（只含 id 与工具名）、`reasoning?`（截断）。带工具调用时 `content` 是模型每一步的汇报（已完成、下一步、子任务进度），见 [工作方式](../02_runtime/07_working_method.md) | — |
 | `plan.updated` | `plan[]`：`{ id, title, status }`，`status` 为 `pending \| in_progress \| completed` | `plan` |
 | `turn.finished` | `turn`（回合序号，不是信封的 `seq`）、`tool_count`、`failed_count`、`tokens`（统计值） | `node.finished` |
 
@@ -123,9 +123,9 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 
 | 事件 | 载荷 |
 |---|---|
-| `research.started` | `topic`、`questions`、`max_sources` |
-| `research.round` | `round`、`queries[]`、`fetched`（抓到正文的页数）、`evidence`（累计有正文的来源数）、`errors[]`（本轮检索失败的原因，没有则为空；只含状态，不含页面正文） |
-| `research.finished` | `rounds`、`sources`、`findings`、`version_facts`、`tokens`、`elapsed_sec` |
+| `websearch.started` | `topic`、`questions`、`max_sources` |
+| `websearch.round` | `round`、`queries[]`、`fetched`（抓到正文的页数）、`evidence`（累计有正文的来源数）、`errors[]`（本轮检索失败的原因，没有则为空；只含状态，不含页面正文） |
+| `websearch.finished` | `rounds`、`sources`、`findings`、`version_facts`、`tokens`、`elapsed_sec` |
 | `subagent.started` | `role`、`depth`、`assigned_tools[]` |
 | `subagent.step` | `step`、`tools[]` |
 | `subagent.tool` | `step`、`tool`、`ok`、`duration_ms`、`untrusted`、`summary`（≤300 字符） |

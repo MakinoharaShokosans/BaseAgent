@@ -60,7 +60,7 @@ def test_record_types_cover_the_contract() -> None:
             "llm",
             {"node": "planner", "tier": "fast", "tokens": 90, "outcome": "ok", "duration_ms": 5},
         ),
-        "research.round": ("subagent", {"round": 1}),
+        "websearch.round": ("subagent", {"round": 1}),
         "task.finished": ("final", {"status": "succeeded", "delivery": "done"}),
         "task.error": ("guard", {"code": "TASK_FAILED", "message": "x"}),
     }

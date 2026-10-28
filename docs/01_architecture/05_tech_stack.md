@@ -41,7 +41,7 @@
 | MCP | 官方 **`mcp`** SDK | 外部工具接入 | 官方实现 | 自写协议（不值得） |
 | 分词估算 | **tiktoken**，仅用于估算 | 裁剪、压缩的局部决策 | 轻、快。用量统计以服务商返回为准 | 模型自带分词器（更准，更重）；字符粗算（无依赖，偏差大） |
 | 网页正文 | **trafilatura** | 抓取后的正文提取 | 质量好，保留代码块 | readability 类库 |
-| 搜索 | 可插拔提供者，见 §9 问题 3 | 研究隔离区的检索 | | |
+| 搜索 | 可插拔提供者，见 §9 问题 3 | websearch 工具的检索 | | |
 | 技能元数据 | **PyYAML**（`safe_load`） | 解析 `SKILL.md` 的 frontmatter | | |
 | 追踪导出 | 自有 span 模型；`opentelemetry-*`、`langfuse` 为**可选依赖组** | 见 [追踪](../08_observability/03_tracing.md) | 已采纳 0004 | 直接依赖 OTel SDK（核心变重） |
 

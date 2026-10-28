@@ -44,7 +44,7 @@ POST /workspaces
 | `GET /sessions/{id}/turns?limit&before_id` | 分页查询对话流水 | 已有 |
 | `GET /sessions/{id}/memory` | 读取会话已压缩记忆 | 已有 |
 | `POST /sessions/{id}/memory/compact` | 手动压缩会话记忆（输入台的“压缩记忆”按钮） | 已有，见下 |
-| `GET /sessions/{id}/context` | 上下文检视：各层装配结果与 Token 估算 | 已有，见 [提示词装配 §6](../03_context/03_prompt_assembly.md) |
+| `GET /sessions/{id}/context` | 上下文检视：下一次请求里各段提示词的 Token 估算 | 已有，见 [提示词装配 §6](../03_context/03_prompt_assembly.md) |
 | `GET /sessions/{id}/tasks` | 列出会话下的任务 | **新增**，见下 |
 
 **分支。** `POST /sessions/{id}/fork` 复制对话流水（轮次 id 重新分配）与会话设置，不复制任务、检查点与产物。记忆只带分支点之前确实成立的部分：摘要水位线不超过分支点时带摘要与水位线，事实和失败记录只保留分支点之前出现过的任务产生的；水位线超过分支点则摘要已混入之后的内容，不带摘要与事实，分支里的对话保持逐字。`from_turn_id` 不属于该会话 → `404 TURN_NOT_FOUND`；源会话不存在 → `404 SESSION_NOT_FOUND`。源会话在运行任务时也可以分支（只读源）。
@@ -240,7 +240,7 @@ POST /tasks/{id}/reject    { "approval_id": "appr_…", "reason": "…" }
 - **续跑**：`failed` 与 `terminated` 可续跑；`cancelled`、`succeeded` 不可（409）。
 - **删除**：任务运行中不能删（409）；删除会话或工作区会级联清掉其下任务的检查点、事件、产物与轨迹目录。
 - **`GET /tasks/{id}/trace`**：目前是事件的 NDJSON（已脱敏）；独立的轨迹文件见 [轨迹](../08_observability/02_trajectory_and_logs.md)，尚未实现。`/llm_calls` 在网关发出 `llm.call` 事件之前返回空列表；`/spans` 由事件推出（阶段一个、工具调用按 `call_id` 与结果配对）。
-- **`GET /sessions/{id}/context`**：装配层提供检视器之前返回 503。
+- **`GET /sessions/{id}/context`**：返回 `{segments[], total_tokens, context_window, skipped[]}`，`segments` 按 `system`、`tools`、`skills`、`mcp_index`、`project_rules`、`workspace`、`workspace_memory`、`session_memory`、`task_data`、`history` 的顺序，每段 `{id, tokens}`，另有 `system.customized`、`tools.count`、`history.turns`、`project_rules.status`。与真实任务同一套装配，系统提示词被改写、记忆变化后再取就是新值。检视器未装配时返回 503。
 - **自省**：`/tools` 与 `/models` 已接上；`/mcp/servers` 返回每个服务器的 `name`、`transport`、`status`（`disabled`/`idle`/`connected`/`failed`）、`tool_count`、`tools`、`rejected`（被拒工具与原因）、`last_error`、`retry_in_sec`，不含命令行与环境变量；`/skills` 返回内置与全局技能的名称、来源、描述、触发词、所需工具与告警（不含正文）。`/models` 不含密钥，也不含密钥所在的环境变量值。
 - **健康检查**：`/health/dependencies` 探测两个 sidecar，`web_search` 尚未实现时显示 `down`。
 - 路径参数（任务、会话、工作区 id）只接受 `[A-Za-z0-9_-]{1,64}`，产物 id 另允许点；`task_goal` 的上限由 `server.task_goal_max_chars` 控制，超出是 400。

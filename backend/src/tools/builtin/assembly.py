@@ -1,7 +1,7 @@
 """内置工具装配。设计文档：04_tools/01_tool_system.md §10。
 
 缺少某个依赖时对应工具不注册：模型根本看不到它，也就不会误调用一个不存在的能力。
-刻意不含 ``web_search``：外部信息的唯一入口是研究子智能体。
+刻意不含 ``web_search``：外部信息的唯一入口是websearch 工具。
 """
 
 from __future__ import annotations

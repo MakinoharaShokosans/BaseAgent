@@ -75,7 +75,7 @@ AegisAgent/src/
 | `checkpoint.py`（`AsyncSqliteSaver`） | `checkpoint/store.py`，自有表与编解码 |
 | `llm/*` | `llm/*`，补熔断、截止时间、能力声明、结构化输出与思考内容 |
 | `context.py`、`guardrails/observation_pruner.py`、`memory/*` | `context/*` 与 `memory/*` |
-| `research/*`、`subagent/*` | `subagents/research`、`subagents/delegate` |
+| `research/*`、`subagent/*` | `websearch`、`subagents/delegate` |
 | `code_search/*`、`api/routes/rag.py`、`tools/builtin/rag_search.py`、`evaluation/rag_bench` | **删除** |
 | `AegisRAG/` | **删除整个工程** |
 
@@ -129,7 +129,7 @@ AegisAgent/src/
 | 轨迹写入 `tool_args`（脱敏） | [轨迹 §1.2](../08_observability/02_trajectory_and_logs.md) |
 | `web_search` 增加地址校验与响应大小上限 | [web_search §4](../04_tools/06_web_search_service.md) |
 | 信封正文转义 | [信任 §4.4](../05_security/03_trust_and_injection.md) |
-| ~~研究子智能体接入预算账本，并限制调用次数；修复账本重复扣减~~ 随预算一并取消 | [0006](../12_decisions/0006-pure-agent-loop.md) |
+| ~~websearch 工具接入预算账本，并限制调用次数；修复账本重复扣减~~ 随预算一并取消 | [0006](../12_decisions/0006-pure-agent-loop.md) |
 | API 令牌认证、工作区路径校验、目录浏览收紧 | [API 接入控制](../09_api/03_access_and_errors.md) |
 | 沙箱拒绝原因传达给模型 | [Shell 工具 §1.2](../04_tools/03_shell_tool.md) |
 | 前端错误信封解析、SSE 重连与序号检测、去掉 URL 中的令牌 | [前端 §7、§8](../10_frontend/01_architecture.md) |
@@ -195,7 +195,7 @@ AegisAgent/src/
 
 **统一入口 `baseagent`（已完成）。** `baseagent start` 先加载配置，按白名单给 sidecar 传环境，等健康后打印看板（令牌只显示路径），退出时整组收掉；`baseagent token [--rotate]`。已用真实进程做过一次冒烟：鉴权、建工作区、依赖健康、沙箱执行、跨站请求被拒。**冒烟发现并修正：** 启动器对 `slots` 数据类取 `__dict__`；sidecar 按设计拿不到模型密钥，却因“模型档没有可用端点”拒绝启动（加 `require_models=False`）。
 
-**联网研究（已完成）。** 细节见 [web_search §10](../04_tools/06_web_search_service.md)、[研究隔离区 §12](../06_subagents/01_research_isolation.md)、预算账本（已取消）。约 150 个测试：SSRF 防护（回环、私网、链路本地、元数据地址、IPv6 与映射写法、十进制/十六进制/八进制 IP、带用户信息的 URL、非 http 协议、端口）、DNS 重绑定（解析只发生一次）、重定向逐跳校验、响应体上限与内容类型、WAF 降级、去重、落盘与 `task_id` 白名单；研究的净化通道（伪造 URL、带命令的版本号、代码与答案的长度上限、`display_only` 不可改、注入样态标注）、渲染（信封不能被内容提前闭合、围栏自适应）、研究循环的每种降级、事件里没有页面正文；账本（守恒式的性质测试、收窄、次数、幂等结算、取消时仍结算、不重复扣减）；整套应用里研究的 Token 计入任务预算。
+**联网研究（已完成）。** 细节见 [web_search §10](../04_tools/06_web_search_service.md)、[websearch 工具 §12](../04_tools/07_websearch_tool.md)、预算账本（已取消）。约 150 个测试：SSRF 防护（回环、私网、链路本地、元数据地址、IPv6 与映射写法、十进制/十六进制/八进制 IP、带用户信息的 URL、非 http 协议、端口）、DNS 重绑定（解析只发生一次）、重定向逐跳校验、响应体上限与内容类型、WAF 降级、去重、落盘与 `task_id` 白名单；研究的净化通道（伪造 URL、带命令的版本号、代码与答案的长度上限、`display_only` 不可改、注入样态标注）、渲染（信封不能被内容提前闭合、围栏自适应）、研究循环的每种降级、事件里没有页面正文；账本（守恒式的性质测试、收窄、次数、幂等结算、取消时仍结算、不重复扣减）；整套应用里研究的 Token 计入任务预算。
 **发现并修正：** ① `web_page` 没有加入信封标签集合，页面正文可以伪造证据信封；② 渲染的外层信封被工具观察值的外层信封当成已知标签破坏掉（信封套信封）；③ 子模型输出里一个不是对象的列表项会让整份报告解析失败。
 
 **动态委派、轨迹与日志、内置技能包（已完成）。** 细节见 [动态委派 §12](../06_subagents/02_dynamic_delegation.md)、[轨迹与日志 §7](../08_observability/02_trajectory_and_logs.md)、[Skills §15](../04_tools/05_skills.md)。约 70 个测试：引用白名单（失败调用不算、URL 精确、路径后缀匹配与伪造路径、检索词不是资源）、状态归一、渲染不可伪造信封；执行循环（权限越级即失败且不挂起、不在分配表里的工具、三重封顶、观察值截断与不可信信封、事件无原始输出、金丝雀、各种降级）；`spawn_subagent`（全有或全无的收窄、深度、预算收窄/次数/取消时仍结算、并发预留）；整套应用里子级的 Token 计入任务；轨迹（记录类型与版本、`tool_args` 脱敏且存在、分页与撕裂行、`task_id` 路径安全、写失败不抛、随任务删除）与日志（任务上下文自动注入、额外字段按键名脱敏、`diagnose=False`、文件 0600、`setup_logging` 幂等）；5 个内置技能都能被注册表扫描且没有告警。

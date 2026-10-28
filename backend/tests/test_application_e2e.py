@@ -33,16 +33,16 @@ class Scripted:
 
     def __init__(self) -> None:
         self.agent: list[LLMResponse | BaseException] = []
-        self.research_plan: list[Any] = []
-        self.research_extract: list[Any] = []
+        self.websearch_plan: list[Any] = []
+        self.websearch_extract: list[Any] = []
         self.subagent_report: Any = None
         self.requests: list[LLMRequest] = []
 
     async def invoke_structured(self, request: LLMRequest, model: type[BaseModel]) -> Any:
         self.requests.append(request)
         queue: list[Any] | None = {
-            "research_plan": self.research_plan,
-            "research_extract": self.research_extract,
+            "websearch_plan": self.websearch_plan,
+            "websearch_extract": self.websearch_extract,
         }.get(request.purpose)
         if request.purpose == "subagent_report":
             value = self.subagent_report
@@ -225,6 +225,67 @@ async def test_a_task_runs_from_submission_to_delivery_with_a_real_tool(stack: A
         ("user", "写一个 hello.txt"),
         ("assistant", "已写入 hello.txt"),
     ]
+
+
+@pytest.mark.integration
+async def test_the_context_inspector_reports_every_prompt_layer_from_the_real_assembly(
+    stack: Any,
+) -> None:
+    """检视用的是真实任务的同一套装配：系统提示词、工具定义、技能清单、记忆、对话各有各的份额。"""
+    application, client, _gateway, workspace = stack
+    sid = await open_session(client, workspace)
+    wid = (await client.get(f"{V1}/sessions/{sid}", headers=HEADERS)).json()["workspace_id"]
+    await client.post(
+        f"{V1}/workspaces/{wid}/memory/facts",
+        json={"text": "用 pnpm，不用 npm", "layer": "guidelines"},
+        headers=HEADERS,
+    )
+    await application.memory.append_turn(sid, "t1", "user", "你好" * 50, 100)
+    await application.memory.append_turn(sid, "t1", "assistant", "收到" * 50, 100)
+
+    reply = await client.get(f"{V1}/sessions/{sid}/context", headers=HEADERS)
+    assert reply.status_code == 200, reply.text
+    body = reply.json()
+    by_id = {x["id"]: x for x in body["segments"]}
+    assert list(by_id) == [
+        "system",
+        "tools",
+        "skills",
+        "mcp_index",
+        "project_rules",
+        "workspace",
+        "workspace_memory",
+        "session_memory",
+        "task_data",
+        "history",
+    ]
+    assert by_id["system"]["tokens"] > 0 and by_id["system"]["customized"] is False
+    assert by_id["tools"]["tokens"] > 0 and by_id["tools"]["count"] > 5
+    assert by_id["skills"]["tokens"] > 0  # 内置技能清单
+    assert by_id["workspace_memory"]["tokens"] > 0
+    assert by_id["history"]["turns"] == 2 and by_id["history"]["tokens"] > 0
+    assert body["total_tokens"] == sum(x["tokens"] for x in body["segments"])
+    assert body["context_window"] > 0
+
+
+@pytest.mark.integration
+async def test_a_custom_system_prompt_shows_up_in_the_inspector_and_the_next_request(
+    stack: Any,
+) -> None:
+    application, client, gateway, workspace = stack
+    sid = await open_session(client, workspace)
+    before = (await client.get(f"{V1}/sessions/{sid}/context", headers=HEADERS)).json()
+    await client.put(f"{V1}/settings", json={"system_prompt": "短提示词"}, headers=HEADERS)
+    after = (await client.get(f"{V1}/sessions/{sid}/context", headers=HEADERS)).json()
+    system_before = next(x for x in before["segments"] if x["id"] == "system")
+    system_after = next(x for x in after["segments"] if x["id"] == "system")
+    assert system_after["customized"] is True
+    assert system_after["tokens"] < system_before["tokens"]  # 比内置的长提示词短
+    gateway.agent.append(call_response("好"))
+    await client.post(f"{V1}/sessions/{sid}/tasks", json={"task_goal": "hi"}, headers=HEADERS)
+    task_id = (await client.get(f"{V1}/sessions/{sid}/tasks", headers=HEADERS)).json()[0]["task_id"]
+    await application.runner.wait(task_id)
+    assert gateway.requests[0].messages[0].content.startswith("短提示词")
 
 
 @pytest.mark.integration
@@ -457,8 +518,8 @@ PAGE_SECRET = "PAGE-BODY-SECRET-77aa"
 async def test_research_runs_isolated_and_only_the_distilled_report_enters_the_task(
     stack: Any,
 ) -> None:
-    from agent_runtime.subagents.research import QueryPlan, RawReport
-    from agent_runtime.subagents.research.models import RawFinding
+    from agent_runtime.websearch import QueryPlan, RawReport
+    from agent_runtime.websearch.models import RawFinding
     from tools.core import SidecarClient
 
     application, client, gateway, workspace = stack
@@ -484,11 +545,11 @@ async def test_research_runs_isolated_and_only_the_distilled_report_enters_the_t
     )
     finish_after(
         gateway,
-        [("c1", "delegate_research", {"topic": "django", "questions": ["怎么回滚迁移？"]})],
+        [("c1", "websearch", {"topic": "django", "questions": ["怎么回滚迁移？"]})],
         "查到了",
     )
-    gateway.research_plan += [QueryPlan(queries=["django rollback"]), QueryPlan(enough=True)]
-    gateway.research_extract.append(
+    gateway.websearch_plan += [QueryPlan(queries=["django rollback"]), QueryPlan(enough=True)]
+    gateway.websearch_extract.append(
         RawReport(
             findings=[
                 RawFinding(
@@ -505,14 +566,16 @@ async def test_research_runs_isolated_and_only_the_distilled_report_enters_the_t
     state = await application.checkpoints.load(tid)
     assert state is not None
     tool_message = next(m for m in state.messages if m.role == "tool")
-    assert '<tool_observation tool="delegate_research" trust="untrusted">' in tool_message.content
+    assert '<tool_observation tool="websearch" trust="untrusted">' in tool_message.content
     assert "外部网页整理的资料" in tool_message.content
     assert "用 migrate app 0001" in tool_message.content
     assert "phish.example" not in tool_message.content  # 钓鱼来源被净化通道丢弃
     everything = json.dumps([m.content for m in state.messages], ensure_ascii=False)
     stream = (await client.get(f"{V1}/tasks/{tid}/stream", headers=HEADERS)).text
     assert PAGE_SECRET not in everything and PAGE_SECRET not in stream  # 原始网页正文不离开研究循环
-    assert {"research.started", "research.round", "research.finished"} <= set(event_names(stream))
+    assert {"websearch.started", "websearch.round", "websearch.finished"} <= set(
+        event_names(stream)
+    )
     # 用量只是统计：研究的两次规划加一次提炼也被计量，但不对应任何上限
     assert (
         application.llm_events.tokens_of(tid) >= 0 if hasattr(application, "llm_events") else True

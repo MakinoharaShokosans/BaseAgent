@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent_runtime.subagents.research.models import Evidence
+from agent_runtime.websearch.models import Evidence
 from tools.core import DependencyUnavailableError, SidecarClient
 
 _QUERY = "/api/v1/search/query"

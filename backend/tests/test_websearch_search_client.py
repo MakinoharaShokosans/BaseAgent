@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from agent_runtime.subagents.research.models import Evidence
-from agent_runtime.subagents.research.search_client import SidecarSearchClient
+from agent_runtime.websearch.models import Evidence
+from agent_runtime.websearch.search_client import SidecarSearchClient
 from tools.core import DependencyUnavailableError
 
 

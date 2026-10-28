@@ -1,6 +1,6 @@
 # web_search 服务
 
-`web_search` 是独立进程的 sidecar（`127.0.0.1:8003`），负责检索、抓取、清洗，供研究子智能体使用。主 Agent 不直接调用它，见 [研究隔离区](../06_subagents/01_research_isolation.md)。
+`web_search` 是独立进程的 sidecar（`127.0.0.1:8003`），负责检索、抓取、清洗，供websearch 工具使用。主 Agent 不直接调用它，见 [websearch 工具](07_websearch_tool.md)。
 
 ## 1. 职责
 
@@ -72,11 +72,11 @@ artifacts_dir = "storage/artifacts"
 
 ## 4. 已发现的问题
 
-这是研究隔离区里**直接接触外部网络**的一环，下面几项的重要性高于其位置：
+这是websearch 工具里**直接接触外部网络**的一环，下面几项的重要性高于其位置：
 
 | # | 问题 | 级别 |
 |---|---|---|
-| 1 | **没有对目标地址做内网过滤（SSRF）。** 抓取只检查协议是 `http://` 或 `https://`，并且 `follow_redirects=True`。搜索结果里一个 URL，或者一次重定向，可以指向 `127.0.0.1`、私网地址、云厂商元数据地址（`169.254.169.254`）。抓取到的内容会作为"证据"进入研究子智能体的上下文，再被提炼回主 Agent。本机上还跑着 Agent API、两个 sidecar，它们的 GET 接口都在回环上 | **高** |
+| 1 | **没有对目标地址做内网过滤（SSRF）。** 抓取只检查协议是 `http://` 或 `https://`，并且 `follow_redirects=True`。搜索结果里一个 URL，或者一次重定向，可以指向 `127.0.0.1`、私网地址、云厂商元数据地址（`169.254.169.254`）。抓取到的内容会作为"证据"进入websearch 工具的上下文，再被提炼回主 Agent。本机上还跑着 Agent API、两个 sidecar，它们的 GET 接口都在回环上 | **高** |
 | 2 | **响应体没有大小上限。** 直接取 `response.text`，把整个响应读入内存。一个指向超大文件的链接可以耗尽内存，或者让 `trafilatura` 长时间占用线程 | 中 |
 | 3 | **不检查内容类型。** 二进制、PDF、压缩包也会被当作 HTML 解码并送去提取 | 低 |
 | 4 | **重定向次数与跳转目标无限制。** 重定向链可以很长，也可以从公网跳到内网 | 中（与 1 同源） |
@@ -104,8 +104,8 @@ artifacts_dir = "storage/artifacts"
 
 ## 6. 与上下文的关系
 
-- 页面正文是**不可信数据**。`web_search` 不做任何信任判断，信任隔离由研究隔离区负责。
-- 响应里的 `preview` 和 `snippet` 进入子智能体的证据块，是提示词注入的入口，所以证据必须用信封包裹，见 [研究隔离区 §8](../06_subagents/01_research_isolation.md)。
+- 页面正文是**不可信数据**。`web_search` 不做任何信任判断，信任隔离由websearch 工具负责。
+- 响应里的 `preview` 和 `snippet` 进入子智能体的证据块，是提示词注入的入口，所以证据必须用信封包裹，见 [websearch 工具 §8](07_websearch_tool.md)。
 - 产物句柄 `artifact_path` 指向 sidecar 落盘位置。研究报告里只保留文件名作为 `artifact_id`，主 Agent 通常不需要读取原文。
 
 ## 7. 不变量

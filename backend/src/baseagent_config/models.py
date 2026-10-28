@@ -542,7 +542,7 @@ class WebSearchConfig(_Section):
 # ==============================================================================
 
 
-class ResearchConfig(_Section):
+class WebSearchToolConfig(_Section):
     enabled: bool = True
     model_tier: ModelTier = "fast"
     max_rounds: PosInt = 3
@@ -572,7 +572,7 @@ class SubagentConfig(_Section):
     max_report_chars: PosInt = 3000
     denied_tools: list[str] = [
         "spawn_subagent",
-        "delegate_research",
+        "websearch",
         "update_plan",
         "note",
         "mcp_describe",
@@ -615,7 +615,7 @@ class PermissionsConfig(_Section):
         "update_plan",
         "note",
         "mcp_describe",
-        "delegate_research",
+        "websearch",
         "spawn_subagent",
     ]
     workspace_write_tools: list[str] = ["write_file", "edit_file"]
@@ -820,7 +820,7 @@ class Settings(BaseSettings):
     services: ServicesConfig = ServicesConfig()
     bash_shell: BashShellConfig = BashShellConfig()
     web_search: WebSearchConfig = WebSearchConfig()
-    research: ResearchConfig = ResearchConfig()
+    websearch: WebSearchToolConfig = WebSearchToolConfig()
     subagent: SubagentConfig = SubagentConfig()
     skills: SkillsConfig = SkillsConfig()
     permissions: PermissionsConfig = PermissionsConfig()

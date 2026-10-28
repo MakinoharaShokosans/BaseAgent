@@ -1,4 +1,4 @@
-"""研究报告的强类型契约与净化通道。设计文档：docs/06_subagents/01_research_isolation.md §5。
+"""研究报告的强类型契约与净化通道。设计文档：docs/04_tools/07_websearch_tool.md §5。
 
 子模型的任何输出都必须先经 ``build_report`` 才可能被渲染进主上下文。四道结构性约束：
 引用的 URL 必须来自本轮真实抓取集合；版本号必须匹配正则；长度有硬上限；
@@ -139,7 +139,7 @@ class CodeExample:
 
 
 @dataclass(frozen=True, slots=True)
-class ResearchSource:
+class WebSearchSource:
     url: str
     title: str
     status: str
@@ -147,11 +147,11 @@ class ResearchSource:
 
 
 @dataclass(frozen=True, slots=True)
-class ResearchReport:
+class WebSearchReport:
     findings: tuple[Finding, ...] = ()
     version_facts: tuple[VersionFact, ...] = ()
     code_examples: tuple[CodeExample, ...] = ()
-    sources: tuple[ResearchSource, ...] = ()
+    sources: tuple[WebSearchSource, ...] = ()
     unresolved: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     rounds_used: int = 0
@@ -182,13 +182,13 @@ def build_report(
     raw: RawReport,
     *,
     fetched: Collection[str],
-    sources: tuple[ResearchSource, ...],
+    sources: tuple[WebSearchSource, ...],
     limits: ReportLimits,
     rounds_used: int,
     total_tokens: int,
     elapsed_sec: float,
     extra_warnings: tuple[str, ...] = (),
-) -> ResearchReport:
+) -> WebSearchReport:
     """净化通道。``fetched``：本轮真实抓取过的 URL；其余引用一律丢弃。"""
     allowed = set(fetched)
     truncated = False
@@ -244,7 +244,7 @@ def build_report(
         for u in raw.unresolved[:_MAX_UNRESOLVED]
         if isinstance(u, str) and u.strip()
     )
-    return ResearchReport(
+    return WebSearchReport(
         findings=tuple(findings),
         version_facts=tuple(facts),
         code_examples=tuple(examples),
@@ -259,16 +259,16 @@ def build_report(
 
 
 @dataclass(frozen=True, slots=True)
-class ResearchRequest:
+class WebSearchRequest:
     topic: str
     questions: tuple[str, ...]
     max_sources: int | None = None
-    task_id: str = "research"
+    task_id: str = "websearch"
 
 
 @dataclass(frozen=True, slots=True)
 class Evidence:
-    """一个抓取到的来源。``text`` 是原始网页文本，只在 ``ResearchRunner.run`` 一次调用内存活。"""
+    """一个抓取到的来源。``text`` 是原始网页文本，只在 ``WebSearchRunner.run`` 一次调用内存活。"""
 
     url: str
     title: str

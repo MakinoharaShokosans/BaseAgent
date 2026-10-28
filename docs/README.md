@@ -14,7 +14,7 @@
 | [03_context](03_context/) | 观察值治理、窗口与压缩、提示词装配、记忆、上下文继承 | 已写初稿 |
 | [04_tools](04_tools/) | 工具系统、内置工具、Shell、MCP、Skills、web_search | 已写初稿 |
 | [05_security](05_security/) | 权限分层、Shell 沙箱、信任隔离与注入防护 | 已写初稿 |
-| [06_subagents](06_subagents/) | 研究隔离区、动态委派 | 已写初稿 |
+| [06_subagents](06_subagents/) | 动态委派（websearch 已移到 [04_tools](04_tools/07_websearch_tool.md)） | 已写初稿 |
 | [07_llm_gateway](07_llm_gateway/) | 模型分档、降级、结构化输出、思考内容 | 已写初稿 |
 | [08_observability](08_observability/) | 事件、轨迹与日志、追踪 | 已写初稿 |
 | [09_api](09_api/) | HTTP API 与 SSE 事件契约 | 已写初稿 |

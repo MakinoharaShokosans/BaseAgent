@@ -8,18 +8,18 @@ BaseAgent 里有两种子智能体，目的不同，隔离方式也不同。
 
 | 文档 | 内容 | 状态 |
 |---|---|---|
-| [01_research_isolation.md](01_research_isolation.md) | 研究隔离区：唯一的外部信息入口，特权分离与强类型报告 | 已写初稿 |
+| [websearch 工具](../04_tools/07_websearch_tool.md) | 已移到工具目录：唯一的外部信息入口，特权分离与强类型报告 | 已写初稿 |
 | [02_dynamic_delegation.md](02_dynamic_delegation.md) | 动态委派：能力衰减、越级即失败、引用白名单 | 已写初稿 |
 
 ## 两种子智能体
 
-| | 研究子智能体 | 动态子智能体 |
+| | websearch 工具 | 动态子智能体 |
 |---|---|---|
-| 入口工具 | `delegate_research` | `spawn_subagent` |
+| 入口工具 | `websearch` | `spawn_subagent` |
 | 目的 | **安全**：隔离不可信的外部内容 | **效率**：隔离大量中间观察值 |
 | 工具集 | 固定，只有 `web_search` | 每次由主 Agent 提议，经父表收窄 |
 | 本地权限 | 无 | 不高于父级，且不能请求审批 |
-| 回流形态 | `ResearchReport`，代码模板渲染 | `SubagentReport`，引用白名单校验 |
+| 回流形态 | `WebSearchReport`，代码模板渲染 | `SubagentReport`，引用白名单校验 |
 | 回流信任级 | 报告自带 `untrusted` 信封 | 返回时覆盖为 `untrusted` |
 | 能力是否可变 | 否 | 是，但只降不升 |
 
@@ -51,11 +51,11 @@ flowchart LR
 
 | # | 问题 | 位置 | 级别 |
 |---|---|---|---|
-| 1 | 研究报告正文未转义，可提前闭合信封 | [研究 §8](01_research_isolation.md) | 高 |
+| 1 | 研究报告正文未转义，可提前闭合信封 | [研究 §8](../04_tools/07_websearch_tool.md) | 高 |
 | 2 | 引用白名单把失败的调用也算作已访问 | [委派 §8](02_dynamic_delegation.md) | 中 |
 | 3 | 子级内部调用不进入轨迹，审计缺口 | [委派 §8](02_dynamic_delegation.md) | 中 |
 | 4 | 子级没有金丝雀检查 | [委派 §8](02_dynamic_delegation.md) | 中 |
-| 5 | 研究证据正文进入子模型提示词时没有信封 | [研究 §8](01_research_isolation.md) | 中 |
+| 5 | 研究证据正文进入子模型提示词时没有信封 | [研究 §8](../04_tools/07_websearch_tool.md) | 中 |
 | 6 | `max_sources` 不收敛、子级与父级共享工具实例 | 各文档 | 低 |
 
 第 1 项建议在实现新版时最先处理：报告正文能提前闭合信封，是一条真实的注入通路。

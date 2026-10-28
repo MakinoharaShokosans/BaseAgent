@@ -511,3 +511,15 @@ def test_the_size_of_everything_else_counts_toward_the_fold_trigger(state: Any) 
     large = PromptAssembler(big_memory, fold=folding(trigger=6000, keep=1))
     assert small.describe(grown)["stream"]["folded"] == 0
     assert large.describe(grown)["stream"]["folded"] > 0
+
+
+@pytest.mark.unit
+def test_the_built_in_system_prompt_keeps_the_security_protocol_and_the_working_method() -> None:
+    from agent_runtime.context import PromptLibrary
+
+    text = PromptLibrary().get("system")
+    assert "安全与数据隔离协议（最高优先级）" in text and "金丝雀" in text
+    # 工作流程：先确认需求，再判断要不要规划，子任务内循环，每一步汇报并带进度
+    for phrase in ("先确认需求", "先判断要不要规划", "规划", "确认", "执行", "评估", "进度："):
+        assert phrase in text
+    assert "websearch" in text and "update_plan" in text

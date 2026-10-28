@@ -14,7 +14,7 @@
 | `edit_file` | 对文件做精确的局部替换 | workspace_write | 否 | **建议新增** |
 | `update_plan` | 整体替换会话草稿里的计划 | read_only | 是 | **目标设计**，见 [计划与草稿](../02_runtime/05_plan_and_scratch.md) |
 | `note` | 向会话草稿追加事实或失败尝试 | read_only | 是（重复忽略） | **目标设计**，同上 |
-| `delegate_research` | 受控的外部检索 | read_only | 否 | 已有，见 [研究隔离区](../06_subagents/01_research_isolation.md) |
+| `websearch` | 受控的外部检索 | read_only | 否 | 已有，见 [websearch 工具](07_websearch_tool.md) |
 | `spawn_subagent` | 动态委派 | read_only（动作本身） | 否 | 已有，见 [动态委派](../06_subagents/02_dynamic_delegation.md) |
 
 `rag_search` 与 `delegate_code_search` 随 RAG 一起移除。

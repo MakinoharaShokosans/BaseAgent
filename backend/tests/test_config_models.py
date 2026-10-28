@@ -182,7 +182,7 @@ def test_bad_capability_value_is_rejected(reference: dict[str, Any]) -> None:
 
 @pytest.mark.unit
 def test_subagent_and_research_tier_must_exist(reference: dict[str, Any]) -> None:
-    _rejects(_set(reference, "research.model_tier", "turbo"), at="research.model_tier")
+    _rejects(_set(reference, "websearch.model_tier", "turbo"), at="websearch.model_tier")
     _rejects(_set(reference, "subagent.model_tier", "turbo"), at="subagent.model_tier")
 
 
@@ -272,7 +272,7 @@ def test_uncompilable_redaction_pattern_fails_at_load(reference: dict[str, Any])
 
 @pytest.mark.unit
 def test_subagent_must_deny_recursive_spawn(reference: dict[str, Any]) -> None:
-    _rejects(_set(reference, "subagent.denied_tools", ["delegate_research"]), at="subagent")
+    _rejects(_set(reference, "subagent.denied_tools", ["websearch"]), at="subagent")
 
 
 @pytest.mark.unit

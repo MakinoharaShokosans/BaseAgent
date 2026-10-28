@@ -90,7 +90,8 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 | `[context.*]` | 会话与任务级窗口、观察值裁剪、记忆、项目规则、提示词装配 | [03_context](../03_context/) |
 | `[tools.*]` | 文件工具与派发 | [内置工具](../04_tools/02_builtin_tools.md) |
 | `[services]` `[bash_shell]` `[web_search]` | sidecar 寻址、沙箱、检索与抓取安全 | [Shell 沙箱](../05_security/02_shell_sandbox.md)、[web_search](../04_tools/06_web_search_service.md) |
-| `[research]` `[subagent]` | 研究隔离区与动态委派 | [06_subagents](../06_subagents/) |
+| `[websearch]` | websearch 工具 | [07_websearch_tool](../04_tools/07_websearch_tool.md) |
+| `[subagent]` | 动态委派 | [06_subagents](../06_subagents/) |
 | `[skills]` `[permissions]` `[mcp]` | 技能、权限分级、MCP | [Skills](../04_tools/05_skills.md)、[权限分层](../05_security/01_permission_tiers.md)、[MCP](../04_tools/04_mcp.md) |
 | `[events]` `[tracing.*]` `[redaction]` | 事件、追踪、脱敏 | [08_observability](../08_observability/) |
 | `[security]` | 金丝雀与不可信输出扫描 | [信任与注入](../05_security/03_trust_and_injection.md) |

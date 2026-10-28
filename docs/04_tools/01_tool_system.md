@@ -102,7 +102,7 @@ class ToolResult(BaseModel):
 | 注册表 | `allow_untrusted` | 用途 |
 |---|---|---|
 | 主工具表 | 仅在有 MCP 工具时为真，且带逐名授权清单 | 主 Agent 的特权工具表 |
-| 隔离区工具表 | 真，清单为 `None` | 研究子智能体，唯一能装 `web_search` 的地方 |
+| 隔离区工具表 | 真，清单为 `None` | websearch 工具，唯一能装 `web_search` 的地方 |
 
 主工具表即使被误加入 `web_search`，也会在构造期抛 `ToolExecutionError`。"主 Agent 不接触原始外部内容"因此是代码强制的不变量。
 
@@ -175,7 +175,7 @@ async def dispatch(calls: Sequence[tuple[str, str, Mapping]]) -> list[Dispatched
 
 原则：缺少某个依赖时，**对应工具不注册**，模型根本看不到它，也就不会误调用一个不存在的能力。
 
-装配函数**刻意不含 `web_search`**。外部信息的唯一入口是研究子智能体，见 [06_subagents](../06_subagents/)。
+装配函数**刻意不含 `web_search`**。外部信息的唯一入口是websearch 工具，见 [06_subagents](../06_subagents/)。
 
 ### 10.1 工具集在会话内保持稳定
 

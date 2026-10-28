@@ -29,7 +29,7 @@ required_tools: [bash]
 |---|---|
 | 写文件 | 用 `write_file` 或 `edit_file`，不要 `echo > file` / `cat <<EOF > file` |
 | 删除 | 删单个具体文件，避免 `rm -rf` 加通配 |
-| 联网 | 不要自己 `curl`；外部资料用 `delegate_research` |
+| 联网 | 不要自己 `curl`；外部资料用 `websearch` |
 | 安装依赖 | 需要审批；先确认确实缺依赖（读 `pyproject.toml`、`package.json`） |
 | `git push`、`sudo`、`docker` | 需要全权限审批 |
 

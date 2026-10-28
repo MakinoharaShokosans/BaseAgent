@@ -26,10 +26,10 @@
 | `read_artifact` | 内置（新增） | trusted | read_only | 取回被裁剪的输出 |
 | `bash` | 内置，经 `bash_shell` sidecar | trusted | 按命令分类 | |
 | `load_skill` | 内置 | trusted | read_only | |
-| `delegate_research` | 研究隔离区入口 | trusted 接口，输出不可信 | read_only | 内部使用 `web_search` |
+| `websearch` | websearch 工具入口 | trusted 接口，输出不可信 | read_only | 内部使用 `web_search` |
 | `spawn_subagent` | 动态委派 | 输出覆盖为 untrusted | read_only（动作本身） | |
 | `mcp__*` | MCP 适配器 | untrusted | 未知工具，默认 full_permissions | |
-| `web_search` | 仅研究隔离区 | untrusted | — | 不在主工具表 |
+| `web_search` | 仅websearch 工具 | untrusted | — | 不在主工具表 |
 
 ## 本目录发现的主要问题
 

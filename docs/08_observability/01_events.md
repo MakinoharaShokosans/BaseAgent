@@ -31,7 +31,7 @@
 | 工具 | `tool.call` | 主循环 | 回复提交后，每个调用一条 |
 | | `tool.result` | 主循环 | 结果追加提交后，每条观察值一条 |
 | 模型 | `llm.call` | **LLM 网关** | 每次模型调用（含重试与降级） |
-| 研究 | `research.started` / `.round` / `.finished` | 研究运行器 | |
+| 研究 | `websearch.started` / `.round` / `.finished` | 研究运行器 | |
 | 子智能体 | `subagent.started` / `.step` / `.tool` / `.blocked` / `.finished` | 子智能体运行器 | |
 | 传输 | `heartbeat` | SSE 层 | 空闲时周期发送，**不带 `seq`** |
 

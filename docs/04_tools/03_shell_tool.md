@@ -81,7 +81,7 @@ bash(command, timeout_sec?)
 |---|---|
 | 写文件 | 用 `write_file` 或 `edit_file`，不要 `echo > file` / `cat <<EOF > file`（后者依赖重定向，被归为写入类，且容易转义出错） |
 | 删除 | 删单个具体文件，避免 `rm -rf` 加通配 |
-| 联网 | 不要自己 `curl`；外部资料走 `delegate_research`。网络命令需要全权限审批 |
+| 联网 | 不要自己 `curl`；外部资料走 `websearch`。网络命令需要全权限审批 |
 | 安装依赖 | 需要审批。先确认确实缺依赖（读 `pyproject.toml`、`package.json`） |
 | `git push`、`sudo`、`docker` | 全权限，需要审批 |
 | 绕过 | 被拒绝后**不要**换个写法重试（拆分命令、改写参数、借脚本间接执行）。系统会把这视为违规，应改用合规方案或如实报告 |

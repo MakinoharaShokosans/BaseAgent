@@ -210,6 +210,7 @@ class Application:
             dependency_checks=self._dependency_checks,
             prompts=self.factory.library,
             compact_session=self.factory.flow.compact,
+            context_inspector=self.factory.inspect_context,
         )
 
     def _model_listing(self) -> list[dict[str, Any]]:

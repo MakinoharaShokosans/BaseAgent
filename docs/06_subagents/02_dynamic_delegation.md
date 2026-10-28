@@ -1,6 +1,6 @@
 # 动态委派
 
-主 Agent 可以用 `spawn_subagent` 临时组建一个受限的子劳动力，去完成一个需要阅读大量材料、但只需回流简短结论的子任务。与研究隔离区不同，它的工具集与权限是**每次派发时动态决定**的。
+主 Agent 可以用 `spawn_subagent` 临时组建一个受限的子劳动力，去完成一个需要阅读大量材料、但只需回流简短结论的子任务。与websearch 工具不同，它的工具集与权限是**每次派发时动态决定**的。
 
 ## 1. 要解决的问题
 
@@ -25,7 +25,7 @@
 
 ### 2.2 `denied_tools` 的作用
 
-默认黑名单包括 `spawn_subagent`、`delegate_research`、`delegate_code_search`（后者随 RAG 移除）。这是两件事的硬防线：防止套娃，防止模型嵌套调用模型造成不可控的循环。深度限制与黑名单双重保证。
+默认黑名单包括 `spawn_subagent`、`websearch`、`delegate_code_search`（后者随 RAG 移除）。这是两件事的硬防线：防止套娃，防止模型嵌套调用模型造成不可控的循环。深度限制与黑名单双重保证。
 
 ## 3. 派发流程
 
@@ -135,7 +135,7 @@ max_observation_chars = 4000 # 子级单条观察值，内存截断不落盘
 max_answer_chars = 400
 max_citations = 8
 max_report_chars = 3000
-denied_tools = ["spawn_subagent", "delegate_research", "delegate_code_search"]
+denied_tools = ["spawn_subagent", "websearch", "delegate_code_search"]
 ```
 
 `enabled=false` 时主 Agent 没有动态委派能力。

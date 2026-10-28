@@ -161,7 +161,7 @@ def to_record(event: Event) -> dict[str, Any] | None:
             "ok": d.get("outcome") == "ok",
             "error_class": d.get("error", ""),
         }
-    if name.startswith(("research.", "subagent.")):
+    if name.startswith(("websearch.", "subagent.")):
         return {**base, "type": "subagent", "event": name, **d}
     if name == "task.finished":
         return {
