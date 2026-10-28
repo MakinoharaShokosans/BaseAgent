@@ -28,6 +28,9 @@ def _fence_for(code: str) -> str:
     return "`" * max(3, longest + 1)
 
 
+_MAX_SOURCES_LISTED = 8
+
+
 def render_report(report: WebSearchReport, *, max_chars: int, envelope: bool = True) -> str:
     """``envelope=False``：交给编排层统一加不可信信封（避免信封套信封，内层标签会被外层破坏）。"""
     lines: list[str] = [_PREAMBLE, ""]
@@ -56,6 +59,11 @@ def render_report(report: WebSearchReport, *, max_chars: int, envelope: bool = T
             ]
     if report.unresolved:
         lines += ["", "## 未解决的问题"] + [f"- {u}" for u in report.unresolved]
+    if report.sources:
+        lines += ["", "## 读取过的页面"]
+        for src in report.sources[:_MAX_SOURCES_LISTED]:
+            mark = "" if src.status == "OK" else f"（{src.status}，没读到正文）"
+            lines.append(f"- {src.title or src.url}：{src.url}{mark}")
     if report.warnings:
         lines += ["", "## 护栏标注"] + [f"- {w}" for w in report.warnings]
     lines += [

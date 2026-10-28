@@ -86,6 +86,8 @@ class ToolRunnerDeps:
     bind: Callable[[AgentState], None] | None = None
     #: ``mcp_call`` 代理；没有延迟工具时为 None
     proxy: McpProxy | None = None
+    #: 参数校验：（状态，调用）→ 失败说明；返回 None 表示放行。在代理解析之后、权限闸门之前
+    guards: tuple[Callable[[AgentState, ToolCall], str | None], ...] = ()
 
 
 _HANDLE = re.compile(r"artifact://([A-Za-z0-9_.-]+)")
@@ -231,9 +233,16 @@ def make_tool_runner(
 def _resolve(deps: ToolRunnerDeps, state: AgentState, call: ToolCall) -> Resolved:
     if _is_unusable(call):
         return Resolved(call.name, call.args, MALFORMED_NOTICE)
-    if deps.proxy is None:
-        return Resolved(call.name, call.args)
-    return deps.proxy.resolve(state, call)
+    resolved = (
+        Resolved(call.name, call.args) if deps.proxy is None else deps.proxy.resolve(state, call)
+    )
+    if resolved.error:
+        return resolved
+    target = ToolCall(id=call.id, name=resolved.name, args=resolved.args)
+    for guard in deps.guards:
+        if (problem := guard(state, target)) is not None:
+            return Resolved(resolved.name, resolved.args, problem)
+    return resolved
 
 
 async def _dispatch(

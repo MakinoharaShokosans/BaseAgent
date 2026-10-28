@@ -260,10 +260,23 @@ def build_report(
 
 @dataclass(frozen=True, slots=True)
 class WebSearchRequest:
+    """一次联网搜索：要查什么（``query``）和/或要读哪些网页（``urls``）。
+
+    ``topic`` 只是给规划器与事件用的一句话标签；``questions`` 是要回答的问题，
+    没给时由工具补一条默认的。
+    只给 ``urls`` 时不搜索，只读这些页面；给了 ``query``（或两者都没给）时才检索。
+    """
+
     topic: str
     questions: tuple[str, ...]
     max_sources: int | None = None
     task_id: str = "websearch"
+    query: str = ""
+    urls: tuple[str, ...] = ()
+
+    @property
+    def search_enabled(self) -> bool:
+        return bool(self.query) or not self.urls
 
 
 @dataclass(frozen=True, slots=True)

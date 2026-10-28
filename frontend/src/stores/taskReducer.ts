@@ -287,7 +287,10 @@ function describeAgent(event: ServerEvent): { name: string; text: string; tone: 
       return {
         name,
         tone: 'info',
-        text: `开始研究：${str(event['topic'])}（${num(event['questions'])} 个问题）`,
+        text:
+          `开始联网搜索：${str(event['topic'])}` +
+          (num(event['urls']) ? `，读取 ${num(event['urls'])} 个网址` : '') +
+          (num(event['questions']) ? `（${num(event['questions'])} 个问题）` : ''),
       };
     case 'websearch.round':
       return {

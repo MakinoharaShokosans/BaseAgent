@@ -114,7 +114,9 @@ async def test_a_line_range_is_inclusive_and_one_based(root: Path) -> None:
     out = await ViewFileTool(root, limits()).invoke(
         {"path": "a.txt", "start_line": 3, "end_line": 4}
     )
-    assert [ln.split("\t")[1] for ln in out.content.splitlines()] == ["l3", "l4"]
+    first, *lines = out.content.splitlines()
+    assert first == "[a.txt · 共 10 行]"
+    assert [ln.split("\t")[1] for ln in lines] == ["l3", "l4"]
 
 
 @pytest.mark.unit
@@ -157,7 +159,6 @@ async def test_a_start_beyond_the_end_fails_and_says_how_long_the_file_is(root: 
     "args",
     [
         {"path": "a.txt", "start_line": 0},
-        {"path": "a.txt", "start_line": -2},
         {"path": "a.txt", "start_line": "x"},
         {"path": "a.txt", "start_line": True},
         {"path": "a.txt", "start_line": 4, "end_line": 2},
@@ -212,7 +213,7 @@ async def test_a_big_file_is_refused_without_a_range_but_readable_with_one(root:
     assert not whole.ok and "start_line" in (whole.error or "")
     part = await tool.invoke({"path": "log.txt", "start_line": 200, "end_line": 202})
     assert part.ok
-    assert [ln.split("\t")[1] for ln in part.content.splitlines()] == [
+    assert [ln.split("\t")[1] for ln in part.content.splitlines()[1:]] == [
         "line 0199",
         "line 0200",
         "line 0201",
@@ -233,7 +234,111 @@ async def test_a_file_without_a_trailing_newline_and_an_empty_file(root: Path) -
 async def test_crlf_files_show_clean_lines(root: Path) -> None:
     put(root, "w.txt", b"a\r\nb\r\n")
     out = await ViewFileTool(root, limits()).invoke({"path": "w.txt"})
-    assert out.content.splitlines() == ["     1\ta", "     2\tb"]
+    # 行本身是干净的（没有 \r），换行风格在开头的说明行里
+    assert out.content.splitlines() == ["[w.txt · CRLF]", "     1\ta", "     2\tb"]
+
+
+@pytest.mark.unit
+async def test_a_negative_start_line_reads_from_the_end_with_true_line_numbers(root: Path) -> None:
+    put(root, "log.txt", "".join(f"l{i}\n" for i in range(1, 21)))
+    out = await ViewFileTool(root, limits()).invoke({"path": "log.txt", "start_line": -3})
+    assert out.content.splitlines() == [
+        "[log.txt · 共 20 行]",
+        "    18\tl18",
+        "    19\tl19",
+        "    20\tl20",
+    ]
+
+
+@pytest.mark.unit
+async def test_pattern_returns_only_matching_lines_with_context_and_the_total(root: Path) -> None:
+    put(root, "a.py", "".join(f"line {i}\n" for i in range(1, 31)) + "def target():\n    pass\n")
+    out = await ViewFileTool(root, limits(view_max_file_bytes=10_000)).invoke(
+        {"path": "a.py", "pattern": r"def \w+\(", "context": 1}
+    )
+    assert out.ok
+    assert out.content.splitlines() == [
+        "    30-\tline 30",
+        "    31:\tdef target():",
+        "    32-\t    pass",
+        "[共 1 行匹配]",
+    ]
+
+
+@pytest.mark.unit
+async def test_pattern_groups_are_separated_and_the_cap_is_reported(root: Path) -> None:
+    put(root, "a.txt", "".join(f"{'hit' if i % 4 == 0 else 'x'} {i}\n" for i in range(1, 41)))
+    tool = ViewFileTool(root, limits(view_max_lines=3, view_max_file_bytes=10_000))
+    out = await tool.invoke({"path": "a.txt", "pattern": "^hit", "context": 1})
+    assert "--" in out.content.splitlines()
+    assert (
+        out.is_truncated is True
+        and "共 10 行匹配" in out.content
+        and "只显示前 3 行" in out.content
+    )
+    none = await tool.invoke({"path": "a.txt", "pattern": "nope"})
+    assert none.ok and "没有匹配（共 40 行）" in none.content
+
+
+@pytest.mark.unit
+async def test_a_bad_pattern_is_a_failure_and_ignore_case_and_fixed_work(root: Path) -> None:
+    put(root, "a.txt", "Foo(bar)\nfoo\n")
+    tool = ViewFileTool(root, limits())
+    assert not (await tool.invoke({"path": "a.txt", "pattern": "("})).ok
+    assert (
+        "共 2 行匹配"
+        in (await tool.invoke({"path": "a.txt", "pattern": "FOO", "ignore_case": True})).content
+    )
+    literal = await tool.invoke({"path": "a.txt", "pattern": "(bar)", "fixed": True})
+    assert literal.ok and "共 1 行匹配" in literal.content
+
+
+@pytest.mark.unit
+async def test_show_whitespace_reveals_tabs_trailing_spaces_and_line_endings(root: Path) -> None:
+    put(root, "w.txt", b"a\tb  \r\nc\n")
+    out = await ViewFileTool(root, limits()).invoke({"path": "w.txt", "show_whitespace": True})
+    lines = out.content.splitlines()
+    assert lines[0].startswith("[w.txt") and "换行混合" in lines[0]
+    assert lines[1] == "     1\ta→b··␍⏎" and lines[2] == "     2\tc⏎"
+
+
+@pytest.mark.unit
+async def test_the_header_names_encoding_bom_and_a_missing_final_newline(root: Path) -> None:
+    put(root, "bom.txt", b"\xef\xbb\xbfhello\nworld")
+    out = await ViewFileTool(root, limits()).invoke({"path": "bom.txt"})
+    assert out.content.splitlines()[0] == "[bom.txt · UTF-8 BOM · 末尾无换行]"
+    assert out.content.splitlines()[1] == "     1\thello"  # BOM 不进正文
+    put(root, "gbk.txt", "你好，世界\n".encode("gb18030"))
+    gbk = await ViewFileTool(root, limits()).invoke({"path": "gbk.txt"})
+    assert "GB18030" in gbk.content and "你好，世界" in gbk.content
+
+
+@pytest.mark.unit
+async def test_lone_cr_and_unicode_separators_split_lines_the_same_way_everywhere(
+    root: Path,
+) -> None:
+    put(root, "m.txt", "a\rb\x0cc\u2028d\n")
+    out = await ViewFileTool(root, limits()).invoke({"path": "m.txt"})
+    rows = [ln.split("\t", 1) for ln in out.content.split("\n")[1:]]  # 不能用 splitlines
+    assert [r[0].strip() for r in rows] == [
+        "1",
+        "2",
+    ]  # 只有 \r 与 \n 切行；换页符与 U+2028 留在行内
+
+
+@pytest.mark.unit
+async def test_a_huge_line_is_clipped_with_its_length(root: Path) -> None:
+    put(root, "min.js", "x" * 5000 + "\nok\n")
+    out = await ViewFileTool(root, limits(view_max_file_bytes=10_000)).invoke({"path": "min.js"})
+    first = out.content.splitlines()[0]
+    assert "该行共 5000 字符，已截断" in first and len(first) < 2200
+
+
+@pytest.mark.unit
+async def test_view_of_a_big_file_with_a_pattern_needs_no_range(root: Path) -> None:
+    put(root, "log.txt", "".join(f"line {i:04d}\n" for i in range(300)))  # 3000 字节 > 1000
+    out = await ViewFileTool(root, limits()).invoke({"path": "log.txt", "pattern": "line 0150"})
+    assert out.ok and "   151:\tline 0150" in out.content
 
 
 # ==============================================================================
@@ -368,3 +473,24 @@ async def test_a_backup_that_cannot_be_made_stops_the_overwrite(root: Path, tmp_
     )
     assert not out.ok and "备份" in (out.error or "")
     assert (root / "a.txt").read_text() == "PRECIOUS"
+
+
+@pytest.mark.unit
+async def test_overwriting_a_crlf_file_keeps_crlf_and_a_bom(root: Path) -> None:
+    put(root, "w.txt", b"\xef\xbb\xbfa\r\nb\r\n")
+    out = await WriteFileTool(root, limits()).invoke({"path": "w.txt", "content": "x\ny\n"})
+    assert out.ok and "CRLF" in out.content and "BOM" in out.content
+    assert (root / "w.txt").read_bytes() == b"\xef\xbb\xbfx\r\ny\r\n"
+
+
+@pytest.mark.unit
+async def test_line_ending_can_be_forced_and_new_files_are_untouched(root: Path) -> None:
+    tool = WriteFileTool(root, limits())
+    await tool.invoke({"path": "new.txt", "content": "a\nb\n"})
+    assert (root / "new.txt").read_bytes() == b"a\nb\n"
+    await tool.invoke({"path": "new.txt", "content": "a\nb\n", "line_ending": "crlf"})
+    assert (root / "new.txt").read_bytes() == b"a\r\nb\r\n"
+    await tool.invoke({"path": "new.txt", "content": "a\r\nb\r\n", "line_ending": "lf"})
+    assert (root / "new.txt").read_bytes() == b"a\nb\n"
+    bad = await tool.invoke({"path": "x.txt", "content": "a", "line_ending": "weird"})
+    assert not bad.ok

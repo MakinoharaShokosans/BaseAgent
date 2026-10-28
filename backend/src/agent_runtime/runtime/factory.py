@@ -33,6 +33,7 @@ from agent_runtime.loop import (
     make_tool_runner,
     scratch_tools,
 )
+from agent_runtime.loop.urls import check_urls
 from agent_runtime.memory import SYSTEM_PROMPT_KEY, MemoryStore, SessionPreferences
 from agent_runtime.observability import EventHub, Redactor
 from agent_runtime.runtime.assembly import (
@@ -277,6 +278,7 @@ class RuntimeFactory:
                 envelope=observation_envelope,
                 bind=lambda s: artifacts.bind(s.artifacts),
                 proxy=McpProxy(deferred, pinned) if deferred else None,
+                guards=(check_urls,),
             )
         )
         return TaskRuntime(

@@ -264,4 +264,17 @@ describe('reduceTaskEvent', () => {
       progress: null,
     });
   });
+
+  it('describes a web search by what was asked: a topic, urls, or both', () => {
+    seq = 0;
+    const state = replay([
+      ev('websearch.started', { topic: 'django 迁移', questions: 2, urls: 0 }),
+      ev('websearch.started', { topic: '读取指定网页：docs.example', questions: 0, urls: 2 }),
+    ]);
+    const texts = state.items.flatMap((i) => (i.kind === 'agent' ? [i.text] : []));
+    expect(texts).toEqual([
+      '开始联网搜索：django 迁移（2 个问题）',
+      '开始联网搜索：读取指定网页：docs.example，读取 2 个网址',
+    ]);
+  });
 });

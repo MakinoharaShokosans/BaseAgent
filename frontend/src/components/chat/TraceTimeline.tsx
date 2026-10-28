@@ -75,12 +75,28 @@ function Row({
   );
 }
 
+/** 工具调用的一行摘要：优先显示最能说明“在做什么”的那个参数，而不是整段 JSON */
+function summarizeArgs(args: Record<string, unknown>): string {
+  const first = (key: string) => (typeof args[key] === 'string' ? (args[key] as string) : null);
+  const urls = Array.isArray(args['urls'])
+    ? (args['urls'] as unknown[]).filter((u) => typeof u === 'string')
+    : [];
+  const pattern = first('pattern');
+  const path = first('path');
+  if (pattern && path) return `${pattern}  ·  ${path}`;
+  return (
+    pattern ??
+    first('query') ??
+    (urls.length ? `${urls[0]}${urls.length > 1 ? ` 等 ${urls.length} 个网址` : ''}` : null) ??
+    path ??
+    JSON.stringify(args)
+  );
+}
+
 function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(false);
   const command = typeof item.args['command'] === 'string' ? item.args['command'] : null;
-  const summary =
-    command ??
-    (typeof item.args['path'] === 'string' ? item.args['path'] : JSON.stringify(item.args));
+  const summary = command ?? summarizeArgs(item.args);
   const Icon =
     item.tool === 'bash'
       ? TerminalGlyph

@@ -153,12 +153,34 @@ edit_file(path, old_string, new_string, replace_all=false)
 3. `write_file` 的备份目录没有清理策略，依赖产物目录的整体保留期。
 
 
-## 13. edit_file、list_dir、grep 的实现
+## 13. 文件类工具的专业能力
 
-- **`edit_file`**：`old_string` 必须恰好出现一次，否则失败并说明出现次数与行号；`replace_all` 替换全部。零匹配时给出最接近的一行与行号。文件是 CRLF 而 `old_string` 不是时，按文件的换行风格转换后再匹配。原子写、保留权限位、覆盖前备份（备份失败则不写）。修改后超过 `write_max_bytes` 失败。
-- **`list_dir`**：目录在前、深度 1-6（缺省 2）、条数上限取配置；忽略 `tools.files.ignored_dirs` 与隐藏项；指向工作区外的符号链接不展示。
-- **`grep`**：纯 Python 正则（不依赖 `rg`，行为确定），支持 `glob`、`context`（0-5）、`ignore_case`、`fixed`；跳过噪音目录、二进制文件与超过 `view_max_file_mb` 的文件；命中数与 10 秒预算双重上限，截断时提示；不跟随指向工作区外的链接。输出 `路径:行号:内容`，上下文行用 `-` 分隔。
-- 三者的权限判定都是确定的（`list_dir`、`grep` 是只读，`edit_file` 是工作区写入），不依赖对命令文本的分类。
+共用底层 `tools/builtin/textio.py`：编码嗅探（UTF-8、带 BOM 的 UTF-8、UTF-16、GB18030，都不行才按 UTF-8 替换）、换行统计、统一的行切分、通配符转正则。**所有工具对“一行”的理解一致**：行以 CRLF、LF、CR 结尾，垂直制表符、换页符、U+2028 不切行（`str.splitlines` 会切，导致 grep 与 view_file 的行号对不上），所以 `grep` 给出的行号可以直接用在 `view_file` 与 `edit_file` 的 `start_line` 上。
+
+- **`view_file`**：
+  - `start_line`/`end_line` 指定范围；`start_line` 为负数表示倒数（`-50` 读最后 50 行，日志）。
+  - `pattern`（正则）在文件内搜索，只返回命中行（`行号:`）与 `context` 行（`行号-`，0-10），并给出命中总数；大文件不必给范围也能搜。`ignore_case`、`fixed` 同 grep。
+  - `show_whitespace=true`：制表符显示 `→`、行尾空格 `·`、每行换行 `⏎`（CRLF 为 `␍⏎`，裸 CR 为 `␍`），用来查缩进与换行。
+  - 文件不是 UTF-8、带 BOM、换行不是 LF（含混合时各多少行）、末尾没有换行、或读的是片段时，开头多一行说明：`[路径 · UTF-8 BOM · CRLF · 末尾无换行 · 共 N 行]`。普通 LF 文件整读时不加，输出与以前一致。
+  - 单行超过 2000 字符截断并标出原长度（压缩后的 JS、单行 JSON 不会撑爆上下文）。
+- **`write_file`**：覆盖已有文件时默认**沿用原文件的换行风格与 BOM**（`line_ending: keep`）：原文件是 CRLF 而 `content` 里只有 `\n`，按 CRLF 写入，避免整文件的换行被悄悄改掉；`lf`、`crlf` 显式转换。新文件按内容原样写。
+- **`edit_file`**：
+  - 默认：`old_string` 必须恰好出现一次，否则失败并说明出现次数与行号；`replace_all` 替换全部；多行文本直接写。零匹配时给出最接近的一行，换行混合的文件会点明。
+  - `regex=true`：`old_string` 是正则（`^`、`$` 按行，`.` 默认不跨行，`dotall` 才跨行，`ignore_case`），`new_string` 里 `\1`、`\g<名字>` 引用捕获组；匹配多处且没给 `replace_all` 同样失败并列出行号。
+  - `start_line`/`end_line`：把匹配限制在行范围内，在重复文本里定位。
+  - `edits[]`：一次传多处修改（每项可带 `replace_all`、`regex`、`start_line`、`end_line`），在内存里按序应用，**任何一处失败就一处都不写**，错误指明 `edits[i]`。
+  - 纯 CRLF 文件在内存里按 LF 处理再按 CRLF 写回，所以模型写 `\n` 或 `\r\n` 都能匹配；BOM 保留；非 UTF-8 文件拒绝编辑。
+  - 成功后返回**统一差异预览**（前后各 2 行上下文，至多 40 行），直接用来核对，不必再读一遍文件。
+  - 原子写、保留权限位、覆盖前备份（备份失败则不写）、修改后超过 `write_max_bytes` 失败。
+- **`list_dir`**：默认目录在前、深度 1-6（缺省 2）。`pattern`（通配符）改为按文件名或路径找文件，平铺列出相对路径，不受深度限制；`details=true` 附文件大小。忽略 `tools.files.ignored_dirs` 与隐藏项；指向工作区外的链接不展示。
+- **`grep`**：纯 Python 正则（不依赖 `rg`，行为确定）。
+  - `output_mode`：`content`（`路径:行号:内容`，上下文行用 `-`）、`files`（只列有命中的文件，大范围摸底）、`count`（每文件命中数）。
+  - `multiline=true`：模式可以跨行（`\n`、`[\s\S]`），命中的每一行都输出。
+  - `glob`/`exclude_glob`：`*.py` 只匹配文件名，含 `/` 的（`src/**/*.{ts,tsx}`）匹配相对路径；`*` 不跨目录、`**` 跨目录、`?`、`{a,b}`。
+  - `context`（0-10），或 `before`、`after` 分别指定；`ignore_case`、`fixed`。
+  - `max_results` 与 `offset` 分页：被截断时提示下一页的 `offset`。遍历顺序是路径字典序，所以翻页稳定。
+  - 跳过噪音目录、二进制文件与超过 `view_max_file_mb` 的文件，非 UTF-8 文件按嗅探到的编码搜索；10 秒预算；不跟随指向工作区外的链接。
+- 权限判定都是确定的（`view_file`、`list_dir`、`grep` 只读，`write_file`、`edit_file` 是工作区写入），不依赖对命令文本的分类。
 
 ## 14. 写入后的即时语法诊断
 

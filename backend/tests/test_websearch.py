@@ -651,10 +651,15 @@ async def test_calls_per_task_are_limited() -> None:
     "args",
     [
         {},
-        {"topic": "t"},
-        {"topic": "", "questions": ["q"]},
-        {"topic": "t", "questions": []},
-        {"topic": "t", "questions": [1, ""]},
+        {"questions": ["q"]},  # 既没有 query 也没有 urls
+        {"query": "  ", "questions": ["q"]},
+        {"query": "t", "questions": "not a list"},
+        {"query": "t", "urls": "https://a.example"},
+        {"urls": ["ftp://a.example/x"]},
+        {"urls": ["file:///etc/passwd"]},
+        {"urls": ["https://user:pw@a.example/x"]},
+        {"urls": [""]},
+        {"urls": [1]},
     ],
 )
 async def test_bad_arguments_fail_without_calling_the_model(args: dict[str, Any]) -> None:
@@ -674,6 +679,81 @@ async def test_an_empty_report_is_a_failure_observation_without_raw_text() -> No
 
 
 @pytest.mark.unit
-def test_the_tool_schema_takes_intent_not_urls() -> None:
+def test_the_tool_schema_takes_a_query_and_or_urls() -> None:
     schema = tool_for(Gateway([], GOOD), Search({})).schema()
-    assert set(schema.parameters["properties"]) == {"topic", "questions", "max_sources"}
+    assert set(schema.parameters["properties"]) == {"query", "urls", "questions", "max_sources"}
+    assert "required" not in schema.parameters  # query 与 urls 至少一个，由工具校验
+
+
+@pytest.mark.unit
+async def test_a_query_alone_searches_and_the_old_topic_name_still_works() -> None:
+    for args in ({"query": "django"}, {"topic": "django", "questions": ["怎么回滚迁移？"]}):
+        search = Search({"django": [page("https://docs.example/a")]})
+        tool = tool_for(Gateway([QueryPlan(queries=["django"])], GOOD), search)
+        assert (await tool.invoke(args)).ok and search.calls  # 搜了
+
+
+@pytest.mark.unit
+async def test_urls_alone_read_those_pages_without_searching_or_planning() -> None:
+    search = Search(
+        {"x": [page("https://docs.example/a", "页面正文"), page("https://docs.example/b")]}
+    )
+    gateway = Gateway([], GOOD)
+    result = await tool_for(gateway, search).invoke(
+        {"urls": ["https://docs.example/a", "https://docs.example/b"], "questions": ["怎么回滚？"]}
+    )
+    assert (
+        result.ok
+        and search.calls == []
+        and search.fetched
+        == [
+            "https://docs.example/a",
+            "https://docs.example/b",
+        ]
+    )
+    assert [r.purpose for r in gateway.requests] == ["websearch_extract"]  # 没有规划
+    assert "## 读取过的页面" in result.content and "https://docs.example/b" in result.content
+
+
+@pytest.mark.unit
+async def test_urls_without_questions_get_a_default_summary_question() -> None:
+    search = Search({"x": [page("https://docs.example/a")]})
+    gateway = Gateway([], GOOD)
+    await tool_for(gateway, search).invoke({"urls": ["https://docs.example/a"]})
+    body = gateway.requests[0].messages[1].content
+    assert "主要内容与关键信息" in body and "读取指定网页：docs.example" in body
+
+
+@pytest.mark.unit
+async def test_urls_and_a_query_together_read_first_then_search_for_more() -> None:
+    search = Search(
+        {
+            "django": [page("https://docs.example/b")],
+            "seed": [page("https://docs.example/a")],
+        }
+    )
+    gateway = Gateway([QueryPlan(queries=["django"])], GOOD)
+    result = await tool_for(gateway, search).invoke(
+        {"query": "django", "urls": ["https://docs.example/a"]}
+    )
+    assert (
+        result.ok
+        and search.fetched[0] == "https://docs.example/a"
+        and search.calls == ["django", "django"][:1]
+    )
+    assert "https://docs.example/b" in search.fetched
+
+
+@pytest.mark.unit
+async def test_unreadable_urls_are_listed_with_their_status_and_at_most_five_are_taken() -> None:
+    bad = Evidence("https://docs.example/403", "", "", "BLOCKED")
+    search = Search({"x": [bad, page("https://docs.example/ok")]})
+    result = await tool_for(Gateway([], GOOD), search).invoke(
+        {"urls": ["https://docs.example/403", "https://docs.example/ok"]}
+    )
+    assert result.ok
+    assert "https://docs.example/403（BLOCKED，没读到正文）" in result.content
+    seven = [f"https://docs.example/p{i}" for i in range(7)]
+    wide = Search({"x": [page(u) for u in seven]})
+    await tool_for(Gateway([], GOOD), wide).invoke({"urls": seven})
+    assert len(wide.fetched) <= 3  # 受 max_sources 上限约束（测试配置为 3）

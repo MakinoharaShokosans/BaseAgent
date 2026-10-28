@@ -102,10 +102,13 @@ class WebSearchRunner:
                 {
                     "topic": request.topic,
                     "questions": len(request.questions),
+                    "urls": len(request.urls),
                     "max_sources": self._cap(request),
                 },
             )
-            while rounds < self._limits.max_rounds:
+            if request.urls:
+                await self._read_urls(request, evidence, budget, warnings)
+            while request.search_enabled and rounds < self._limits.max_rounds:
                 if _usable(evidence) >= self._cap(request):
                     break
                 if budget.remaining_wall_sec <= self._reserve:
@@ -171,6 +174,37 @@ class WebSearchRunner:
         return report
 
     # ------------------------------------------------------------------ 步骤
+
+    async def _read_urls(
+        self,
+        request: WebSearchRequest,
+        evidence: dict[str, Evidence],
+        budget: ChildUsage,
+        warnings: list[str],
+    ) -> None:
+        """直接读调用方给的网址（来源已由工具包装层校验过）；失败的页面留在来源清单里并说明原因。"""
+        window = budget.remaining_wall_sec - self._reserve
+        if window <= 0:
+            return
+        wanted = [Evidence(u, "", "", "SNIPPET") for u in request.urls[: self._cap(request)]]
+        try:
+            fetched = await asyncio.wait_for(self._search.fetch(wanted, request.task_id), window)
+        except TimeoutError:
+            warnings.append("读取指定网页超时")
+            return
+        except Exception as exc:
+            logger.warning("读取指定网页失败：{}", type(exc).__name__)
+            warnings.append(f"读取指定网页失败（{type(exc).__name__}）")
+            return
+        for item in fetched:
+            if item.url and item.url not in evidence:
+                text = item.text[: self._limits.max_source_chars]
+                evidence[item.url] = Evidence(
+                    item.url, item.title, text, item.status, item.artifact_id
+                )
+        failed = [e for e in evidence.values() if e.status != "OK"]
+        if failed:
+            warnings.append(f"{len(failed)} 个网页没能读到正文（{failed[0].status}）")
 
     def _cap(self, request: WebSearchRequest) -> int:
         """请求值与配置上限取小，主 Agent 不能把来源数抬高。"""
