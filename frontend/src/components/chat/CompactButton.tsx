@@ -28,6 +28,7 @@ export function CompactButton({ sessionId, disabled }: { sessionId: string; disa
     onSuccess: async (result) => {
       setShown(result);
       await client.invalidateQueries({ queryKey: ['smemory', sessionId] });
+      await client.invalidateQueries({ queryKey: ['context', sessionId] });
     },
     onError: (error) => {
       const e = error as { message?: string; traceId?: string };

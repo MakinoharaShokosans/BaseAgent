@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ServerEvent } from '../types/api';
-import { emptyRun, reduceTaskEvent, type RunState } from './taskReducer';
+import { parseSay, emptyRun, reduceTaskEvent, type RunState } from './taskReducer';
 
 let seq = 0;
 const ev = (event: string, extra: Record<string, unknown> = {}, at?: number): ServerEvent => ({
@@ -172,9 +172,9 @@ describe('reduceTaskEvent', () => {
   it('describes research and subagent progress, and highlights blocked attempts', () => {
     seq = 0;
     const state = replay([
-      ev('research.started', { topic: 'django', questions: 2 }),
-      ev('research.round', { round: 1, fetched: 3, evidence: 3 }),
-      ev('research.finished', { rounds: 1, sources: 3, findings: 2, tokens: 300 }),
+      ev('websearch.started', { topic: 'django', questions: 2 }),
+      ev('websearch.round', { round: 1, fetched: 3, evidence: 3 }),
+      ev('websearch.finished', { rounds: 1, sources: 3, findings: 2, tokens: 300 }),
       ev('subagent.started', { role: 'reader', token_budget: 5000, max_steps: 4 }),
       ev('subagent.tool', { tool: 'view_file', ok: true, summary: '成功，120 字符' }),
       ev('subagent.blocked', {
@@ -201,18 +201,67 @@ describe('reduceTaskEvent', () => {
   it('shows why a research round came back empty instead of just "0 new sources"', () => {
     seq = 0;
     const state = replay([
-      ev('research.round', {
+      ev('websearch.round', {
         round: 1,
         fetched: 0,
         evidence: 0,
         errors: ['搜索被拦截：限流', '检索请求失败（TimeoutError）', '第三条不显示'],
       }),
-      ev('research.round', { round: 2, fetched: 2, evidence: 2, errors: [] }),
+      ev('websearch.round', { round: 2, fetched: 2, evidence: 2, errors: [] }),
     ]);
     const texts = state.items.flatMap((i) => (i.kind === 'agent' ? [i.text] : []));
     expect(texts[0]).toBe(
       '第 1 轮检索，取到 0 个新来源（累计 0），检索出错：搜索被拦截：限流；检索请求失败（TimeoutError）',
     );
     expect(texts[1]).toBe('第 2 轮检索，取到 2 个新来源（累计 2）');
+  });
+
+  it("turns the model's remarks before tool calls into timeline narration, not the final reply", () => {
+    seq = 0;
+    const state = replay([
+      ev('model.reply', {
+        turn: 1,
+        content: '现状：还没读过代码。下一步：先看入口文件。\n进度：了解结构 约 20%',
+        tool_calls: [{ id: 'c1', name: 'list_dir' }],
+      }),
+      ev('model.reply', { turn: 2, content: '最终交付', tool_calls: [] }),
+      ev('model.reply', { turn: 3, content: '', tool_calls: [{ id: 'c2', name: 'grep' }] }),
+    ]);
+    expect(state.items).toEqual([
+      {
+        kind: 'say',
+        seq: 1,
+        turn: 1,
+        text: '现状：还没读过代码。下一步：先看入口文件。\n进度：了解结构 约 20%',
+      },
+    ]);
+    expect(state.lastSeq).toBe(3); // 没有进时间线的回复照样推进序号
+  });
+
+  it('keeps internal bookkeeping events out of the timeline', () => {
+    seq = 0;
+    const state = replay([
+      ev('llm.call', { purpose: 'main' }),
+      ev('turn.finished', { turn: 1 }),
+      ev('plan.updated', { plan: [] }),
+    ]);
+    expect(state.items).toEqual([]);
+    expect(state.lastSeq).toBe(3);
+  });
+
+  it('splits a narration into its text and the sub-task progress', () => {
+    expect(parseSay('已完成：读了配置。下一步：改端口。\n进度：调整配置 约 60%')).toEqual({
+      body: '已完成：读了配置。下一步：改端口。',
+      progress: { label: '调整配置', percent: 60 },
+    });
+    expect(parseSay('> 已完成：A。\n> 进度：B 约 100%').progress).toEqual({
+      label: 'B',
+      percent: 100,
+    });
+    expect(parseSay('进度：超出 约 250%').progress?.percent).toBe(100);
+    expect(parseSay('只有一句话，没有进度')).toEqual({
+      body: '只有一句话，没有进度',
+      progress: null,
+    });
   });
 });

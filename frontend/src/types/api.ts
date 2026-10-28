@@ -164,6 +164,37 @@ export interface SessionSettings {
   bounds: { context_token_limit: { min: number; max: number; step: number } };
 }
 
+/** 会话下一次请求里各段提示词的 Token 估算，与真实任务同一套装配（GET /sessions/{id}/context） */
+export interface ContextSegment {
+  id:
+    | 'system'
+    | 'tools'
+    | 'skills'
+    | 'mcp_index'
+    | 'project_rules'
+    | 'workspace'
+    | 'workspace_memory'
+    | 'session_memory'
+    | 'task_data'
+    | 'history';
+  tokens: number;
+  /** system：系统提示词是否被用户改写过 */
+  customized?: boolean;
+  /** tools：工具个数 */
+  count?: number;
+  /** history：对话条数 */
+  turns?: number;
+  /** project_rules：检测状态 */
+  status?: string;
+}
+
+export interface ContextSnapshot {
+  segments: ContextSegment[];
+  total_tokens: number;
+  context_window: number;
+  skipped: string[];
+}
+
 export interface AppSettings {
   system_prompt: string | null;
   system_prompt_default: string;

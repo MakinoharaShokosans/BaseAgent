@@ -1,7 +1,8 @@
 import { motion } from 'motion/react';
+import { MessageSquareText } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import type { Milestone } from '../../types/api';
-import type { TimelineItem } from '../../stores/taskReducer';
+import { parseSay, type TimelineItem } from '../../stores/taskReducer';
 import { cn, stripControl } from '../../utils/text';
 import {
   AgentGlyph,
@@ -83,7 +84,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const Icon =
     item.tool === 'bash'
       ? TerminalGlyph
-      : item.tool === 'delegate_research'
+      : item.tool === 'websearch'
         ? GlobeGlyph
         : item.tool === 'spawn_subagent'
           ? AgentGlyph
@@ -139,10 +140,48 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   );
 }
 
-export function TraceTimeline({ items }: { items: TimelineItem[] }) {
-  const visible = items.filter(
-    (i) => !(i.kind === 'stage' && i.node === 'budget_guard' && i.decision === 'pass'),
+/** 时间线里真正显示的条目：旧的阶段行（“#2 工具 executed”）只是内部记账，不显示 */
+export function visibleItems(items: TimelineItem[]): TimelineItem[] {
+  return items.filter((i) => i.kind !== 'stage');
+}
+
+/** 模型每一步的汇报：正文加一条细进度。进度是模型对当前子任务的估计，不是精确值。 */
+function SayRow({ text }: { text: string }) {
+  const { body, progress } = parseSay(text);
+  return (
+    <Row icon={<MessageSquareText size={14} strokeWidth={1.7} />} tone="accent">
+      <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-ink">
+        {stripControl(body)}
+      </p>
+      {progress && (
+        <div className="mt-1.5 flex items-center gap-2.5">
+          <div
+            role="progressbar"
+            aria-label={`子任务进度${progress.label ? `：${progress.label}` : ''}`}
+            aria-valuenow={progress.percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            className="h-[3px] w-24 overflow-hidden rounded-full bg-ink/[0.08]"
+          >
+            <motion.div
+              className="h-full rounded-full bg-accent/70"
+              initial={{ width: 0 }}
+              animate={{ width: `${progress.percent}%` }}
+              transition={{ duration: 0.5, ease: EASE_OUT }}
+            />
+          </div>
+          <span className="text-2xs tabular-nums text-mute">
+            {progress.label && <span className="mr-1.5">{stripControl(progress.label)}</span>}
+            {progress.percent}%
+          </span>
+        </div>
+      )}
+    </Row>
   );
+}
+
+export function TraceTimeline({ items }: { items: TimelineItem[] }) {
+  const visible = visibleItems(items);
   return (
     <ol
       aria-label="执行过程"
@@ -179,6 +218,7 @@ export function TraceTimeline({ items }: { items: TimelineItem[] }) {
               </p>
             </Row>
           )}
+          {item.kind === 'say' && <SayRow text={item.text} />}
           {item.kind === 'tool' && <ToolRow item={item} />}
           {item.kind === 'decision' && (
             <Row
@@ -203,7 +243,7 @@ export function TraceTimeline({ items }: { items: TimelineItem[] }) {
           {item.kind === 'agent' && (
             <Row
               icon={
-                item.name.startsWith('research') ? (
+                item.name.startsWith('websearch') ? (
                   <GlobeGlyph size={14} />
                 ) : (
                   <AgentGlyph size={14} />

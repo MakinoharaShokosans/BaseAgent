@@ -31,6 +31,8 @@ export type TimelineItem =
   | { kind: 'decision'; seq: number; approved: boolean; text: string }
   | { kind: 'guard'; seq: number; name: string; text: string }
   | { kind: 'agent'; seq: number; name: string; text: string; tone: 'info' | 'warn' }
+  /** 模型在调用工具之前的简短说明：已完成什么、下一步做什么、子任务进度 */
+  | { kind: 'say'; seq: number; turn: number; text: string }
   | { kind: 'unknown'; seq: number; name: string };
 
 export interface RunState {
@@ -121,6 +123,21 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
   const next: RunState = { ...state, lastSeq: event.seq };
   const seq = event.seq;
   switch (event.event) {
+    case 'model.reply': {
+      // 带工具调用的回复里的话是“每一步的汇报”；没有工具调用的是最终交付，由 task.finished 给出
+      const text = str(event['content']).trim();
+      const calls = Array.isArray(event['tool_calls']) ? event['tool_calls'].length : 0;
+      if (!text || !calls) return next;
+      return {
+        ...next,
+        items: [...state.items, { kind: 'say', seq, turn: num(event['turn']), text }],
+      };
+    }
+    // 与界面无关的内部事件：只推进序号，不进时间线
+    case 'llm.call':
+    case 'turn.finished':
+    case 'plan.updated':
+      return next;
     case 'task.started':
       return { ...next, status: 'running', goal: str(event['task_goal'], state.goal), error: null };
     case 'plan': {
@@ -243,7 +260,7 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
     case 'stream.dropped':
       return state; // 传输事件不改变业务状态，也不推进序号
     default:
-      if (event.event.startsWith('research.') || event.event.startsWith('subagent.')) {
+      if (event.event.startsWith('websearch.') || event.event.startsWith('subagent.')) {
         return {
           ...next,
           items: [...state.items, { kind: 'agent', seq, ...describeAgent(event) }],
@@ -266,13 +283,13 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
 function describeAgent(event: ServerEvent): { name: string; text: string; tone: 'info' | 'warn' } {
   const name = event.event;
   switch (name) {
-    case 'research.started':
+    case 'websearch.started':
       return {
         name,
         tone: 'info',
         text: `开始研究：${str(event['topic'])}（${num(event['questions'])} 个问题）`,
       };
-    case 'research.round':
+    case 'websearch.round':
       return {
         name,
         tone: 'info',
@@ -280,7 +297,7 @@ function describeAgent(event: ServerEvent): { name: string; text: string; tone: 
           `第 ${num(event['round'])} 轮检索，取到 ${num(event['fetched'])} 个新来源（累计 ${num(event['evidence'])}）` +
           roundErrors(event),
       };
-    case 'research.finished':
+    case 'websearch.finished':
       return {
         name,
         tone: 'info',
@@ -360,4 +377,24 @@ function roundErrors(event: Record<string, unknown>): string {
     .filter((e) => typeof e === 'string')
     .slice(0, 2)
     .join('；')}`;
+}
+
+export interface SayParts {
+  body: string;
+  /** 当前子任务的名称与完成百分比（0–100）；模型没按格式写时为 null */
+  progress: { label: string; percent: number } | null;
+}
+
+const PROGRESS_LINE = /^\s*>?\s*进度[:：]\s*(.*?)\s*约?\s*(\d{1,3})\s*%\s*$/m;
+
+/** 把“……\n进度：子任务名 约 40%”拆成正文与进度；格式不对就原样当正文 */
+export function parseSay(text: string): SayParts {
+  const match = PROGRESS_LINE.exec(text);
+  if (!match) return { body: text.trim(), progress: null };
+  const percent = Math.min(100, Math.max(0, Number(match[2])));
+  const body = text
+    .replace(PROGRESS_LINE, '')
+    .replace(/^\s*>\s?/gm, '')
+    .trim();
+  return { body, progress: { label: (match[1] ?? '').trim(), percent } };
 }

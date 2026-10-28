@@ -41,7 +41,8 @@ export default {
       },
       fontSize: { '2xs': ['11px', '16px'] },
       opacity: { 12: '0.12' },
-      borderRadius: { xl2: '1.125rem', xl3: '1.5rem' },
+      // 阶梯圆角：micro 角标与快捷键、base 输入框与按钮、large 卡片与弹窗；胶囊用 rounded-full
+      borderRadius: { micro: '6px', base: '12px', large: '24px', xl2: '1.125rem', xl3: '1.5rem' },
       boxShadow: {
         card: 'var(--shadow-card)',
         float: 'var(--shadow-float)',

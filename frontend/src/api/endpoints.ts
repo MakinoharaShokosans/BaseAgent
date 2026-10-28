@@ -3,6 +3,7 @@ import type {
   AppSettings,
   Artifact,
   CompactionResult,
+  ContextSnapshot,
   DecisionResult,
   DirectoryListing,
   FileContent,
@@ -68,8 +69,8 @@ export function createApi(client: HttpClient = http) {
         id: string,
         body: { model: string | null; context_token_limit: number | null },
       ) => client.put<SessionSettings>(`/sessions/${enc(id)}/settings`, body),
-      /** 上下文检视：后端检视器未启用时返回 503 */
-      context: (id: string) => client.get<Record<string, unknown>>(`/sessions/${enc(id)}/context`),
+      /** 上下文检视：各段提示词的 Token 估算；后端检视器未启用时返回 503 */
+      context: (id: string) => client.get<ContextSnapshot>(`/sessions/${enc(id)}/context`),
       tasks: (id: string, limit = 20) =>
         client.get<Task[]>(`/sessions/${enc(id)}/tasks?limit=${limit}`),
     },

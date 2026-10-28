@@ -26,7 +26,7 @@ import { CompactButton } from './CompactButton';
 import { InputConsole } from './InputConsole';
 import { ModelPicker } from './ModelPicker';
 import { NodeRail, type RailNode } from './NodeRail';
-import { TraceTimeline } from './TraceTimeline';
+import { TraceTimeline, visibleItems } from './TraceTimeline';
 
 const SUGGESTIONS: { text: string; icon: ReactNode; hint: string }[] = [
   { text: '帮我梳理一下这个工程的结构和入口', icon: <MapIcon size={16} />, hint: '只读浏览' },
@@ -202,6 +202,7 @@ export function ChatPane() {
       void client.invalidateQueries({ queryKey: ['turns', sessionId] });
       void client.invalidateQueries({ queryKey: ['tasks', sessionId] });
       void client.invalidateQueries({ queryKey: ['smemory', sessionId] });
+      void client.invalidateQueries({ queryKey: ['context', sessionId] });
     }
   }, [run?.status, run, client, sessionId]);
 
@@ -289,7 +290,7 @@ export function ChatPane() {
 
   const meta = run ? statusMeta(run.status) : null;
   const empty = !run && !rounds.length;
-  const steps = run?.items.length ?? 0;
+  const steps = run ? visibleItems(run.items).length : 0;
 
   return (
     <div className="relative flex h-full flex-col">

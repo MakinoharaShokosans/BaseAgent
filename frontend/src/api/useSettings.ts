@@ -31,7 +31,10 @@ export function useSessionSettings(sessionId: string | null) {
   const save = useMutation({
     mutationFn: (body: { model: string | null; context_token_limit: number | null }) =>
       api.sessions.saveSettings(sessionId as string, body),
-    onSuccess: (data: SessionSettings) => client.setQueryData(['ssettings', sessionId], data),
+    onSuccess: (data: SessionSettings) => {
+      client.setQueryData(['ssettings', sessionId], data);
+      void client.invalidateQueries({ queryKey: ['context'] });
+    },
   });
   return { query, save };
 }
@@ -43,4 +46,20 @@ export function contextWindowOf(models: ModelEndpoint[] | undefined, model: stri
   if (chosen) return chosen.context_window;
   const windows = list.map((m) => m.context_window).filter((n) => n > 0);
   return windows.length ? Math.min(...windows) : 0;
+}
+
+/** 会话下一次请求的各段占比。设置、系统提示词、记忆、对话任何一项变化后都要让它失效。 */
+export function useContextSnapshot(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['context', sessionId],
+    queryFn: () => api.sessions.context(sessionId as string),
+    enabled: !!sessionId,
+    retry: false,
+  });
+}
+
+/** 让上下文占比重新取一次（所有会话；变化的来源不止一个会话，也包括全局系统提示词） */
+export function useRefreshContext() {
+  const client = useQueryClient();
+  return () => client.invalidateQueries({ queryKey: ['context'] });
 }

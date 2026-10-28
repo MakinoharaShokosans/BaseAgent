@@ -214,7 +214,45 @@ export function Card({
 }
 
 /**
- * 遮罩 + 居中对话框的外壳：Esc 关闭，焦点落在对话框。
+ * 信封的封舌：弹窗顶部一片朝下的 V 形，内衬铺防窥纹，尖端一枚蜡封小圆点。
+ * 纯装饰，不拦截点击；颜色全部来自令牌，明暗主题自动切换。
+ */
+export function EnvelopeFlap() {
+  return (
+    <div aria-hidden className="pointer-events-none relative h-[30px] shrink-0">
+      <div
+        className="tint absolute inset-0"
+        style={{ clipPath: 'polygon(0 0, 100% 0, 100% 10%, 50% 97%, 0 10%)' }}
+      />
+      <svg
+        viewBox="0 0 100 30"
+        preserveAspectRatio="none"
+        className="absolute inset-0 h-full w-full"
+      >
+        <path d="M0 0H100V3L50 29L0 3Z" fill="rgb(var(--c-side) / 0.55)" />
+        <path
+          d="M0 3L50 29L100 3"
+          fill="none"
+          stroke="rgb(var(--c-ink) / 0.12)"
+          strokeWidth="1"
+          vectorEffect="non-scaling-stroke"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span
+        className="absolute bottom-[-3px] left-1/2 h-[11px] w-[11px] -translate-x-1/2 rounded-full bg-accent/85"
+        style={{
+          boxShadow:
+            'inset 0 1px 1px rgb(255 255 255 / 0.45), inset 0 -1px 1px rgb(0 0 0 / 0.12), 0 1px 3px rgb(40 32 20 / 0.25)',
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * 遮罩 + 居中对话框的外壳：Esc 关闭，焦点落在对话框。对话框是一封信：纸面、发丝边、封舌。
+ * `className` 作用在整封信（宽高），`bodyClassName` 作用在封舌下面的正文区。
  * 渲染到 body：祖先上的 backdrop-filter / transform 会成为 fixed 定位的包含块，把对话框困在侧栏里。
  */
 export function Overlay({
@@ -222,11 +260,15 @@ export function Overlay({
   onClose,
   children,
   className,
+  bodyClassName,
+  flap = true,
 }: {
   label: string;
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  bodyClassName?: string;
+  flap?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -251,15 +293,18 @@ export function Overlay({
         aria-modal="true"
         aria-label={label}
         tabIndex={-1}
-        initial={{ opacity: 0, scale: 0.96, y: 8 }}
+        initial={{ opacity: 0, scale: 0.96, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.26, ease: EASE_OUT }}
+        transition={{ type: 'spring', stiffness: 320, damping: 30 }}
         className={cn(
-          'relative max-h-[90vh] w-full overflow-auto rounded-[24px] bg-raised shadow-float outline-none no-scrollbar',
+          'paper relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-[24px] bg-raised shadow-float outline-none',
           className,
         )}
       >
-        {children}
+        {flap && <EnvelopeFlap />}
+        <div className={cn('min-h-0 flex-1 overflow-auto no-scrollbar', bodyClassName)}>
+          {children}
+        </div>
       </motion.div>
     </div>,
     document.body,
@@ -278,7 +323,12 @@ export function Modal({
   wide?: boolean;
 }) {
   return (
-    <Overlay label={title} onClose={onClose} className={cn('p-6', wide ? 'max-w-3xl' : 'max-w-md')}>
+    <Overlay
+      label={title}
+      onClose={onClose}
+      className={wide ? 'max-w-3xl' : 'max-w-md'}
+      bodyClassName="px-6 pb-6 pt-3"
+    >
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-[17px] font-semibold text-ink">{title}</h2>
         <IconButton label="关闭" onClick={onClose}>

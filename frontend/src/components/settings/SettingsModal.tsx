@@ -7,7 +7,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Check, FolderCog, MessageSquareText, Palette, ScrollText, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../../api/endpoints';
-import { useModels, useSessionSettings } from '../../api/useSettings';
+import { useModels, useRefreshContext, useSessionSettings } from '../../api/useSettings';
 import { useAppStore } from '../../stores/useAppStore';
 import { useUiStore, type ThemePref } from '../../stores/useUiStore';
 import { cn, formatTokens } from '../../utils/text';
@@ -117,7 +117,10 @@ function SessionSection() {
         />
       </Field>
 
-      <Field label="上下文上限" hint="活跃对话超过它的高水位时，较早的轮次会被压缩成会话记忆。">
+      <Field
+        label="上下文上限"
+        hint="活跃对话超过它时，较早的轮次会被压缩成会话记忆。右侧“上下文占比”里的对话记录会显示距这条线还有多远。"
+      >
         <div className="flex items-center gap-4">
           <Slider
             label="上下文上限"
@@ -169,6 +172,7 @@ function SessionSection() {
 
 function PromptSection() {
   const client = useQueryClient();
+  const refreshContext = useRefreshContext();
   const settings = useQuery({ queryKey: ['appsettings'], queryFn: api.system.settings });
   const [draft, setDraft] = useState('');
   const [saved, flash] = useFlash();
@@ -176,6 +180,7 @@ function PromptSection() {
     mutationFn: (text: string | null) => api.system.saveSettings({ system_prompt: text }),
     onSuccess: (data) => {
       client.setQueryData(['appsettings'], data);
+      void refreshContext(); // 系统提示词变了，上下文占比里它的份额也要变
       flash();
     },
   });
@@ -188,23 +193,33 @@ function PromptSection() {
   if (!settings.data) return <p className="text-sm text-mute">读取中…</p>;
   const current = settings.data.system_prompt ?? settings.data.system_prompt_default;
   const isDefault = draft.trim() === settings.data.system_prompt_default.trim();
+  const customized = settings.data.system_prompt !== null;
   const over = draft.length > settings.data.system_prompt_max_chars;
 
   return (
-    <div className="flex h-full flex-col gap-3">
-      <Field
-        label="系统提示词"
-        hint="替换内置提示词作为每个任务的系统段。安全相关的阶段指令、工具说明、记忆渲染不受影响。"
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="flex items-start gap-3">
+        <p className="flex-1 text-xs leading-relaxed text-mute">
+          替换内置提示词，作为每个任务的系统段。安全协议之外的工作方式都写在这里；工具说明与记忆渲染不受影响。
+        </p>
+        {customized && <span className="stamp mt-0.5 shrink-0">已自定义</span>}
+      </div>
+      {/* 信纸：横线随内容滚动，文字落在线上；撑满剩余高度，不留空白 */}
+      <div
+        className="min-h-0 flex-1 rounded-base bg-card p-3.5"
+        style={{
+          boxShadow: 'inset 0 1px 2px rgb(40 32 20 / 0.07), 0 0 0 1px rgb(var(--c-ink) / 0.07)',
+        }}
       >
         <textarea
           aria-label="系统提示词"
           spellCheck={false}
-          className="field min-h-[300px] resize-none font-mono text-[12.5px] leading-relaxed"
+          className="ruled block h-full w-full resize-none bg-transparent font-mono text-[12.5px] text-ink outline-none"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
         />
-      </Field>
-      <div className="flex items-center gap-3">
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
         <Button
           variant="primary"
           disabled={draft === current || over || save.isPending}
@@ -220,6 +235,7 @@ function PromptSection() {
           恢复默认
         </Button>
         <Saved show={saved} />
+        {save.isError && <span className="text-xs text-bad">{(save.error as Error).message}</span>}
         <span className={cn('ml-auto text-2xs tabular-nums', over ? 'text-bad' : 'text-mute')}>
           {draft.length} / {settings.data.system_prompt_max_chars}
         </span>
@@ -331,10 +347,20 @@ function WorkspaceSection({ onDone }: { onDone: () => void }) {
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [section, setSection] = useState<Section>('session');
+  const title = SECTIONS.find((s) => s.id === section)?.label;
   return (
-    <Overlay label="设置" onClose={onClose} className="flex h-[min(620px,88vh)] max-w-3xl">
-      <nav aria-label="设置分组" className="flex w-48 shrink-0 flex-col gap-0.5 bg-side/70 p-3">
-        <div className="px-2.5 pb-3 pt-1.5 text-[15px] font-semibold">设置</div>
+    <Overlay
+      label="设置"
+      onClose={onClose}
+      className="h-[min(640px,88vh)] max-w-3xl"
+      bodyClassName="flex"
+    >
+      {/* 信封内衬：防窥纹铺在导航底下，右侧是信纸 */}
+      <nav
+        aria-label="设置分组"
+        className="tint flex w-48 shrink-0 flex-col gap-0.5 border-r border-ink/[0.07] bg-side/60 p-3"
+      >
+        <div className="px-2.5 pb-3 pt-1 text-[15px] font-semibold">设置</div>
         {SECTIONS.map((s) => (
           <button
             key={s.id}
@@ -347,28 +373,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </button>
         ))}
       </nav>
-      <div className="relative min-w-0 flex-1 overflow-y-auto p-7 no-scrollbar">
-        <IconButton label="关闭设置" className="absolute right-3 top-3" onClick={onClose}>
-          <X size={16} />
-        </IconButton>
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={section}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.16 }}
-            className="h-full"
-          >
-            <h2 className="mb-6 text-[17px] font-semibold">
-              {SECTIONS.find((s) => s.id === section)?.label}
-            </h2>
-            {section === 'session' && <SessionSection />}
-            {section === 'prompt' && <PromptSection />}
-            {section === 'appearance' && <AppearanceSection />}
-            {section === 'workspace' && <WorkspaceSection onDone={onClose} />}
-          </motion.div>
-        </AnimatePresence>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex shrink-0 items-center justify-between px-7 pb-3 pt-3">
+          <h2 className="text-[17px] font-semibold">{title}</h2>
+          <IconButton label="关闭设置" onClick={onClose}>
+            <X size={16} />
+          </IconButton>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6 no-scrollbar">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={section}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.16 }}
+              className="h-full"
+            >
+              {section === 'session' && <SessionSection />}
+              {section === 'prompt' && <PromptSection />}
+              {section === 'appearance' && <AppearanceSection />}
+              {section === 'workspace' && <WorkspaceSection onDone={onClose} />}
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </div>
     </Overlay>
   );
