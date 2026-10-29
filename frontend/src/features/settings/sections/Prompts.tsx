@@ -339,7 +339,7 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
               </IconButton>
             </div>
           )}
-          <div className="relative flex min-h-[22rem] flex-1 overflow-hidden rounded-b-xl">
+          <div className="relative flex min-h-[26rem] flex-1 overflow-hidden rounded-b-xl">
             <div
               ref={gutterRef}
               className="select-none overflow-hidden border-r border-line/40 bg-ink/[0.02] py-2.5 pl-3 pr-2 text-right font-mono text-[12.5px] leading-relaxed text-mute/40 tabular-nums"
@@ -360,12 +360,12 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
                   gutterRef.current.scrollTop = e.currentTarget.scrollTop;
                 }
               }}
-              className="min-h-[22rem] flex-1 resize-y overflow-x-auto whitespace-pre bg-transparent px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink outline-none"
+              className="min-h-[26rem] flex-1 resize-y overflow-x-auto whitespace-pre bg-transparent px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink outline-none"
             />
           </div>
         </div>
       ) : (
-        <div className="max-h-[34rem] min-h-[22rem] overflow-auto rounded-xl bg-code py-2 font-mono text-[12px] leading-[1.6] text-code-ink">
+        <div className="max-h-[36rem] min-h-[26rem] overflow-auto rounded-xl bg-code py-2 font-mono text-[12px] leading-[1.6] text-code-ink">
           {diff.map((l, i) => (
             <div
               key={i}
@@ -514,7 +514,7 @@ export function Prompts() {
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-[13rem_minmax(0,1fr)]">
+    <div className="grid gap-4 md:grid-cols-[13rem_minmax(0,1fr)] lg:gap-6">
       <nav aria-label="提示词分区" className="md:space-y-3">
         <div className="md:hidden">
           <Select
