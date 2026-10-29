@@ -159,11 +159,8 @@ class TaskEvents:
         )
 
     async def approval_requested(self, request: PendingApproval, state: AgentState) -> None:
-        payload = approval_payload(request, self._redactor)
-        payload["session_id"] = state.session_id
-        payload["workspace_id"] = state.workspace_id
         await self._hub.emit(
-            self._task_id, "task.waiting_for_approval", payload
+            self._task_id, "task.waiting_for_approval", approval_payload(request, self._redactor)
         )
 
     async def context_compacted(self, result: Compaction, state: AgentState) -> None:

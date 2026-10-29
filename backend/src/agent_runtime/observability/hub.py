@@ -73,6 +73,7 @@ class EventHub:
         self._locks: dict[str, asyncio.Lock] = {}
         self._sinks: list[Callable[[Event], None]] = []
         self._global_subs: set[_Subscriber] = set()
+        self._task_meta: dict[str, dict[str, str]] = {}
 
     def add_sink(self, sink: Callable[[Event], None]) -> None:
         """旁路：每个事件发布后同步调用（如轨迹写入）。sink 抛出的异常只告警。"""
@@ -149,9 +150,34 @@ class EventHub:
                     sub.lost_from = event.seq
                 sub.lost_to = event.seq
         if event.name in GLOBAL_LIFECYCLE_EVENTS:
+            if event.name == "task.started":
+                s_id = str(event.data.get("session_id", ""))
+                w_id = str(event.data.get("workspace_id", ""))
+                if s_id or w_id:
+                    self._task_meta[event.task_id] = {
+                        "session_id": s_id,
+                        "workspace_id": w_id,
+                    }
+            global_event = event
+            meta = self._task_meta.get(event.task_id)
+            if meta and (
+                "session_id" not in event.data or "workspace_id" not in event.data
+            ):
+                enriched_data = dict(event.data)
+                if "session_id" not in enriched_data and meta["session_id"]:
+                    enriched_data["session_id"] = meta["session_id"]
+                if "workspace_id" not in enriched_data and meta["workspace_id"]:
+                    enriched_data["workspace_id"] = meta["workspace_id"]
+                global_event = Event(
+                    event.task_id,
+                    event.seq,
+                    event.ts,
+                    event.name,
+                    enriched_data,
+                )
             for sub in list(self._global_subs):
                 with contextlib.suppress(asyncio.QueueFull):
-                    sub.queue.put_nowait(event)
+                    sub.queue.put_nowait(global_event)
 
     def _evict_cold_tasks(self) -> None:
         while len(self._buffers) > self._max_tasks:
@@ -159,6 +185,7 @@ class EventHub:
             if victim is None:
                 return
             del self._buffers[victim]
+            self._task_meta.pop(victim, None)
 
     # ------------------------------------------------------------------ 查询
 
