@@ -30,7 +30,7 @@ from agent_runtime.websearch.models import (
     RawVersionFact,
 )
 from agent_runtime.websearch.search_client import SearchOutcome
-from stage_support import degraded, parsed
+from gateway_support import degraded, parsed
 
 LIMITS = ReportLimits(
     max_findings=3,

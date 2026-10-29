@@ -149,5 +149,5 @@ bash(command, timeout_sec?)
 - **产物**：`artifact_id` 取日志文件名去扩展名（`step_3_bash`），工具后处理把它登记进 `state.artifacts`（见 [内置工具 §11](02_builtin_tools.md)），摘要里带句柄，全文可用 `read_artifact` 取回（§5 第 4 条成立）。
 - **输出拼接**：stdout 在前，stderr 以 `[stderr]` 标题随后；都为空是“（无输出）”。
 
-sidecar 服务端已实现（见 [沙箱 §10](../05_security/02_shell_sandbox.md)）。**未做**：环境自检（§4）、`shell_best_practices` 内置技能（§3）。
+sidecar 服务端已实现（见 [沙箱 §10](../05_security/02_shell_sandbox.md)）。`shell_best_practices` 内置技能已有（`src/skills/`）。**未做**：环境自检（§4）。
 

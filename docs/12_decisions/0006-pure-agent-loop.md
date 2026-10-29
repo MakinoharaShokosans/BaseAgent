@@ -1,6 +1,6 @@
 # 0006 主循环收敛为纯 agent loop，取消预算
 
-- 状态：**已采纳并实施**（后端已按"迁移"表落地；前端仍消费旧事件，见 [事件契约 §12](../09_api/02_events_contract.md)）
+- 状态：**已采纳并实施**（后端与前端都已落地，旧的 `plan` / `node.finished` 事件已删除，见 [事件契约 §4](../09_api/02_events_contract.md)）
 - 取代：[0001 主循环保留五阶段](0001-main-loop-shape.md)
 - 影响：[02_runtime](../02_runtime/)、[03_context/05_inheritance.md](../03_context/05_inheritance.md)、[06_subagents](../06_subagents/)、[07_llm_gateway](../07_llm_gateway/)
 

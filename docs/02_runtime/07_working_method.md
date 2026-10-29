@@ -25,7 +25,7 @@
 
 - 带工具调用的 `model.reply.content` 在执行过程时间线里是一条**说明行**（`kind: 'say'`），不是灰色的事件名。没有工具调用的 `model.reply` 是最终交付，由 `task.finished` 给出，不重复显示。
 - 说明行里的 `进度：<子任务名> 约 N%` 被解析成一条细进度条加百分比（`parseSay`）；格式不符就原样当正文，不显示进度条。
-- 内部记账事件（`llm.call`、`turn.finished`、`plan.updated`）与旧的阶段行（`node.finished`）不进时间线，只推进事件序号。
+- 内部记账事件（`llm.call`、`turn.finished`、`plan.updated`）不进时间线，只推进事件序号。
 - 事件契约见 [02_events_contract](../09_api/02_events_contract.md)；`reasoning`（若有）仍只在事件里，不渲染。
 
 ## 4. 与其他机制的关系

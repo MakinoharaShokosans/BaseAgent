@@ -1,4 +1,4 @@
-"""委派子智能体的报告与引用纪律。设计文档：docs/06_subagents/02_dynamic_delegation.md §5。
+"""委派子智能体的报告与引用纪律。设计文档：docs/06_subagents/01_dynamic_delegation.md §5。
 
 每条结论要带 ``Citation``，系统校验 ``ref`` 是否在子智能体**本次真实访问成功**过的资源集合里：
 URL 精确命中；文件与产物允许路径分量后缀双向匹配。引用被整条丢弃的结论 ``verified`` 为假，

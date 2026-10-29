@@ -59,7 +59,7 @@ CompressedMemory(
 
 **任务中产生的认知没有被写回会话记忆。**
 
-- 任务内的事实与失败尝试存在 `AgentState` 里（旧设计由 evaluator 产出，目标设计由模型通过 `note` 工具写入，见 [计划与草稿](../02_runtime/05_plan_and_scratch.md)）。
+- 任务内的事实与失败尝试存在 `AgentState` 里（由模型通过 `note` 工具写入，见 [计划与草稿](../02_runtime/05_plan_and_scratch.md)）。
 - 任务收尾只把"用户目标"和"最终交付文本"写入流水。
 - 状态里的事实与失败尝试**没有**写回会话记忆；用来提取它们的 `collect_failed_attempts` 方法存在，但全工程没有调用点。
 - 工作区记忆的两个沉淀方法，上浮事实与记录全局失败，只被 HTTP 接口调用，也就是说完全靠用户手动。

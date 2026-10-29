@@ -1,8 +1,6 @@
 # BaseAgent 文档
 
-自研 Agent Runtime 版本（无 LangGraph、无 RAG）的全新文档集。旧文档仍在 `documents/`，仅作迁移参考，不再维护。
-
-> **运行时与上下文相关文档描述的是 [0006](12_decisions/0006-pure-agent-loop.md)（纯 agent loop，无预算）与 [0007](12_decisions/0007-capability-mounting.md)（延迟 MCP 工具）的设计，后端代码已按它们迁移。** 各文档的"实现状态"一节写明与设计的偏差和未做项；两者不一致时，以代码为准并回头修文档推进代码。
+BaseAgent 是一个运行在本机的高可靠、安全可控的代码工程 Agent 架构底座。本文档集为系统的核心设计与实现规范。
 
 ## 目录
 

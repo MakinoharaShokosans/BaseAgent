@@ -22,9 +22,9 @@
 - 数组与表（如端点列表）不支持环境变量覆盖，只能改文件。
 - 配置文件位置：`BASEAGENT_CONFIG` 指定，否则依次查找 `./config/config.toml` 与 `$BASEAGENT_HOME/config.toml`。
 - 相对路径一律相对 `BASEAGENT_HOME` 解析，不相对当前目录，避免不同目录启动得到不同数据集。解析后必须仍在数据目录之内（`..` 逃逸被拒绝）；绝对路径原样使用。
-- 数据目录本身：环境变量 `BASEAGENT_HOME` 优先于文件里的 `app.home`。文件里的 `app.home` 必须是绝对路径或以 `~` 开头；环境变量里给相对值时，在加载时按当前目录取绝对（这是使用者当下显式的选择）。开发时想用仓库内的目录，设 `BASEAGENT_HOME=./storage`。
+- 数据目录本身：环境变量 `BASEAGENT_HOME` 优先于文件里的 `app.home`。文件里的 `app.home` 必须是绝对路径或以 `~` 开头；环境变量里给相对值时，在加载时按当前目录取绝对。开发时想用仓库内的目录，设 `BASEAGENT_HOME=./storage`。
 - 只有以 `BASEAGENT_<节>__` 形式指向**存在的标量**的变量才是覆盖项。`BASEAGENT_HOME`、`BASEAGENT_CONFIG`、`BASEAGENT_API_TOKEN`、`BASEAGENT_PROXY_TARGET` 是普通变量，不是覆盖项。指向数组、表、整节、未知键的变量，加载时报错并带上变量名。
-- 实现在 [`baseagent_config`](../../backend/src/baseagent_config/)，见 [路线图 阶段 -0.5](03_code_layout_and_roadmap.md)。
+- 实现在 [`baseagent_config`](../../backend/src/baseagent_config/)。
 
 ## 3. 环境变量：什么该放，什么不该放
 
@@ -76,7 +76,7 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 | 文件 | 内容 | 说明 |
 |---|---|---|
 | `api_token` | 256 位随机访问令牌 | 首次启动生成；删除并重启即轮换 |
-| `canary_salt` | 金丝雀派生用的盐 | 首次启动生成；替代旧版写死在源码里的固定盐，见 [信任 §8](../05_security/03_trust_and_injection.md) |
+| `canary_salt` | 金丝雀派生用的随机盐 | 首次启动生成；动态注入提示词以检测泄露 |
 
 ## 5. 各节速查
 
@@ -84,7 +84,7 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 |---|---|---|
 | `[app]` `[logging]` `[storage]` | 数据目录、日志、存储路径与保留策略 | [系统总览](01_system_overview.md)、[轨迹与日志](../08_observability/02_trajectory_and_logs.md) |
 | `[server]` `[server.auth]` `[server.filesystem]` `[server.workspace]` | API、令牌、文件系统浏览边界、工作区路径校验 | [API 接入控制](../09_api/03_access_and_errors.md) |
-| `[runtime.guardrails]` `[runtime.loop]` `[runtime.checkpoint]` `[runtime.approval]` | 死循环拦截（指纹窗口、摆动、`max_consecutive_blocks`）、检查点、审批；旧实现的预算、重规划、打回与降级上限、进度提示项随 [0006](../12_decisions/0006-pure-agent-loop.md) 删除 | [主循环](../02_runtime/02_main_loop.md)、[检查点](../02_runtime/03_checkpoint_and_resume.md)、[审批](../02_runtime/04_approval.md) |
+| `[runtime.guardrails]` `[runtime.loop]` `[runtime.checkpoint]` `[runtime.approval]` | 死循环拦截（指纹窗口、摆动、`max_consecutive_blocks`）、检查点、审批 | [主循环](../02_runtime/02_main_loop.md)、[检查点](../02_runtime/03_checkpoint_and_resume.md)、[审批](../02_runtime/04_approval.md) |
 | `[models.*]` | 两档模型、端点、能力声明 | [网关](../07_llm_gateway/01_gateway.md)、[DeepSeek](../07_llm_gateway/04_deepseek.md) |
 | `[llm.*]` | 重试、熔断、并发、单次调用总耗时上限、用量估算、结构化输出 | [网关](../07_llm_gateway/01_gateway.md)、[结构化输出](../07_llm_gateway/02_structured_output.md) |
 | `[context.*]` | 会话与任务级窗口、观察值裁剪、记忆、项目规则、提示词装配 | [03_context](../03_context/) |
@@ -93,13 +93,10 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 | `[websearch]` | websearch 工具 | [07_websearch_tool](../04_tools/07_websearch_tool.md) |
 | `[subagent]` | 动态委派 | [06_subagents](../06_subagents/) |
 | `[skills]` `[permissions]` `[mcp]` | 技能、权限分级、MCP | [Skills](../04_tools/05_skills.md)、[权限分层](../05_security/01_permission_tiers.md)、[MCP](../04_tools/04_mcp.md) |
-| `[events]` `[tracing.*]` `[redaction]` | 事件、追踪、脱敏 | [08_observability](../08_observability/) |
-| `[security]` | 金丝雀与不可信输出扫描 | [信任与注入](../05_security/03_trust_and_injection.md) |
-| `[evaluation]` | 真实模型评测的预算保护（默认关闭） | [测试策略](../11_testing/01_strategy.md) |
+| `[events]` `[redaction]` | 事件、脱敏 | [08_observability](../08_observability/) |
+| `[security]` | 金丝雀盐文件 | [信任与注入](../05_security/03_trust_and_injection.md) |
 
 ### 5.1 与上下文窗口相关的配置
-
-用户特别关心的这一组：
 
 | 项 | 位置 | 说明 |
 |---|---|---|
@@ -108,9 +105,8 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 | 会话活跃对话窗口 | `context.session.token_limit` | 默认 32000 |
 | 会话压缩触发/回落 | `context.session.high_watermark` / `compaction_ratio` | 0.80 触发，一次压到 0.40 |
 | 任务内折叠触发 | `context.task.soft_ratio` / `soft_tokens` | 取 `min(窗口 × 比例, 绝对值)` |
-| 任务内压缩触发 | `context.task.hard_ratio` / `hard_tokens` | 同上，且默认关闭 `compaction_enabled` |
+| 任务内压缩触发 | `context.task.hard_ratio` / `hard_tokens` | 同上；`compaction_enabled`（默认开）可关 |
 | 观察值裁剪阈值 | `context.observation.max_tokens` | 默认 1500 |
-| 单任务 / 子智能体 Token 上限 | **无**（预算已取消，旧项 `runtime.guardrails.max_total_tokens`、`subagent.max_total_tokens` 待删除） | |
 
 ## 6. 校验
 
@@ -118,14 +114,14 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 
 | 类别 | 规则 |
 |---|---|
-| 安全红线 | `server.host`、`bash_shell.host`、`web_search.host` 必须是回环地址（环境变量覆盖后同样校验）；`web_search.block_private_addresses` 等布尔项只接受真正的布尔值，`maybe` 之类拒绝 |
-| 路径 | `app.home` 可创建且可写（新建时权限 0700）；所有相对路径解析后落在 `app.home` 之下；`browse_roots` 不得落在 `forbidden_roots` 之内（禁用根里的 `/` 只指根目录本身，所以显式写 `"/"` 允许整盘浏览不算冲突） |
+| 安全红线 | `server.host`、`bash_shell.host`、`web_search.host` 必须是回环地址；`web_search.block_private_addresses` 等布尔项只接受真正的布尔值 |
+| 路径 | `app.home` 可创建且可写（新建时权限 0700）；所有相对路径解析后落在 `app.home` 之下；`browse_roots` 不得落在 `forbidden_roots` 之内 |
 | 模型 | 每档至少有一个端点；端点的 `context_window`、`max_output_tokens`、`timeout_sec` 为正；`api_key_env` 对应变量缺失的**云端**端点被跳过并告警，某档一个都不剩则拒绝启动 |
 | 比例 | `high_watermark` 大于 `compaction_ratio`；`soft_ratio` 小于 `hard_ratio`，二者在 (0,1) 内 |
 | 数量关系 | `context.task.soft_tokens` 小于 `hard_tokens`；`mcp.call_timeout_sec` 小于工具派发超时；`bash_shell.timeout_sec` 不大于 `max_timeout_sec` |
 | 权限 | 级别取值合法；分类正则能编译（不合法的启动时报错，而不是运行时静默跳过） |
 | 子智能体 | `max_depth` 为非负；`denied_tools` 必须包含 `spawn_subagent`；`model_tier` 必须是已存在的档 |
-| MCP | `stdio` 服务器必须给 `command`，`sse` 必须给 `url`；名字像密钥的环境变量（key / token / secret / password 等）必须写成 `"env:变量名"`，不能是明文 |
+| MCP | `stdio` 服务器必须给 `command`，`sse` 必须给 `url`；敏感环境变量必须写成 `"env:变量名"` |
 | 模型（补充） | 同一档内端点不得重名；`max_output_tokens` 必须小于 `context_window` |
 | 技能 | 开启 `allow_workspace` 时给出警告 |
 | 规则文件 | 开启 `context.rules.allow_workspace` 时给出警告 |
@@ -133,50 +129,10 @@ Vite 约定以 `VITE_` 开头的变量会被**打包进浏览器代码**。所�
 
 校验结果同样显示在启动看板里。
 
-## 7. 与旧版配置的差异
-
-| 变化 | 说明 |
-|---|---|
-| 删除 | `services.rag_url`、`[code_search]`、权限名单里的 `rag_search`、`delegate_code_search`，以及子智能体黑名单里的 `delegate_code_search` |
-| 删除 | `context.compaction_trigger_turns`：旧版配置存在但从未被读取 |
-| 新增 | `[app]` 数据目录；所有路径改为相对 `BASEAGENT_HOME` |
-| 新增 | `server.auth`、`server.filesystem`、`server.workspace`：令牌、目录浏览边界、工作区路径校验 |
-| 新增 | 端点级的 `context_window`、`max_output_tokens`、`reasoning_effort` 与 `capabilities` |
-| 新增 | `[llm.*]`：退避上限与抖动、熔断、并发、单次调用总耗时上限、用量估算、结构化输出 |
-| 新增 | `context.task.*`、`context.memory.*`、`context.rules.*`、`context.prompt.*` |
-| 新增 | `tools.files`：读写上限、原子写、覆盖前备份 |
-| 新增 | `services.sidecar_env_allowlist`、`bash_shell.child_env_allowlist` 与 `child_home`：子进程最小环境 |
-| 新增 | `web_search` 的 SSRF 防护与下载上限 |
-| 新增 | `mcp.retry_backoff_sec`、`exposed_name_max_len`、`refresh_tools_each_task`，服务器级 `allow_tools` 与 `idempotent_tools` |
-| 新增 | `[events]` `[tracing.*]` `[redaction]` `[security]`（含 `canary_scope = installation \| session`，默认安装级以保持系统层全局静态）`[evaluation]` |
-| 调整 | `mcp.rlimit_as_mb` 默认由 1024 提高到 4096，Node 类服务器需要较大的虚拟地址空间 |
-| 调整 | 模型段换成 DeepSeek，并显式声明能力 |
-| 调整 | 技能默认新增 `protect_trusted_names`、`scan_untrusted_body`；`high_privilege_tools` 加入 `edit_file` |
-
-## 8. 待定
+## 7. 待定设计
 
 - 配置热加载。目前所有配置在启动时读取，改了要重启。模型端点和日志级别是最可能需要热加载的，但会带来状态一致性问题，首版不做。
 - 多配置文件叠加（例如 `config.local.toml` 覆盖共享配置）。目前用环境变量覆盖已够用；若覆盖项变多再引入。
 - 配置的 JSON Schema 导出，用于编辑器补全与校验。
-- `max_total_tokens` 的默认值是否随所选模型与价格调整。当前沿用旧版的 200000。
-- `context.task.soft_tokens` 与 `hard_tokens` 的默认值（100000 与 160000）只是起点，应依据实测的成本与延迟调整，见 [DeepSeek §9](../07_llm_gateway/04_deepseek.md) 的验证清单。
-
-## 9. 改名与兼容（Aegis → BaseAgent）
-
-项目由 Aegis 改名为 BaseAgent。原则：**旧的永远还能用，新的永远优先，从不替用户搬数据。** 实现在 `backend/src/baseagent_config/envcompat.py`。
-
-| 旧 | 新 | 兼容方式 |
-|---|---|---|
-| 环境变量 `AEGIS_*`（`AEGIS_HOME`、`AEGIS_CONFIG`、`AEGIS_API_TOKEN`、`AEGIS_<节>__<键>` 等） | `BASEAGENT_*` | 两个前缀都认，同一个变量新旧都设了用新的；旧名生效时启动会给一条改名提示（只写变量名，不写值）。旧名的拼写错误同样会被校验报出 |
-| 数据目录 `~/.local/share/aegis` | `~/.local/share/baseagent` | 没有显式配置、旧目录在而新目录不存在时沿用旧目录，并提示迁移命令（`mv`）。新目录一旦存在就用新的。从不自动移动或复制数据 |
-| 元数据库 `aegis_meta.db` | `baseagent_meta.db` | 使用默认文件名、新库不存在而旧库在时，继续用旧库，不另起一个空库 |
-| 命令 `aegis`、`aegis-server`、`aegis-bench` | `baseagent`、`baseagent-server`、`baseagent-bench` | 旧命令保留为别名，指向同一个入口 |
-| 全局技能目录 `~/.aegis/skills` | `~/.baseagent/skills` | 旧目录在而新目录不在时沿用旧的 |
-| 工作区技能 `.aegis/skills`、规则 `.aegis/rules.md` | `.baseagent/skills`、`.baseagent/rules.md` | 新旧名都识别，新的靠前 |
-| 前端本地偏好的存储键 `aegis.ui.v2` | `baseagent.ui.v2` | 读不到新键时读旧键，下次保存写到新键；开发服务器的代理对数据目录与环境变量遵循同样的规则 |
-| `config.toml` 里写死的 `app.home = "~/.local/share/aegis"` | — | 照旧生效 |
-
-**没有改名的：** 内部包名 `agent_runtime`、`services`、`tools`、`mcps`、`evaluation`（本来就是通用名）。Python 配置包由 `aegis_config` 改为 `baseagent_config`，工具基类由 `AegisTool` 改为 `AgentTool`；这两个是代码层的改名，没有保留旧名（项目内部使用，没有外部调用方）。HTTP API 路径不变。
-
-想迁移到新目录：停掉服务，`mv ~/.local/share/aegis ~/.local/share/baseagent`，数据库文件名会在下次启动时继续沿用旧名（`aegis_meta.db`），想统一再手动改名。
-
+- `max_total_tokens` 的默认值是否随所选模型与价格调整。当前默认值为 200000。
+- `context.task.soft_tokens` 与 `hard_tokens` 的默认值（100000 与 160000）依据实测的成本与延迟调整。

@@ -1,17 +1,16 @@
 # 测试策略
 
-## 1. 现状
+## 1. 测试体系概况
 
-| 项 | 现状 |
+| 项 | 规格与范围 |
 |---|---|
-| Agent 后端 | 约 48 个测试文件、231 个用例，pytest + pytest-asyncio |
-| RAG | 约 61 个用例（随 RAG 删除） |
-| 前端 | 16 个测试文件，Vitest + Testing Library |
-| 工具 | `Hypothesis` 用于权限分类的模糊测试；`MockLLMGateway` 在 `conftest` 里 |
-| 真实模型 | `tests/real_llm/`，带 `real_llm` marker，默认不运行，无密钥自动跳过，并强制把存储隔离到临时目录、限制步数与 Token |
-| 缺口 | 多处测试直接依赖 LangGraph 与 LangChain 的类型；对抗性测试集中在权限分类，其他安全点覆盖不均；没有评测的统一报告格式 |
+| Agent 后端 | 覆盖核心运行时、状态机、工具派发与 API，基于 pytest + pytest-asyncio |
+| 前端测试 | 组件测试与状态归约测试，基于 Vitest + Testing Library |
+| 模糊与属性测试 | `Hypothesis` 用于权限判定与状态转移的属性测试；`FakeGateway` 置于 `conftest` 驱动确定性回放 |
+| 真实模型测试 | `tests/real_llm/`，带 `real_llm` marker，默认不运行，无密钥自动跳过，强制存储隔离到临时目录、严格限制步数与 Token |
+| 质量重点 | 覆盖状态机原子对不变量、权限安全边界、崩溃恢复、沙箱与 MCP 隔离、端到端黄金场景确定性回放 |
 
-好的部分要保留：**默认全部离线、可重复**；真实模型测试显式触发并带成本保护；存储一律隔离到 `tmp_path`。
+核心实践：**默认全部离线、可重复**；真实模型测试显式触发并带成本保护；存储一律隔离到 `tmp_path`。
 
 ## 2. 分层
 

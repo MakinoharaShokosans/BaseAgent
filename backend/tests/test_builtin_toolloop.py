@@ -22,7 +22,7 @@ from agent_runtime.core import (
 )
 from agent_runtime.guardrails import LoopLimits
 from agent_runtime.loop import ApprovalHooks, ToolRunnerDeps, make_tool_runner
-from stage_support import MakeState, with_state
+from gateway_support import MakeState, with_state
 from test_permissions import POLICY
 from tools.builtin import FileLimits, ShellBinding, TaskArtifacts, build_builtin_tools
 from tools.core import SidecarClient, ToolDispatcher, ToolRegistry

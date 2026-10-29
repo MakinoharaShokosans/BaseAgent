@@ -1,6 +1,6 @@
 """动态委派：受限的子劳动力，能力衰减而非能力授予。
 
-设计文档：docs/06_subagents/02_dynamic_delegation.md
+设计文档：docs/06_subagents/01_dynamic_delegation.md
 """
 
 from agent_runtime.subagents.delegate.render import render_report

@@ -15,7 +15,7 @@
 |---|---|---|
 | [01_events.md](01_events.md) | 事件信封与目录、事件总线、SSE 传输、持久化与保留、脱敏 | 已写初稿 |
 | [02_trajectory_and_logs.md](02_trajectory_and_logs.md) | 轨迹契约、日志装配、脱敏、三者的关系 | 已写初稿 |
-| [03_tracing.md](03_tracing.md) | span 模型、导出器、隐私规则，以及外部追踪的接入方式 | 已写初稿 |
+| [03_tracing.md](03_tracing.md) | span 模型、导出器、隐私规则，以及外部追踪的接入方式 | 设计稿，未实现 |
 
 ## 总原则
 

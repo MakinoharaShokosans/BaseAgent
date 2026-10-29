@@ -43,7 +43,7 @@
 | 网页正文 | **trafilatura** | 抓取后的正文提取 | 质量好，保留代码块 | readability 类库 |
 | 搜索 | 可插拔提供者，见 §9 问题 3 | websearch 工具的检索 | | |
 | 技能元数据 | **PyYAML**（`safe_load`） | 解析 `SKILL.md` 的 frontmatter | | |
-| 追踪导出 | 自有 span 模型；`opentelemetry-*`、`langfuse` 为**可选依赖组** | 见 [追踪](../08_observability/03_tracing.md) | 已采纳 0004 | 直接依赖 OTel SDK（核心变重） |
+| 追踪导出（未实现） | 自有 span 模型；`opentelemetry-*`、`langfuse` 曾设想为**可选依赖组**，现已从 `pyproject.toml` 移除 | 见 [追踪](../08_observability/03_tracing.md) | 已采纳 0004 | 直接依赖 OTel SDK（核心变重） |
 
 ### 3.1 需要特别说明的几项
 
@@ -51,7 +51,7 @@
 
 **tiktoken 需要预置词表。** 它首次使用时会联网下载词表文件。要在安装或构建阶段预置缓存目录（`TIKTOKEN_CACHE_DIR`），保证离线环境、CI、测试都不触网。DeepSeek 的分词器与它不同，所以估算值要乘配置里的安全系数。
 
-**SQLite 的使用约定。** 每个数据库文件一个长生命周期连接；写操作串行化；WAL 模式，`busy_timeout` 设置；迁移器按版本号顺序执行并幂等，记录在 `schema_version` 表中。旧版的“每次操作新开连接”不再沿用。
+**SQLite 的使用约定。** 每个数据库文件一个长生命周期连接；写操作串行化；WAL 模式，`busy_timeout` 设置；迁移器按版本号顺序执行并幂等，记录在 `schema_version` 表中。
 
 **自己写重试的范围。** 只有网关一处需要：分类（可重试与不可重试）、带抖动与上限的指数退避、`Retry-After`、截止时间、熔断。约一百行，配套测试用假时钟。
 
@@ -88,81 +88,66 @@ sidecar 与主进程共享代码库，但各自的依赖应当能单独安装：
 |---|---|
 | pytest、pytest-asyncio、pytest-cov | 测试 |
 | hypothesis | 属性测试与模糊测试 |
-| respx | 模拟 httpx 请求，用于我们自己用 `httpx` 发请求的客户端测试（如 sidecar 调用）。**拦不住 `openai` 3.x**，见 §10 |
+| respx | 模拟 httpx 请求，用于我们自己用 `httpx` 发请求的客户端测试（如 sidecar 调用） |
 | ruff | 检查与格式化 |
 | pyright | 类型检查，核心包用严格模式 |
 | import-linter | 强制模块依赖方向，见 [代码结构 §1](03_code_layout_and_roadmap.md) |
 | hatchling | 构建后端 |
 
-### 4.4 移除的旧依赖
-
-| 包 | 原因 |
-|---|---|
-| langgraph、langgraph-checkpoint-sqlite | 自研循环与检查点 |
-| langchain-core | 自定义消息类型；原为传递依赖 |
-| langfuse | 降为可选依赖组 |
-| tenacity | 自己实现重试 |
-| numpy、tabulate | 旧评测框架的开发依赖，新评测不需要 |
-| 向量库、嵌入、重排序全家桶 | RAG 移除 |
-
 ## 5. 前端
 
 | 领域 | 选择 | 理由 | 考虑过的替代 |
 |---|---|---|---|
-| 框架 | **React 19** + **TypeScript** | 沿用，旧组件可复用 | |
-| 构建 | **Vite** | 沿用；开发服务器做同源代理，令牌在服务端侧注入 | |
-| 样式 | **Tailwind CSS 3.4** | 沿用，避免无谓迁移；后续升级是独立事项 | Tailwind 4（新，等稳定后再评估） |
-| 状态 | **Zustand** | 沿用；事件归约写成纯函数 | Redux Toolkit（过重） |
-| 服务端状态 | **TanStack Query** | 沿用 | |
-| SSE | **自写的 fetch 流式管理器** | 需要序号缺口检测、`STREAM_GAP` 处理、连接状态展示、可控的重连，现有 `@microsoft/fetch-event-source` 提供不了 | 继续用该库（维护不活跃，且这些逻辑仍要自己加） |
-| Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` + **`rehype-sanitize`** | 不启用原始 HTML，再加一道清理 | |
-| 代码编辑与查看 | **CodeMirror 6** | 轻量、可完全本地打包 | **Monaco**：`@monaco-editor/react` 默认从 CDN 加载本体，违反“默认离线”；要保留就必须改为本地资源，且体积大。见 §9 问题 2 |
-| 图标与工具 | lucide-react、clsx、tailwind-merge | 沿用 | |
-| 面板布局 | react-resizable-panels | 沿用 | |
-| 单元与组件测试 | **Vitest** + Testing Library + jsdom | 沿用 | |
-| E2E | **Playwright**，数量控制在个位数 | 覆盖审批、断线重连、错误展示 | Cypress |
-| 代码质量 | ESLint + Prettier + `tsc --noEmit` | | |
-
-移除：`@monaco-editor/react`、`@microsoft/fetch-event-source`；去掉所有 RAG 相关代码。
+| 框架 | **React 19** + **TypeScript** | 生态完善、类型安全 | |
+| 构建 | **Vite** | 极速构建；开发服务器做同源代理，令牌在服务端侧注入 | |
+| 样式 | **Tailwind CSS 3.4** | 效能优先、样式可预测 | |
+| 状态 | **Zustand** | 简洁；事件归约写成纯函数 | Redux Toolkit（过重） |
+| 服务端状态 | **TanStack Query** | 缓存与自动再拉取机制成熟 | |
+| SSE | **自写的 fetch 流式管理器** | 支持序号缺口检测、`STREAM_GAP` 处理、连接状态展示、可控重连 | `@microsoft/fetch-event-source` |
+| Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` + **`rehype-sanitize`** | 不启用原始 HTML，强隔离渲染 | |
+| 代码编辑与查看 | **CodeMirror 6** | 轻量、可完全本地打包、离线友好 | Monaco（体积庞大、默认依赖 CDN） |
+| 图标与工具 | lucide-react、clsx、tailwind-merge | 现代轻量工具链 | |
+| 面板布局 | react-resizable-panels | 声明式分栏 | |
+| 单元与组件测试 | **Vitest** + Testing Library + jsdom | 原生 Vite 适配 | |
+| E2E | **Playwright**，数量控制在个位数 | 覆盖审批、断线重连、关键流程 | Cypress |
+| 代码质量 | ESLint + Prettier + `tsc --noEmit` | 标准静态质量门禁 | |
 
 ## 6. 工程化
 
 | 项 | 选择 |
 |---|---|
-| 仓库结构 | 单仓库：`backend/`、`frontend/`、`config/`、`docs/`。取代旧的 `AegisAgent` 等命名 |
-| Python 包布局 | `backend/src/` 下按 [目标目录](03_code_layout_and_roadmap.md) 组织；`pyproject.toml` 在 `backend/` |
-| 任务入口 | 一份 `Makefile` 或 `justfile`：`make test`、`make lint`、`make dev` 等，包装 `uv` 与 `pnpm` 命令 |
+| 仓库结构 | 单仓库：`backend/`、`frontend/`、`config/`、`docs/` |
+| Python 包布局 | `backend/src/` 下按模块架构组织；`pyproject.toml` 在 `backend/` |
+| 任务入口 | 一份 `Makefile` 包装 `uv` 与 `pnpm` 常用开发命令 |
 | 提交前检查 | pre-commit：ruff、格式、密钥扫描（防止把密钥提交） |
 | CI（每次提交） | lint、类型检查、单元与集成测试、依赖方向检查、前端测试 |
 | CI（每日） | E2E、慢测试 |
 | 手动 | 真实模型评测，带预算保护 |
 | 版本与发布 | 语义化版本；变更记录；锁文件入库 |
-| 许可证 | 沿用现有 LICENSE，需要你确认；新增依赖前检查许可证兼容性 |
+| 许可证 | 沿用现有 LICENSE，新增依赖前检查许可证兼容性 |
 
 ## 7. 沙箱的演进
 
-沙箱是整套安全设计里最薄弱的机制，技术上分两步走。
+沙箱机制在技术路线上分阶段演进：
 
 | 阶段 | 手段 | 状态 |
 |---|---|---|
-| 首版 | 进程组、`RLIMIT_AS`/`FSIZE`/`CPU`、超时两段式硬杀、内存池、最小环境变量 | 沿用并补环境隔离 |
-| 加固（可选，接口先留好） | **`bubblewrap`**：用户命名空间隔离文件系统视图、可断网；**`systemd-run --user --scope`**：cgroup 限制内存、CPU、**进程数（`pids.max`）** | 第二阶段 |
+| 首版 | 进程组、`RLIMIT_AS`/`FSIZE`/`CPU`、超时两段式硬杀、内存池、最小环境变量 | 当前实现 |
+| 加固（规划中） | **`bubblewrap`**：用户命名空间隔离文件系统视图、断网；**`systemd-run --user --scope`**：cgroup 限制内存、CPU、`pids.max` | 演进规划 |
 
-关于进程数限制：之前我提到的 `RLIMIT_NPROC` **不适合**。它限制的是同一用户 ID 的**全部进程总数**，会和你桌面上其他进程相互影响，既可能误伤，也限制不住。cgroup 的 `pids.max` 才是针对一条命令及其子进程的精确上限。
-
-Fedora 带 SELinux，开启 `bwrap` 或 cgroup 时要核对策略是否放行。沙箱升级之前，文档里的“不是对抗恶意代码的隔离环境”这条边界声明继续有效。
+关于进程数限制：`RLIMIT_NPROC` 限制的是同一用户 ID 的全部进程总数，易误伤其他桌面进程。cgroup 的 `pids.max` 才是针对特定命令及其子进程树的精确上限。
 
 ## 8. 明确不选
 
 | 不选 | 原因 |
 |---|---|
-| LangChain / LangGraph / LlamaIndex 等编排框架 | 核心诉求就是自研循环 |
-| 向量数据库与嵌入模型 | RAG 移除 |
-| ORM | 表少，手写 SQL 更清楚 |
-| Redis、消息队列、Celery | 单机单进程，不需要 |
-| Docker 作为强依赖 | 本机直接运行；容器化是可选的分发方式，不是前提 |
-| GraphQL / WebSocket | REST 加 SSE 已满足；审批与取消走普通 HTTP |
-| 前端 SSR 框架（Next.js 等） | 本机控制台，不需要 |
+| LangChain / LangGraph / LlamaIndex 等编排框架 | 采用纯 Agent Loop，不引入胶水框架抽象层 |
+| 向量数据库与嵌入模型 | 代码定位基于确定性的符号工具与文件读取（ripgrep / view_file） |
+| ORM | 表结构清晰简单，手写 SQL 控制力与透明度更高 |
+| Redis、消息队列、Celery | 单机单进程，无分布式需求 |
+| Docker 作为强依赖 | 本机直接运行；容器化仅作为可选分发打包方式 |
+| GraphQL / WebSocket | REST 加 SSE 已充分满足单向推流与请求需求 |
+| 前端 SSR 框架（Next.js 等） | 本机桌面级控制台，SPA + 静态构建即可 |
 | 多语言后端 | 单一语言降低维护成本 |
 
 ## 9. 5 项分叉的结论

@@ -143,8 +143,6 @@ PermissionDecision(
 | `bash_tools` | 按命令内容分类的工具名，默认 `["bash"]` |
 | `full_permission_patterns` / `workspace_write_patterns` | 命令分类正则，使用单引号字面量 |
 
-去掉 RAG 后，`read_only_tools` 中删除 `rag_search` 与 `delegate_code_search`。
-
 ## 10. 测试要点
 
 - 每个显式名单、`bash` 的三种分类、未知工具兜底各一组用例。

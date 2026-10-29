@@ -255,29 +255,21 @@ scratch              计划条数、笔记条数、证据提醒是否出现
 - 是否把"段预算"做成配置：给每一段设 Token 上限，超出时按优先级裁剪。
 - 近期新增事实的上限，以及超出上限时是否提前触发一次并入。
 
-## 10. 实现状态
+## 10. 实现规范
 
-`agent_runtime.context`：`PromptAssets`（任务启动时装好的冻结资产）、`PromptAssembler`（`__call__(state, instruction)` 与 `describe`）、`RulesCache`、`PromptLibrary`；系统层正文在 `prompts/system.md`；信封在 `guardrails.envelope`（见 [信任 §4.5](../05_security/03_trust_and_injection.md)）。`runtime.build_prompt_assets` / `assembler_from_settings` / `rules_from_settings` 把配置接上。**已迁移**：`__call__(state)` 没有阶段指令，只有一种请求形状。
+核心实现在 `agent_runtime.context`：`PromptAssets`（任务启动时冻结的静态资产）、`PromptAssembler`（生成模型请求消息列表与 `describe` 检视数据）、`RulesCache`、`PromptLibrary`；系统层正文在 `prompts/system.md`；信封由 `guardrails.envelope` 封装。
 
-与上文的差异与细节：
+### 装配关键规范
 
-- **会话流水已经在 `state.messages` 里。** `create_task` 把历史问答与当前目标一起放进 `messages`，所以近期问答（第 7 段）不是单独的资产：装配器在 `messages` 里找**最后一条与 `task_goal` 逐字相同的 user 消息**当作当前目标（历史里可能有同样的问题），它之前是近期问答，数据层插在它前面，它本身被包成 `<user_task>`，之后是任务内往返。找不到目标消息时，数据层放在整个流之前。
-- **第 6 段只放资产里的“已并入”部分，任务内新增的放尾部。** 旧实现里 `state.confirmed_facts` 等字段在任务内会被 evaluator 追加，渲染进会话记忆段会让每一步都使其后整段缓存失效，所以尾部放 `<task_progress>`（里程碑、新增事实与失败尝试、进展摘要）和阶段指令。**目标设计**把它们换成 `<scratch>`（§3.7），状态里只有任务内的笔记，继承来的内容本来就只在资产里。
-- **记忆条目的排序与构造顺序无关**：按 `(trust, source, text)` 排序后按 `(source, trust)` 分组，各成一个信封（属性顺序固定）。会话记忆的失败尝试和数据层的近期失败一律标 `untrusted`（它们由对话提炼，来源不可靠）。
-- **`memory_role = "system"`**（旧实现）时记忆信封追加在系统消息里金丝雀之后；目标设计取消该选项，记忆一律 `user` 侧。
-- **金丝雀**由 `state.canary_token` 渲染（旧实现与目标设计都放在系统消息的最后一个固定部分，差别只在 token 的作用域：旧实现随会话，目标设计默认随安装）；`describe` 不含 token，其余消息里也不出现。
-- **降级**：每一段包在 `guard` 里，渲染抛异常只记日志、记入 `describe()["skipped"]`，其余段照常。
-- **`describe`** 与请求同源（同一次装配），含各段的条目数、字符数与 Token 估算（计数函数可注入）、请求总量。未做“相对上次请求的前缀命中长度估计”。
-- **项目规则**：`RulesCache.load` 先探测、后判断开关：未启用时只报告“检测到文件、未启用”，**连内容都不读**；规则文件解析后必须在工作区内（符号链接指到外面被忽略并附说明）；只读前 `max_chars×4` 字节，超出标 `truncated`；按 `(路径, 修改时间, 大小, 上限)` 缓存，文件一变下次重读。
-- **提示词库**：只接受 `[A-Za-z0-9_]+` 的名字；进程内缓存，`reload()` 清空。
+- **单请求结构**：`__call__(state)` 直接装配完整消息流，不包含任何外部阶段指令。
+- **消息层级结构**：
+  - 系统层（`prompts/system.md`）与金丝雀作为唯一的 `system` 消息位于最前端；
+  - 技能清单、MCP 索引、项目规则、工作区常量、工作区记忆、会话记忆依次作为独立的 `user` 信封；
+  - 会话流水在 `state.messages` 中以对话时序呈现，当前任务目标被封装为 `<user_task>`；
+  - 会话草稿回显（`<scratch>`，首行重复任务目标、当前计划与未完成项）位于请求最末尾。
+- **记忆条目确定性排序**：按 `(trust, source, text)` 排序后按 `(source, trust)` 分组独立成信封，保证提示词前缀哈希严格稳定。
+- **项目规则缓存**：`RulesCache.load` 优先检查开关与路径安全，超出限制自动截断，并按文件修改时间缓存。
+- **容错降级**：各个独立段装配均包裹在容错逻辑中，单个可选资产渲染异常不阻断主任务，仅记录日志并标记在 `describe()["skipped"]` 中。
+- **检视与请求同源**：`describe()` 与实际发送的上下文装配完全同源，前端“上下文占比”卡片据此精准呈现各部分所占份额。
 
-**迁移后的状态：** 系统层（`prompts/system.md`）加金丝雀是唯一的 `system` 消息；技能清单、MCP 索引、项目规则、工作区常量、工作区记忆、会话记忆各是独立的 `user` 信封；`memory_role` 与阶段指令已取消，草稿回显（`<scratch>`，第一行重复任务目标）在请求最末尾。
-
-**未做 / 偏差：**
-
-- **金丝雀仍随 (会话, 任务) 派生**（`RuntimeFactory.make_canary`），`security.canary_scope = installation` 没有实现，所以同一工作区的新任务之间第 0 段不共享缓存。
-- 近期新增事实的上限与段预算（§9）、`system.md` 措辞的真实模型验证。
-- MCP 索引（`mcp_index`）已接入：`RuntimeFactory` 用 `mcps.render_index` 生成，只在存在 `deferred` 工具时才有。
-
-记忆的存取与会话压缩已实现，见 [记忆 §11](04_memory.md)：`MemoryFlow.prepare` 把记忆装成资产（`SessionContext.apply_to` 并入真正的资产）。**未做**：任务级的窗口折叠与压缩；环境自检的采集；近期问答里助手交付的信任标注（`messages` 里没有这个信息）；`merge_consecutive_user` 由网关负责，这里不处理；`system.md` 的措辞还没用真实模型验证；规则文件更新的界面提示。
 

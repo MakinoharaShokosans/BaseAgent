@@ -23,7 +23,7 @@ from agent_runtime.runtime.memory_flow import (
     task_was_tainted,
     touched_files,
 )
-from stage_support import MakeState, with_state
+from gateway_support import MakeState, with_state
 
 CFG = CompactionConfig(100, 0.8, 0.4, 2, (30,), MergeLimits(10, 5, 100, True))
 

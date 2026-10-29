@@ -75,7 +75,6 @@ reasoning_effort = "medium"       # 缺省不发送
 
 [models.reasoning.endpoints.capabilities]
 tools             = true
-parallel_tools    = true
 json_object       = true
 json_schema       = false
 usage_in_response = true
@@ -89,7 +88,7 @@ thinking_with_tools = true                # 为否时，带 tools 的请求显�
 
 | 能力 | 用途 |
 |---|---|
-| `tools`、`parallel_tools` | 不支持时不发送 `tools`，或不发送并行调用开关 |
+| `tools` | 不支持时不发送 `tools` |
 | `json_object`、`json_schema` | 决定结构化输出走哪条路径，见 [结构化输出](02_structured_output.md) |
 | `usage_in_response` | 为否时用量由本地估算，见 §8 |
 | `thinking_control` | 决定怎样发送思考开关。`deepseek` 时总是在 `extra_body` 显式发送 `thinking`，因为该服务默认开启思考，不发送不等于关闭，见 [DeepSeek](04_deepseek.md) |

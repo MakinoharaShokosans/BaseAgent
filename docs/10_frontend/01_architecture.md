@@ -15,7 +15,7 @@
 | 项 | 选择 | 说明 |
 |---|---|---|
 | 框架 | React 19 + TypeScript | |
-| 构建 | Vite 6，开发服务器监听 `127.0.0.1:5173` | 同源代理 `/api`、`/docs`、`/openapi.json` 到 `127.0.0.1:8000` |
+| 构建 | Vite 6，开发服务器监听 `127.0.0.1:5173` | 同源代理 `/api`、`/docs`、`/openapi.json` 到 `127.0.0.1:11328` |
 | 样式 | Tailwind CSS 3 | |
 | 状态 | Zustand（任务、工作区、界面三个 store） | |
 | 服务端缓存 | TanStack Query | |
@@ -80,13 +80,13 @@ flowchart LR
 
 ### 5.1 事件归约
 
-`useTaskStore` 处理的事件：`task.started`、`plan`、`node.finished`、`node.started`、`tool.call`、`tool.result`、`task.waiting_for_approval`、`task.approved`、`task.rejected`、`llm.call`、`task.finished`、`task.error`，以及子智能体与研究事件。契约见 [09_api/02](../09_api/02_events_contract.md)。
+`useTaskStore` 处理的事件：`task.started`、`model.reply`、`plan.updated`、`turn.finished`、`context.compacted`、`tool.call`、`tool.result`、`task.waiting_for_approval`、`task.approved`、`task.rejected`、`llm.call`、`task.finished`、`task.error`，以及子智能体与研究事件。契约见 [09_api/02](../09_api/02_events_contract.md)。
 
 ## 6. 关键界面
 
 | 界面 | 职责 | 要点 |
 |---|---|---|
-| 回合时间线 `TraceTimeline` | 展示计划与工具调用往返 | 按回合序号归组，用 `turn.finished` 的回合序号而不是事件条数估计进度（迁移前仍是 `node.finished`，见 [事件契约 §4.1](../09_api/02_events_contract.md)） |
+| 回合时间线 `TraceTimeline` | 展示计划与工具调用往返 | 按回合序号归组，用 `turn.finished` 的回合序号而不是事件条数估计进度（见 [事件契约 §4](../09_api/02_events_contract.md)） |
 | 审批卡片 `HitlApprovalCard` | 展示越级动作并收集决策 | 见 [02](02_approval_and_safety_ux.md) |
 | 子智能体卡片 | 展示委派的角色、步骤、被拒绝的越级尝试、结论与引用 | `subagent.blocked` 要突出；未经验证的结论要标注 |
 | 调用检视器 `LlmInvocationInspector` | 查看每次模型调用的消息体、工具、响应、耗时、Token | 按需拉取完整内容；展示前对金丝雀脱敏；折叠思考内容 |
@@ -151,4 +151,4 @@ flowchart LR
 
 **视觉层**按 [03_visual_design.md](03_visual_design.md) 重做：无边框浅色风格、自定义下拉与滑动条、工作区 → 会话侧栏（底部主题与设置）、设置面板（会话模型、上下文上限、系统提示词）、输入台里的模型下拉（选项来自 `GET /models`）与“压缩记忆”按钮（`POST /sessions/{id}/memory/compact`；任务运行中禁用，结果显示并入的条数，失败进错误提示）、对话节点轨道、右侧可折叠的任务卡片与上下文占比卡片。文件画布组件 `canvas/FilePane.tsx` 保留但目前未挂到界面上。
 
-**与 §3 目录的差异**：没有 Monaco（文件编辑用 `textarea`，避免一个很重的依赖）、没有子智能体卡片与调用检视器（对应的后端事件尚未发出）、没有 `SettingsModal`；`react-resizable-panels` 用 v2 的 `PanelGroup` 接口。**未做**：生产形态的静态托管（构建产物目前只由开发服务器的同源代理使用）、子智能体与调用检视界面、上下文抽屉（等后端的 `/context` 检视器）。
+**与 §3 目录的差异**：没有 Monaco（文件编辑用 `textarea`，避免一个很重的依赖）、子智能体与联网搜索事件以时间线上的行显示，没有独立的卡片和调用检视器；`react-resizable-panels` 用 v2 的 `PanelGroup` 接口。**未做**：生产形态的静态托管（构建产物目前只由开发服务器的同源代理使用）、调用检视界面。上下文占比由右侧栏的上下文卡片显示（后端 `/context` 检视器）。

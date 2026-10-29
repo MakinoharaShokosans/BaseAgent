@@ -9,7 +9,7 @@ BaseAgent 里有两种子智能体，目的不同，隔离方式也不同。
 | 文档 | 内容 | 状态 |
 |---|---|---|
 | [websearch 工具](../04_tools/07_websearch_tool.md) | 已移到工具目录：唯一的外部信息入口，特权分离与强类型报告 | 已写初稿 |
-| [02_dynamic_delegation.md](02_dynamic_delegation.md) | 动态委派：能力衰减、越级即失败、引用白名单 | 已写初稿 |
+| [01_dynamic_delegation.md](01_dynamic_delegation.md) | 动态委派：能力衰减、越级即失败、引用白名单 | 已写初稿 |
 
 ## 两种子智能体
 
@@ -22,8 +22,6 @@ BaseAgent 里有两种子智能体，目的不同，隔离方式也不同。
 | 回流形态 | `WebSearchReport`，代码模板渲染 | `SubagentReport`，引用白名单校验 |
 | 回流信任级 | 报告自带 `untrusted` 信封 | 返回时覆盖为 `untrusted` |
 | 能力是否可变 | 否 | 是，但只降不升 |
-
-> 旧版还有第三种，代码检索子智能体，它是对 RAG 的多轮检索封装，随 RAG 一起移除。
 
 ## 共同的设计要点
 
@@ -47,20 +45,9 @@ flowchart LR
 - 权限收窄见 [权限分层 §7](../05_security/01_permission_tiers.md)。
 - 回流内容的信任处理见 [信任与注入 §3](../05_security/03_trust_and_injection.md)。
 
-## 已发现的问题汇总
+## 代码探索场景的委派定位
 
-| # | 问题 | 位置 | 级别 |
-|---|---|---|---|
-| 1 | 研究报告正文未转义，可提前闭合信封 | [研究 §8](../04_tools/07_websearch_tool.md) | 高 |
-| 2 | 引用白名单把失败的调用也算作已访问 | [委派 §8](02_dynamic_delegation.md) | 中 |
-| 3 | 子级内部调用不进入轨迹，审计缺口 | [委派 §8](02_dynamic_delegation.md) | 中 |
-| 4 | 子级没有金丝雀检查 | [委派 §8](02_dynamic_delegation.md) | 中 |
-| 5 | 研究证据正文进入子模型提示词时没有信封 | [研究 §8](../04_tools/07_websearch_tool.md) | 中 |
-| 6 | `max_sources` 不收敛、子级与父级共享工具实例 | 各文档 | 低 |
+在大型代码库中，针对需要大范围阅读但仅需回流关键结论的探索场景，适合使用 `spawn_subagent`：
+- 为其授予只读工具（`view_file`、`grep`、`list_dir` 或受限 `bash`）；
+- 在完全隔离的子上下文中并行搜索与阅读，最终仅将带有具体文件/行号引用的结构化报告回流给主上下文，有效保护主上下文空间。
 
-第 1 项建议在实现新版时最先处理：报告正文能提前闭合信封，是一条真实的注入通路。
-
-## 去掉 RAG 之后
-
-- 代码检索子智能体删除，`denied_tools` 中的 `delegate_code_search` 一并去掉。
-- 读代码的需求由主 Agent 用 `bash`（grep、rg）和 `view_file` 承担。需要大量阅读而只回流结论的场景，正好适合 `spawn_subagent`，授予 `bash` 与 `view_file`，让它在独立上下文里搜索与阅读，只带回带引用的结论。系统提示词里"何时值得委派"的描述应据此调整。

@@ -1,8 +1,7 @@
 # 0002 审批采用落盘挂起
 
 - 状态：**已采纳**
-- 影响：[02_runtime/04_approval.md](../02_runtime/04_approval.md)、[02_runtime/03_checkpoint_and_resume.md](../02_runtime/03_checkpoint_and_resume.md)
-- 注：[0006](0006-pure-agent-loop.md) 取消了阶段，下文的"阶段"现指工具执行步骤，决定本身不变。
+- 关联决策：[0006-pure-agent-loop.md](0006-pure-agent-loop.md)
 
 ## 背景
 
@@ -25,7 +24,7 @@
 
 ## 决定
 
-选 B。它与"可恢复"这一设计取向一致，且与旧版行为（`interrupt` 加 `Command(resume)`）对外语义相同，前端与 API 无需改变协议。
+选 B。它与系统"断点可持久、崩溃可恢复"的核心设计取向一致，任务挂起不占用进程与协程资源，服务重启不丢失状态，对外提供高可靠的恢复语义。
 
 ## 后果
 

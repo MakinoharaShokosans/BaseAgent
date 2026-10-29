@@ -10,50 +10,20 @@
 
 要让上层代码拿到的是**经过校验的强类型对象**，而不是满手 `dict.get()` 加兜底。
 
-## 2. 现状
+## 2. 历史与现状
 
-- 通过 `response_format={"type": "json_object"}` 请求 JSON 模式，并依赖提示词描述字段。
-- `extract_json_object` 做宽松抽取：去掉代码围栏，失败则截取第一个 `{` 到最后一个 `}`。只保证抽出**一个字典**。
-- 抽出后由各节点用 `.get()` 读字段。为了容忍字段名漂移，代码里堆了大量别名：规划阶段同时认 `next_step`、`action`、`next_action`；评估阶段把 `milestone_ok`、`is_completed`、`all_completed`、`status` 的多种取值都当作"通过/不通过"。
-- 抽取失败的处理因节点而异：规划降级为纯文本指令，评估"按未达成处理"，研究与子智能体返回空报告。
+最初的做法是 `response_format={"type": "json_object"}` 加提示词描述字段，再用宽松抽取（去代码围栏、截取第一个 `{` 到最后一个 `}`）和 `.get()` 兜底别名。契约只存在于提示词和别名表里，模型偏离会被静默吞掉，失败路径各写各的。那是五阶段工作流时代的做法，规划、评估这些场景已经随工作流一起取消。
 
-这套做法能工作，但有三个问题：契约只存在于提示词和别名表里，没有任何地方给出权威定义；模型小幅偏离就会被静默吞掉，难以发现；失败路径各写各的，行为不一致。
-
-## 3. 新版：三层保证
-
-```
-①请求层：让服务端尽量保证格式 ──► ②校验层：用 Pydantic 模型强校验 ──► ③修复层：失败时带着错误重试一次
-```
-
-### 3.1 请求层：按能力选择路径
-
-网关根据端点能力声明选择，对调用方透明：
-
-| 优先级 | 路径 | 适用 |
-|---|---|---|
-| 1 | `json_schema`（严格模式）：把 Pydantic 模型导出的 JSON Schema 交给服务端 | 端点声明 `json_schema = true` |
-| 2 | `json_object` 模式加提示词里附 Schema | 端点声明 `json_object = true` |
-| 3 | **以工具调用承载**：定义一个名为 `emit_result` 的工具，其参数就是 Schema，并强制模型调用它 | 端点支持工具调用但不支持 JSON 模式 |
-| 4 | 纯提示词加宽松抽取 | 以上都不支持 |
-
-路径 1 与 3 由服务端约束，比 2 和 4 可靠得多。路径 4 是保底，只用于本地小模型这类场景。
-
-**DeepSeek 走路径 2**：文档只提供 `json_object` 模式，不提 `json_schema`。它的额外要求：提示词里必须出现 "json" 字样并最好附示例（网关构造请求时检查，缺失则补一句）；偶尔返回空内容，按瞬时故障重试；`max_tokens` 要足够大。路径 3 需要带 `tools`，在 DeepSeek 上只有关闭思考时才可用，见 [DeepSeek §5](04_deepseek.md)。
-
-### 3.2 校验层：用模型定义契约
+现在的做法是下面的强类型契约：
 
 每个结构化场景定义一个 Pydantic 模型，作为该场景的**唯一契约**，提示词里的字段说明由模型导出，而不是手写两遍：
 
 ```python
-class PlannerVerdict(BaseModel):
-    thought: str
-    next_step: str
-    milestones: list[MilestoneSpec] = []
-    milestone_updates: list[MilestoneUpdate] = []
-    all_completed: bool = False
+class TaskSummary(BaseModel):  # context/task_compaction.py：任务内压缩
+    summary: str = ""
 ```
 
-其他场景：`EvaluatorVerdict`、`ResearchRaw`、`SubagentRaw`、`CompactionResult`。
+现有的结构化场景：任务内压缩（`TaskSummary`）、会话记忆压缩（`CompactionResult`）、联网搜索的规划与提炼、动态子智能体的报告（`RawSubagentReport` 一类）、sidecar 的输出提炼。
 
 校验规则：
 
@@ -69,7 +39,7 @@ class PlannerVerdict(BaseModel):
 ```
 [原消息...]
 assistant: <上次的输出>
-user: 上一次输出未通过校验：缺少字段 `next_step`；`milestones[0].id` 应为整数。请只输出修正后的 JSON。
+user: 上一次输出未通过校验：缺少字段 `summary`；`findings[0].url` 应为字符串。请只输出修正后的 JSON。
 ```
 
 - 最多一次修复重试。多了只会放大 Token 和延迟。
@@ -107,7 +77,7 @@ user: 上一次输出未通过校验：缺少字段 `next_step`；`milestones[0]
 
 结构化输出本身是一条注入通路：不可信内容影响了模型，模型输出的 JSON 字段再被代码当作指令。防护靠**强类型与取值白名单**：
 
-- 枚举字段用 `Literal`，例如里程碑状态、置信度。
+- 枚举字段用 `Literal`，例如结论的置信度、计划条目的状态。
 - 路径、URL、版本号这类会被后续使用的字段，按各自契约再校验（见研究与子智能体的白名单）。
 - 不把模型给出的任意字符串直接拼进命令或路径。
 

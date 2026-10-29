@@ -23,7 +23,7 @@ from agent_runtime.bootstrap import Application
 from agent_runtime.llm import LLMRequest, LLMResponse, Parsed, TokenUsage
 from api_support import HEADERS, REPO_ROOT, TOKEN
 from baseagent_config import load_settings
-from stage_support import call_response
+from gateway_support import call_response
 
 V1 = "/api/v1"
 

@@ -26,16 +26,15 @@
 | | `task.finished` | 任务运行器 | 终态，含状态、原因、回合数、Token（统计值）、交付 |
 | | `task.error` | 任务运行器 | 不可恢复异常或游标缺口 |
 | 回合 | `model.reply` | 主循环 | 模型回复追加之后 |
-| | `plan.updated` | 主循环 | `update_plan` 执行之后（旧实现：`plan`） |
-| | `turn.finished` | 主循环 | 每个回合结束提交之后（旧实现：每个阶段一条 `node.finished`） |
+| | `plan.updated` | 主循环 | `update_plan` 执行之后 |
+| | `turn.finished` | 主循环 | 每个回合结束提交之后 |
+| | `context.compacted` | 主循环 | 任务内压缩提交之后；只带数字（并入步数、压缩前 Token、摘要长度、`llm`/`mechanical`），不含摘要正文 |
 | 工具 | `tool.call` | 主循环 | 回复提交后，每个调用一条 |
 | | `tool.result` | 主循环 | 结果追加提交后，每条观察值一条 |
 | 模型 | `llm.call` | **LLM 网关** | 每次模型调用（含重试与降级） |
 | 研究 | `websearch.started` / `.round` / `.finished` | 研究运行器 | |
 | 子智能体 | `subagent.started` / `.step` / `.tool` / `.blocked` / `.finished` | 子智能体运行器 | |
 | 传输 | `heartbeat` | SSE 层 | 空闲时周期发送，**不带 `seq`** |
-
-`code_search.*` 随 RAG 移除。
 
 ## 3. 谁来发：三条规则
 
@@ -93,7 +92,9 @@ CREATE TABLE task_events (
 - **大块内容外置**：`llm.call` 的完整 `messages`、`tools`、响应放到 `storage/traces/{task_id}/llm/{seq}.json`，事件里只带摘要（档位、模型、Token、耗时、消息条数、`blob_ref`）。前端的检视器按需拉取。这同时解决内存占用和查询滚动的问题。
 - 任务重启或续跑后，`seq` 接着已有的最大值继续，不重置。
 
-### 6.1 保留策略
+### 6.1 保留策略（设计，未实现）
+
+目前没有任何清理：事件、轨迹、产物都一直累积，需要时手动清理数据目录。下面是打算做的策略；之前配置里的 `storage.retention` 没有被任何代码读取，已删除，实现时再加回。
 
 | 数据 | 默认保留 |
 |---|---|
@@ -101,7 +102,7 @@ CREATE TABLE task_events (
 | `llm.call` 大块内容 | 最近 7 天或最近 50 个任务，总量上限（如 1 GB） |
 | 轨迹文件 | 与事件表一致 |
 
-清理在启动时和每天一次执行。保留策略要写进配置，而不是靠人工清理。
+清理打算在启动时和每天一次执行，策略写进配置。
 
 ## 7. 内容与脱敏
 

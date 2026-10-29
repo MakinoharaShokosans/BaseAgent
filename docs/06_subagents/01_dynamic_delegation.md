@@ -25,7 +25,7 @@
 
 ### 2.2 `denied_tools` 的作用
 
-默认黑名单包括 `spawn_subagent`、`websearch`、`delegate_code_search`（后者随 RAG 移除）。这是两件事的硬防线：防止套娃，防止模型嵌套调用模型造成不可控的循环。深度限制与黑名单双重保证。
+默认黑名单包括 `spawn_subagent`、`websearch`。这是两件事的硬防线：防止套娃，防止模型嵌套调用模型造成不可控的循环。深度限制与黑名单双重保证。
 
 ## 3. 派发流程
 
@@ -135,7 +135,7 @@ max_observation_chars = 4000 # 子级单条观察值，内存截断不落盘
 max_answer_chars = 400
 max_citations = 8
 max_report_chars = 3000
-denied_tools = ["spawn_subagent", "websearch", "delegate_code_search"]
+denied_tools = ["spawn_subagent", "websearch"]
 ```
 
 `enabled=false` 时主 Agent 没有动态委派能力。

@@ -64,30 +64,19 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 
 `delivery` 是面向用户的交付结论，已脱敏金丝雀；若是 JSON 形式的结构化结论，服务端已渲染成 Markdown。
 
-## 4. 阶段事件（旧实现的契约）
+## 4. 回合事件
 
-> 主循环收敛为纯 agent loop 后（[0006](../12_decisions/0006-pure-agent-loop.md)），没有阶段，下面的 `plan` 与 `node.finished` 被回合事件取代，见 §4.1。迁移期间服务端与前端按 §4.1 的映射同步修改，期间旧事件继续可用。
+主循环是纯 agent loop（[0006](../12_decisions/0006-pure-agent-loop.md)），没有阶段。旧的 `plan`、`node.finished` 事件以及 `milestones`、`should_terminate`、`decision`、`stage` 等字段已经删除。
 
 | 事件 | 载荷 |
 |---|---|
-| `plan` | `thought`、`directive`、`milestones[]`、`step` |
-| `node.finished` | `node`、`stage`（阶段序号，不是信封的 `seq`）、`input_summary`、`output_summary`、`decision`、`step_count`、`total_tokens`、`should_terminate`，规划/评估时有 `milestones[]`，直接答复时有 `content` |
+| `model.reply` | `turn`、`content`、`tool_calls[]`（只含 id 与工具名）、`reasoning?`（截断）。带工具调用时 `content` 是模型每一步的汇报（已完成、下一步、子任务进度），见 [工作方式](../02_runtime/07_working_method.md) |
+| `plan.updated` | `plan[]`：`{ id, title, status }`，`status` 为 `pending \| in_progress \| completed` |
+| `turn.finished` | `turn`（回合序号，不是信封的 `seq`）、`tool_count`、`failed_count`、`tokens`（本任务累计，统计值） |
+| `context.compacted` | `turn`、`steps`（本次新并入摘要的往返步数）、`cut`（累计已并入的消息条数）、`before_tokens`、`summary_chars`、`via`（`llm` \| `mechanical`，后者是模型不可用时的调用清单）。不含摘要正文 |
 
-`node.finished.decision` 取值：`pass`、`call_tools`、`executed`、`reply`、`accepted`、`continue` 以及规划阶段的指令文本。
+`task.finished` 的 `step_count`（与 `turns`）是回合数，`total_tokens` 是统计值，二者都不对应任何上限。终态由 `task.finished.status` 表达。
 
-里程碑：`{ id, title, description?, status }`，`status` 为 `pending | in_progress | completed | failed`。
-
-### 4.1 目标设计：回合事件
-
-| 事件 | 载荷 | 取代 |
-|---|---|---|
-| `model.reply` | `turn`、`content`、`tool_calls[]`（只含 id 与工具名）、`reasoning?`（截断）。带工具调用时 `content` 是模型每一步的汇报（已完成、下一步、子任务进度），见 [工作方式](../02_runtime/07_working_method.md) | — |
-| `plan.updated` | `plan[]`：`{ id, title, status }`，`status` 为 `pending \| in_progress \| completed` | `plan` |
-| `turn.finished` | `turn`（回合序号，不是信封的 `seq`）、`tool_count`、`failed_count`、`tokens`（统计值） | `node.finished` |
-
-`task.finished` 的 `step_count` 改为回合数 `turns`，`total_tokens` 保留为统计值，二者都不对应任何上限。`should_terminate` 与 `decision` 字段取消，终态由 `task.finished.status` 表达。
-
-> `input_summary` 与 `output_summary` 现状是硬编码的中文模板文案，不是由实际内容生成的。它们对用户有展示价值，但不应被客户端当作机器可读字段解析。新版保留文案，机器可读信息放在独立字段（`decision`、`milestones`）。
 
 ## 5. 工具与模型事件
 
@@ -134,8 +123,6 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 
 `subagent.blocked` 值得前端突出显示：它解释了子任务为什么做不成某件事。研究事件**永远不含页面正文**。
 
-`code_search.*` 随 RAG 移除。
-
 ## 8. 传输事件
 
 | 事件 | 说明 |
@@ -145,7 +132,7 @@ data: {"task_id":"…","seq":17,"ts":1760000000.1,"event":"tool.call","tool":"ba
 
 ## 9. 典型序列
 
-一次带审批的工具任务（目标设计）：
+一次带审批的工具任务：
 
 ```
 task.started
@@ -162,8 +149,6 @@ model.reply                        ← 最终回复，无工具调用
 turn.finished
 task.finished (succeeded)
 ```
-
-旧实现的序列是 `plan`、`node.finished (planner)`、`node.finished (budget_guard)`、`tool.call`、`node.finished (executor)` … `node.finished (evaluator)`，迁移前仍以它为准。
 
 注意审批后事件的 `seq` 接着挂起前的继续，不会重置，即使中间经历过进程重启。
 
@@ -189,7 +174,7 @@ task.finished (succeeded)
 
 事件由 `agent_runtime.observability.EventHub` 分配序号、持久化并分发，由 `agent_runtime.runtime.events.TaskEvents` 把循环翻译成本文的事件。与上文的差异：
 
-- **`node.finished` 的阶段序号叫 `stage`**，不是 `seq`：信封的 `seq` 是事件序号，同名的载荷字段会被信封覆盖。客户端用 `stage` 显示进度。
+- **`turn.finished` 的回合序号叫 `turn`**，不是 `seq`：信封的 `seq` 是事件序号，同名的载荷字段会被信封覆盖。客户端用 `turn` 显示回合数。
 - **`stream.dropped` 之后服务端关闭该订阅**：慢消费者读完已有事件后收到它，然后流结束；客户端带着游标重连，重放从事件库补齐，不会丢。
 - **游标缺口**有三种：早于可重放的最旧事件、事件库已按保留策略清理了中间一段、游标超前于服务端已知的最新序号；都以一条 `task.error`（`code=STREAM_GAP`）结束流。
 - **挂起不结束流；`task.finished` 结束流**，但已结束的任务可能被续跑，所以从头订阅会越过中间的终态事件，只在“终态就是最后一个事件”时才关。
@@ -197,4 +182,4 @@ task.finished (succeeded)
 - **`tool.result`** 带 `call_id`、`ok`、`artifact_id`；`ok` 来自工具包装层经内部的 `tool.observed` 递来的结果，该信号本身不对外发布，随阶段提交后的 `tool.result` 一起发出。
 - **`tool.call` 的 `args`、`tool.result` 的 `result`、审批的 `command` 与 `reason`** 都过统一脱敏，金丝雀由 `TaskEvents` 自己并入；审批的 `command` 不截断，`reason` 等摘要类字段限长 300。
 - **`llm.call`** 由网关的调用记录经 `LlmCallEvents` 发出（每次尝试一条，含重试与降级）：`node`（purpose）、`tier`、`endpoint`、`model`、`attempts`、`outcome`、`duration_ms`、`tokens`、`finish_reason`、`error?`，以及服务商给了才有的用量拆分：`prompt_tokens`、`completion_tokens`、`reasoning_tokens`、`cache_hit_tokens`、`cache_miss_tokens`（缓存命中率与各阶段开销由它们算出，评测框架读取）。记录本身不含消息正文，所以事件只有摘要，也没有 `blob_ref`；完整提示词的外置与按需拉取尚未做。任务收尾前会等在途的 `llm.call` 发完，`task.finished` 仍是最后一个事件。
-- **回合事件已发出**（`model.reply`、`plan.updated`、`turn.finished`），**同时仍发旧的 `plan` 与 `node.finished`**（`node` 取 `agent` / `tool_runner`，`should_terminate` 恒为 `false`）：前端 `taskReducer` 还在消费旧事件，改完后去掉。`task.finished` 的 `step_count` 与新增的 `turns` 都是回合数，`total_tokens` 是统计值（`LlmCallEvents` 按任务累计）。`GET /system/limits` 只剩 `max_concurrent_tasks`。
+- **只有回合事件**（`model.reply`、`plan.updated`、`turn.finished`）；旧的 `plan` 与 `node.finished` 已删除，前端 `taskReducer` 也已改为消费回合事件。`task.finished` 的 `step_count` 与 `turns` 都是回合数，`total_tokens` 是统计值（`LlmCallEvents` 按任务累计）。`GET /system/limits` 只剩 `max_concurrent_tasks`。

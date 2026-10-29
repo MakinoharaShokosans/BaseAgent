@@ -1,4 +1,4 @@
-"""动态委派：收窄、越级即失败、引用白名单、账本。出处：docs/06_subagents/02_dynamic_delegation.md。"""
+"""动态委派：收窄、越级即失败、引用白名单、账本。出处：docs/06_subagents/01_dynamic_delegation.md。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from agent_runtime.subagents.delegate import (
 )
 from agent_runtime.subagents.delegate.report import RawCitation, RawSubFinding
 from agent_runtime.subagents.usage import ChildUsage
-from stage_support import call_response, parsed
+from gateway_support import call_response, parsed
 from test_permissions import POLICY
 from test_tools_core import Fake
 from tools.core import ToolRegistry

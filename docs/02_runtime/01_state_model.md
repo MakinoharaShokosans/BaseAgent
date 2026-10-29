@@ -48,12 +48,13 @@ class Message:
 | 对话 | `messages` | 追加式 transcript | 循环 |
 | 草稿 | `plan` `facts` `failed_attempts` | 任务内临时记忆，见 [计划与草稿](05_plan_and_scratch.md) | `update_plan` / `note` 工具 |
 | 产物 | `artifacts` | `artifact_id -> 磁盘路径` | 工具后处理 |
+| 压缩 | `stream_summary` `stream_cut` | 任务内压缩的结果：较早往返的摘要，以及目标消息之后有多少条往返已并入摘要。`messages` 不因压缩而改动，装配器据此渲染视图 | 循环内核（压缩之后） |
 | 验证 | `verification` | `none`/`unchecked`/`failed`/`passed`：最近一次修改文件之后命令的验证情况，来自工具结果而不是模型自述 | 工具后处理 |
 | 防御 | `consecutive_errors` `fingerprint_history` `consecutive_blocks` | 瞬态护栏计数 | 工具包装层 |
 | 安全 | `permission_level` `canary_token` | 任务基线权限与金丝雀 | 初始化 |
 | 控制 | `pending_approval` | 待审批请求，`None` 表示未挂起 | Supervisor（捕获 `ApprovalRequired` 后写入） |
 | 控制 | `approval_decision` | 已到达、尚未被消费的审批决策 | 续跑入口写入，工具包装层消费后清空 |
-| 控制 | `schema_version` | 状态序列化版本（目标 3） | 序列化层 |
+| 控制 | `schema_version` | 状态序列化版本（当前 4；v3 的检查点迁移为“没压缩过”） | 序列化层 |
 
 状态里**没有**：`phase`（没有阶段）、里程碑、步数与 Token 计数（没有预算）、终止标志（停止原因是 `run` 的出口，由 Supervisor 记录）、重规划与打回计数、派发前标记（尾部未配对调用即其信号）、会话继承来的摘要与记忆（只在提示词资产里，任务内只读）。
 
@@ -75,9 +76,9 @@ class Message:
 
 `apply_update` 是纯函数，返回新状态对象，不原地修改。这让工具后处理等写入方可以放心读取传入的状态，而不用担心另一个写入者在期间改动它。
 
-> 旧版 `add_messages` 还支持按 `id` 替换或删除消息。新版**不支持**：`Message` 没有 `id`，`state.messages` 只追加，压缩与折叠只发生在装配提示词时，不改写状态里的消息。（待核对项已按此定案；若阶段 5 的折叠实现发现必须改写，再回头扩展。）
+> 注：`Message` 没有 `id`，`state.messages` 严格只追加；长文本压缩与观察值折叠只发生在提示词装配视图中，不改写状态里的原始消息历史。
 
-### 3.1 实现细节（已落地于 `agent_runtime.core`）
+### 3.1 实现细节（位于 `agent_runtime.core`）
 
 - `AgentState` 是 `frozen` 的 dataclass，不是 TypedDict；序列类字段全是元组，`artifacts` 是字典且约定不原地修改。
 - 初始化后不可更新的字段：`workspace_id`、`workspace_path`、`session_id`、`task_id`、`task_goal`、`permission_level`、`canary_token`、`schema_version`。更新它们直接报 `InvalidUpdateError`。
@@ -87,7 +88,7 @@ class Message:
 
 ## 4. 计划条目与失败尝试
 
-`PlanItem` 与 `FailedAttempt` 仍为 pydantic 模型，是全工程唯一定义，`memory/` 等模块复用而不自持第二份。
+`PlanItem` 与 `FailedAttempt` 统一由 pydantic 定义，全工程复用而不重复定义。
 
 ```python
 class PlanItem(BaseModel):
@@ -103,19 +104,17 @@ class FailedAttempt(BaseModel):
 
 ## 5. 序列化
 
-检查点里的状态是一份 JSON，由 `state_codec` 负责编解码，取代 `JsonPlusSerializer` 的 msgpack 与模块白名单。
+检查点里的状态是一份标准 JSON，由 `state_codec` 负责编解码：
 
-- `Message` 与 `ToolCall` 手写 `to_dict` / `from_dict`，字段显式，不使用 `pickle` 或按类型名反射构造。`to_dict` 只写非默认字段，字段顺序固定；`reasoning_state` 不排序键，编码、解码、再编码字节相同。
-- `PlanItem`、`FailedAttempt`、`PendingApproval`、`ApprovalDecision` 用 pydantic 的 `model_dump(mode="json")` 与严格 JSON 校验（JSON 数组可进元组字段，但 `"1"` 不会被悄悄当成整数）。
-- 解码是**严格**的：未知 `role`、缺必需字段、未知字段、类型不符、`schema_version` 缺失或高于当前代码版本都直接报 `StateDecodeError`，不做猜测性修复。消息里可选字段（`reasoning` 等）缺失视为默认值，所以旧检查点仍可加载。解码只做结构校验，不检查原子对：该不变量由循环在写入前断言。
-- `schema_version` 低于当前版本时，通过按版本注册的迁移函数逐级升级。v1、v2 是五阶段工作流的状态，与 v3 不兼容，**不迁移**：`MINIMUM_SCHEMA_VERSION = 3`，旧状态解码时报错；检查点库里的旧表改名为 `task_checkpoints_legacy`，只读保留。
+- `Message` 与 `ToolCall` 手写 `to_dict` / `from_dict`，字段显式，不使用反射构造。`to_dict` 只写非默认字段，字段顺序固定；`reasoning_state` 不排序键，编码、解码、再编码字节相同。
+- `PlanItem`、`FailedAttempt`、`PendingApproval`、`ApprovalDecision` 用 pydantic 的 `model_dump(mode="json")` 与严格 JSON 校验。
+- 解码是**严格**的：未知 `role`、缺必需字段、未知字段、类型不符、`schema_version` 缺失或高于当前代码版本都直接报 `StateDecodeError`，不做猜测性修复。消息里可选字段（`reasoning` 等）缺失视为默认值。解码只做结构校验，不检查原子对：该不变量由循环在写入前断言。
+- 当前标准版本为 `MINIMUM_SCHEMA_VERSION = 3`，杜绝不兼容格式的错误加载。
 
 安全上的好处：检查点内容不再能触发任意类型实例化，数据库文件被篡改的最坏后果是解码失败。
 
-## 6. 与 ExecutionContext 的关系
+## 6. 内存运行视图与持久化状态的边界
 
-旧版另有 `ExecutionContext`，是任务在内存里的运行视图，额外持有 `step_history`，任务结束时落盘轨迹后丢弃。本版保留这一职责划分，但不再单独定义一份近似重复的 TypedDict：
-
-- 持久化与恢复只认 `AgentState`。
-- 轨迹由 `TrajectoryRecorder` 逐条追加到 `storage/traces/{task_id}.jsonl`，不经过状态。
-- 任务结束时的收尾（把结论写回会话记忆、触发压缩）由收尾函数完成，读取终态 `AgentState` 即可，不需要第二份状态。
+- **持久化与恢复**：系统统一以不可变 `AgentState` 作为唯一权威状态源。
+- **因果轨迹**：由 `TrajectoryRecorder` 逐条追加到 `storage/traces/{task_id}.jsonl`，作为外置旁路落盘，不污染状态对象。
+- **任务收尾**：任务结束时的收尾（把结论写回会话记忆、触发压缩）由收尾函数完成，读取终态 `AgentState` 即可。

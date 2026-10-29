@@ -41,7 +41,6 @@ reasoning_effort  = "high"
 
 [models.reasoning.endpoints.capabilities]
 tools              = true
-parallel_tools     = true               # 待验证
 json_object        = true
 json_schema        = false              # 文档未提及，按不支持处理
 usage_in_response  = true
@@ -64,7 +63,6 @@ max_output_tokens = 8192
 
 [models.fast.endpoints.capabilities]
 tools               = true
-parallel_tools      = true
 json_object         = true
 json_schema         = false
 usage_in_response   = true
@@ -192,7 +190,7 @@ DeepSeek 标称 1M 上下文。窗口很大带来一个后果：按"窗口的 60
 |---|---|
 | 采样参数 | 思考模式下 `temperature` 无效。对推理档不必再强调温度 0；对快速档（思考关闭）温度仍然生效 |
 | 用量字段 | 文档给出了缓存字段，推理 Token 的明细字段是否提供，未在抓取的页面中确认，待验证；没有就只按总量 |
-| 并行工具调用 | 文档页面没有明确说明，待验证；不支持时 `parallel_tools = false`，网关按串行处理 |
+| 并行工具调用 | 文档页面没有明确说明。同一回复里的多个工具调用由循环自己调度（只读并发、写入串行），与端点是否支持并行无关，所以没有对应的能力开关 |
 | 限流 | 文档摘要没有给出限流数值。网关的并发信号量与 429 退避保持默认，运行后依据实际观察调整 |
 | 工具调用的参数 | 仍按网关的规范化处理：非法 JSON 标记为格式错误，`length` 截断不执行 |
 | 错误码 | 400（含缺少 `reasoning_content`）不重试；429、5xx、超时重试 |

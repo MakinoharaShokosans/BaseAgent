@@ -2,7 +2,6 @@
 
 前缀 `/api/v1`。除健康检查与文档外，所有端点都经过 [接入层闸门](03_access_and_errors.md)。请求与响应均为 JSON，SSE 端点除外。错误体统一，见 [03](03_access_and_errors.md)。
 
-> 标记说明：**已有** 为当前实现；**新增** 为新版需要补上的；**移除** 随 RAG 删除。
 
 ## 1. 工作区
 
@@ -107,7 +106,7 @@ PUT /settings
 | `GET /tasks/{id}/timeline?limit` | 时间线（消息的投影） | 已有 |
 | `GET /tasks/{id}/trace` | 下载全量因果轨迹 NDJSON | 已有 |
 | `GET /tasks/{id}/llm_calls` | 底层模型调用记录 | 已有，需改为按需拉取，见 [事件 §6](../08_observability/01_events.md) |
-| `GET /tasks/{id}/spans` | span 树 | **新增**，见 [追踪](../08_observability/03_tracing.md) |
+| `GET /tasks/{id}/spans` | 回合与工具调用的简单列表 | 由事件推出；真正的 span 树见 [追踪](../08_observability/03_tracing.md)（设计稿） |
 | `DELETE /tasks/{id}` | 删除任务及其轨迹、事件、产物 | **新增** |
 
 ### 提交任务
@@ -128,9 +127,9 @@ task_id, session_id, workspace_id, task_goal,
 status: queued | running | waiting_for_approval | succeeded | failed | cancelled | terminated
 permission_level,
 approval_request: ApprovalRequestOut | null,
-milestones[], current_milestone_idx,
-step_count, total_tokens, consecutive_errors,
-should_terminate, termination_reason,        # 旧实现；目标设计：plan[]、turns、total_tokens（统计）、termination_reason，见事件契约 §4.1
+plan[]: { id, title, status },        # 来自会话草稿的计划，没有写过计划则为空
+step_count, total_tokens, consecutive_errors,   # step_count 是回合数，total_tokens 是统计值
+termination_reason,
 created_at, started_at, finished_at,
 artifact_count
 ```
@@ -195,11 +194,7 @@ POST /tasks/{id}/reject    { "approval_id": "appr_…", "reason": "…" }
 
 自省接口是只读的，用于让用户看见"系统此刻装配了什么"。注意它们暴露了配置结构，同样需要令牌保护。
 
-## 8. 移除
-
-整组 `/rag/*`：`GET /rag/health`、`POST /rag/ingest`、`POST /rag/retrieve`；`/health/dependencies` 里的 `rag` 项；`schemas.py` 里的 RAG 相关模型。
-
-## 9. 约定
+## 8. 约定
 
 | 项 | 约定 |
 |---|---|
@@ -212,7 +207,7 @@ POST /tasks/{id}/reject    { "approval_id": "appr_…", "reason": "…" }
 | 大小 | 请求体大小上限（默认 2 MB），超出 413 |
 | 编码 | UTF-8 |
 
-## 10. 不变量
+## 9. 不变量
 
 1. 对外 DTO 永远不是内部状态对象。
 2. 路径类参数要么是相对路径并经工作区校验，要么是资源 id，不接受任意绝对路径（目录浏览除外，且受限，见 03）。
@@ -220,7 +215,7 @@ POST /tasks/{id}/reject    { "approval_id": "appr_…", "reason": "…" }
 4. 同一语义的错误在所有端点返回同一个 `code`。
 5. 响应不含密钥、不含原始网页正文。
 
-## 11. 测试要点
+## 10. 测试要点
 
 - 每个端点的成功路径与 4xx 路径；校验错误统一为 400。
 - 工作区路径校验：不存在、非目录、根目录、过宽路径、符号链接。
@@ -239,8 +234,8 @@ POST /tasks/{id}/reject    { "approval_id": "appr_…", "reason": "…" }
 - **审批**：`approval_id` 必填。预检在发 `task.approved` / `task.rejected` 事件**之前**做，所以错配（409 `APPROVAL_MISMATCH`）不留事件；重复提交同一决定返回当前状态，提交相反的决定是 409 `TASK_STATE_CONFLICT`。
 - **续跑**：`failed` 与 `terminated` 可续跑；`cancelled`、`succeeded` 不可（409）。
 - **删除**：任务运行中不能删（409）；删除会话或工作区会级联清掉其下任务的检查点、事件、产物与轨迹目录。
-- **`GET /tasks/{id}/trace`**：目前是事件的 NDJSON（已脱敏）；独立的轨迹文件见 [轨迹](../08_observability/02_trajectory_and_logs.md)，尚未实现。`/llm_calls` 在网关发出 `llm.call` 事件之前返回空列表；`/spans` 由事件推出（阶段一个、工具调用按 `call_id` 与结果配对）。
+- **`GET /tasks/{id}/trace`**：目前是事件的 NDJSON（已脱敏）；独立的轨迹文件见 [轨迹](../08_observability/02_trajectory_and_logs.md)，尚未实现。`/llm_calls` 在网关发出 `llm.call` 事件之前返回空列表；`/spans` 由事件推出（回合一个、工具调用按 `call_id` 与结果配对）。
 - **`GET /sessions/{id}/context`**：返回 `{segments[], total_tokens, context_window, skipped[]}`，`segments` 按 `system`、`tools`、`skills`、`mcp_index`、`project_rules`、`workspace`、`workspace_memory`、`session_memory`、`task_data`、`history` 的顺序，每段 `{id, tokens}`，另有 `system.customized`、`tools.count`、`history.turns`、`project_rules.status`。与真实任务同一套装配，系统提示词被改写、记忆变化后再取就是新值。检视器未装配时返回 503。
 - **自省**：`/tools` 与 `/models` 已接上；`/mcp/servers` 返回每个服务器的 `name`、`transport`、`status`（`disabled`/`idle`/`connected`/`failed`）、`tool_count`、`tools`、`rejected`（被拒工具与原因）、`last_error`、`retry_in_sec`，不含命令行与环境变量；`/skills` 返回内置与全局技能的名称、来源、描述、触发词、所需工具与告警（不含正文）。`/models` 不含密钥，也不含密钥所在的环境变量值。
-- **健康检查**：`/health/dependencies` 探测两个 sidecar，`web_search` 尚未实现时显示 `down`。
+- **健康检查**：`/health/dependencies` 探测两个 sidecar，哪个没起来就显示 `down`。
 - 路径参数（任务、会话、工作区 id）只接受 `[A-Za-z0-9_-]{1,64}`，产物 id 另允许点；`task_goal` 的上限由 `server.task_goal_max_chars` 控制，超出是 400。

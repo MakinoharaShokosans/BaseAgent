@@ -9,7 +9,7 @@ import pytest
 
 from agent_runtime.context import MemoryEntry, ProjectRules, PromptAssembler, PromptAssets
 from agent_runtime.core import FailedAttempt, Message, PlanItem, ToolCall
-from stage_support import MakeState, with_state
+from gateway_support import MakeState, with_state
 
 SYSTEM = "你是 BaseAgent。"
 

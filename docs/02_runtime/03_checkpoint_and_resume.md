@@ -129,11 +129,10 @@ async def resume_task(deps, task_id, decision=None):
 - 检查点库只被运行时进程写入，sidecar 不访问。
 - 同一任务的 `resume` 在已有运行实例时直接拒绝，不排队。
 
-## 8. 迁移
+## 8. 实现要点
 
-1. 旧版 `aegis_state.db`（LangGraph 格式）**不迁移**，使用新的库文件名，旧文件保留不动。
-2. 本目标设计之前的五阶段检查点（`phase` 列）不迁移续跑：已结束的只读保留，进行中或挂起的在续跑时拒绝并提示重新发起，见 [状态模型 §5](01_state_model.md)。
+- `CheckpointStore.commit(state, *, outcome="", reason="")` 单事务执行 UPSERT；`outcome` 非空时标记 `status = 'finished'`，否则按是否挂起写 `waiting` 或 `running`。
+- 表结构包含 `outcome` 与 `reason` 列记录终态原因，读取通过 `load_status`。
+- 未配对调用的尾部修复在 `checkpoint/recovery.py`，`mcp_call` 按目标工具判断幂等。
+- `resume_task` 对已处于 `finished` 状态的任务按 `outcome` 抛出 `TaskNotResumableError`。
 
-## 9. 实现状态
-
-**已实施。** `CheckpointStore.commit(state, *, outcome="", reason="")` 单事务 UPSERT；`outcome` 非空时 `status = 'finished'`，否则按是否挂起写 `waiting` / `running`。与 §2 表结构的差异：多了 `outcome`、`reason` 两列（终态怎么结束的、为什么），读取用 `load_status`；旧的 `phase` 表原样改名留存为 `task_checkpoints_legacy`（只读保留，v1、v2 状态不再解码）。`repair_tail` 在 `checkpoint/recovery.py`，`mcp_call` 按目标工具判断幂等。`resume_task` 对 `finished` 的任务按 `outcome` 报 `TaskNotResumableError`。

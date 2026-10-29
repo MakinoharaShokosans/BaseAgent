@@ -10,7 +10,7 @@
 flowchart LR
     U[用户浏览器] -->|HTTP + SSE| FE[前端 Vite :5173]
     FE -->|同源代理 + 令牌| API
-    subgraph AG[AegisAgent 进程 :8000]
+    subgraph AG[BaseAgent 进程 :11328]
         API[HTTP API] --> RT[Agent Runtime]
         RT --> MEM[(元数据库 baseagent_meta.db)]
         RT --> CK[(检查点库)]
@@ -27,12 +27,10 @@ flowchart LR
 | 进程 | 端口 | 角色 | 生命周期 |
 |---|---|---|---|
 | 前端（Vite 开发服务器） | 5173 | 控制台界面；开发时也是 API 的同源代理 | 由统一启动器管理 |
-| AegisAgent | 8000 | HTTP API 与运行时同进程 | 统一启动器管理 |
+| BaseAgent | 11328 | HTTP API 与运行时同进程 | 统一启动器管理 |
 | `bash_shell` | 8002 | 命令执行沙箱 | 由 Agent 的监督器拉起，或复用已在运行的外部实例 |
 | `web_search` | 8003 | 检索、抓取、清洗 | 同上 |
 | MCP 服务器 | — | 第三方工具进程 | 懒加载，由 MCP 管理器拉起 |
-
-端口 8001 原为 AegisRAG，随 RAG 移除。
 
 ### 2.1 为什么这样划分
 
@@ -51,21 +49,19 @@ flowchart LR
 | 存储 | 位置 | 内容 | 写入方 |
 |---|---|---|---|
 | 元数据库 | `storage/baseagent_meta.db` | 工作区、会话、对话流水、会话记忆、工作区记忆 | 记忆管理器 |
-| 检查点库 | `storage/checkpoints/…` | 每个任务最新的 `AgentState` 快照（新版自有表） | 主循环 |
-| 事件库（新版） | `storage/…/events.db` | 任务事件，供时间线与重放 | 任务注册表 |
+| 检查点库 | `storage/checkpoints/…` | 每个任务最新的 `AgentState` 快照 | 主循环 |
+| 事件库 | `storage/…/events.db` | 任务事件，供时间线与重放 | 任务注册表 |
 | 轨迹 | `storage/traces/{task_id}.jsonl` | 每步因果记录 | 轨迹记录器 |
 | 大块内容 | `storage/traces/{task_id}/llm/` | `llm.call` 的完整消息体 | 网关 |
 | 产物 | `storage/artifacts/{task_id}/` | 被裁剪的观察值、命令全量日志、网页正文 | 裁剪器、沙箱、web_search |
 | 日志 | `storage/logs/baseagent.jsonl` | 结构化运行日志 | Loguru |
-| 令牌 | `storage/api_token` | API 访问令牌（新版） | 启动流程 |
+| 令牌 | `storage/api_token` | API 访问令牌 | 启动流程 |
 
 全部是本地文件，SQLite 使用 WAL。没有外部数据库依赖。
 
-### 3.1 数据目录的锚定问题
+### 3.1 数据目录的锚定
 
-配置里的路径是**相对路径**，相对启动时的当前目录解析。现状仓库里同时存在根目录的 `storage/` 与 `AegisAgent/storage/`，里面各有一份数据库、令牌与日志，说明在不同目录启动会得到不同的数据集，用户的历史"消失"而没有任何提示。
-
-新版：引入 `BASEAGENT_HOME`（默认 `~/.local/share/baseagent`，可由环境变量或配置覆盖），所有相对路径相对它解析，并在启动看板里打印实际路径。开发时仍可指向仓库内的 `storage/`。
+系统通过 `BASEAGENT_HOME`（默认 `~/.local/share/baseagent`，可由环境变量或配置覆盖）作为数据根目录，所有存储相对路径均相对它解析，并在启动看板里打印实际路径。本地开发调试时可通过配置指向仓库内的 `storage/`。
 
 ## 4. 配置
 
@@ -76,7 +72,7 @@ flowchart LR
 - 配置在加载时**强校验**，不合法直接拒绝启动（例如监听非回环地址、端点密钥缺失且为云端）。
 - 配置文件里的敏感值（`env:VAR` 引用）在加载时解析一次，不写回。
 
-分区：运行时护栏、重试、上下文治理、存储路径、模型分档、服务寻址、API 接入、MCP、`bash_shell`、`web_search`、研究、子智能体、技能、权限。各分区的含义见对应子系统文档，去掉 RAG 后删除 `[services].rag_url` 与 `[code_search]`。
+分区：运行时护栏、重试、上下文治理、存储路径、模型分档、服务寻址、API 接入、MCP、`bash_shell`、`web_search`、研究、子智能体、技能、权限。各分区的含义见对应子系统文档。
 
 ## 5. 启动顺序
 
@@ -122,7 +118,7 @@ flowchart LR
 
 `baseagent` 命令一键管理多个进程：
 
-- 启动 AegisAgent 与前端，聚合输出并按进程打上带颜色的标签。
+- 启动 BaseAgent 与前端，聚合输出并按进程打上带颜色的标签。
 - 每个进程放在独立的进程组，退出时级联发 `SIGTERM`、超时后 `SIGKILL`，绝不残留孤儿进程。
 - 提供 `status`（探测各端口健康）与 `stop`（一键安全关机）。
 - 端口占用时给出清晰提示，不盲目杀进程。

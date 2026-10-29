@@ -10,7 +10,7 @@ from agent_runtime.memory import Fact, Failure, SessionMemory, Turn
 from agent_runtime.memory.compactor import ExtractionRequest
 from agent_runtime.memory.merge import MergeLimits
 from agent_runtime.runtime.extractor import CompactionOutput, GatewayExtractor
-from stage_support import FakeGateway, degraded, parsed
+from gateway_support import FakeGateway, degraded, parsed
 
 LIMITS = MergeLimits(50, 30, 300, True)
 

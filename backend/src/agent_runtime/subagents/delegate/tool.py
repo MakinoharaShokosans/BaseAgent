@@ -1,4 +1,4 @@
-"""``spawn_subagent``：动态委派。设计文档：docs/06_subagents/02_dynamic_delegation.md §2-3、§5.3。
+"""``spawn_subagent``：动态委派。设计文档：docs/06_subagents/01_dynamic_delegation.md §2-3、§5.3。
 
 入参是主模型生成的**提议**，不是授权。派发前一次性完成三道收窄（工具集全有或全无、权限不升级、
 深度），之后子级面对的是一个已经定死的世界。返回值恒标 ``untrusted``；拿到结构良好的报告就算成功。

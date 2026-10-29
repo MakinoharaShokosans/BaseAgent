@@ -4,20 +4,21 @@
 
 ## 1. 清单
 
-| 工具 | 作用 | 权限级别 | 幂等 | 状态 |
+| 工具 | 作用 | 权限级别 | 幂等 | 说明 |
 |---|---|---|---|---|
-| `view_file` | 带行号读取工作区文件片段 | read_only | 是 | 已有 |
-| `write_file` | 写入工作区文件 | workspace_write | 否（待定） | 已有 |
-| `bash` | 在工作区执行 Shell 命令 | 按命令分类 | 否 | 已有，见 [Shell 工具](03_shell_tool.md) |
-| `load_skill` | 载入技能 SOP | read_only | 是 | 已有，见 [Skills](05_skills.md) |
-| `read_artifact` | 读取本任务被裁剪的完整输出 | read_only | 是 | **新增** |
-| `edit_file` | 对文件做精确的局部替换 | workspace_write | 否 | **建议新增** |
-| `update_plan` | 整体替换会话草稿里的计划 | read_only | 是 | **目标设计**，见 [计划与草稿](../02_runtime/05_plan_and_scratch.md) |
-| `note` | 向会话草稿追加事实或失败尝试 | read_only | 是（重复忽略） | **目标设计**，同上 |
-| `websearch` | 受控的外部检索 | read_only | 否 | 已有，见 [websearch 工具](07_websearch_tool.md) |
-| `spawn_subagent` | 动态委派 | read_only（动作本身） | 否 | 已有，见 [动态委派](../06_subagents/02_dynamic_delegation.md) |
-
-`rag_search` 与 `delegate_code_search` 随 RAG 一起移除。
+| `view_file` | 带行号读取文件；支持范围、倒数、文件内正则搜索、显示空白 | read_only | 是 | §2、§13 |
+| `list_dir` | 列目录，可按通配符过滤 | read_only | 是 | §13 |
+| `grep` | 正则搜索（多行、`glob` 限定、`files` 摸底模式） | read_only | 是 | §13 |
+| `write_file` | 整文件写入（原子、自动备份） | workspace_write | 否 | §3 |
+| `edit_file` | 局部替换：精确文本或正则、多处 `edits` 一次提交 | workspace_write | 否 | §5、§13 |
+| `read_artifact` | 读取本任务被裁剪的完整输出 | read_only | 是 | §4 |
+| `bash` | 在工作区执行 Shell 命令 | 按命令分类 | 否 | 见 [Shell 工具](03_shell_tool.md) |
+| `load_skill` | 载入技能 SOP | read_only | 是 | 见 [Skills](05_skills.md) |
+| `update_plan` | 整体替换会话草稿里的计划 | read_only | 是 | 见 [计划与草稿](../02_runtime/05_plan_and_scratch.md) |
+| `note` | 向会话草稿追加事实或失败尝试 | read_only | 是（重复忽略） | 同上 |
+| `websearch` | 联网检索，或读取用户给过的网址 | read_only | 否 | 见 [websearch 工具](07_websearch_tool.md) |
+| `spawn_subagent` | 动态委派 | read_only（动作本身） | 否 | 见 [动态委派](../06_subagents/01_dynamic_delegation.md) |
+| `mcp_describe`、`mcp_call` | 索引里的 MCP 工具：先取定义，再调用（直接挂载的 MCP 工具不经过它们） | 随被调工具 | 否 | 见 [MCP](04_mcp.md) |
 
 ## 2. view_file
 
@@ -36,11 +37,11 @@
 - 起始行超出总行数返回失败，并告知总行数。
 - 超时 15 秒。
 
-缺口：
+缺口与考量：
 
-1. **整个文件读入内存再切片。** 一个几百兆的日志文件会占用大量内存。应改为按行流式读取到目标范围即停止，并设置文件大小上限（例如超过 10 MB 拒绝全量读取，只允许指定行范围）。
-2. **不识别二进制。** 读图片或编译产物会得到一堆替换字符，白白占用上下文。应检测空字节或高比例非文本字节，返回"疑似二进制文件，大小 N 字节"。
-3. **没有目录列表能力。** 模型只能靠 `bash ls`、`find` 浏览目录。去掉 RAG 后这一点更突出，见 §6。
+1. **按行流式读取与大小限制。** 避免大文件全量进内存，设置文件大小上限（如超 10MB 需指定行范围）。
+2. **二进制识别。** 检测空字节或高比例非文本字节，返回提示而非乱码。
+3. **目录浏览配合。** 配合 `list_dir` 快速定位项目文件结构。
 
 ## 3. write_file
 
@@ -53,7 +54,7 @@
 
 行为：路径校验同上；自动创建父目录；单次内容不超过 1,000,000 字节；UTF-8 写入；返回"已写入 path（N 字符）"。
 
-缺口：
+缺口（1、2、3、5 已补，见 §11）：
 
 1. **非原子写入。** 直接 `write_text`，写到一半进程崩溃会留下残缺文件。应先写临时文件再 `os.replace`。
 2. **不保留文件权限与换行风格。** 覆盖一个可执行脚本会丢掉执行位；覆盖 CRLF 文件会变 LF。至少应当保留原有权限位。
@@ -61,7 +62,7 @@
 4. **没有"改前必须先读"的硬约束。** 系统提示词要求先 `view_file`，但工具本身不检查。可选的强化：要求覆盖已有文件时附带上一次读取时的文件摘要（哈希），不一致则拒绝，避免覆盖用户在期间做的修改。
 5. 覆盖已有文件**没有任何备份**。用户的工作区里的未提交修改一旦被覆盖就无法找回。建议在写入前对被覆盖的文件在任务产物目录里留一份副本（`artifacts/{task_id}/overwritten/…`），成本低，价值高。
 
-## 4. read_artifact（新增）
+## 4. read_artifact
 
 解决"被裁剪的观察值无法取回"的问题，设计见 [观察值治理 §6](../03_context/01_observation_governance.md)。
 
@@ -75,7 +76,7 @@ read_artifact(artifact_id, start_line?, end_line?, grep?)
 - 产物的原工具信任级随产物一起记录；原工具不可信时读取结果同样带不可信信封。
 - 不能读取其他任务的产物。
 
-## 5. edit_file（建议新增）
+## 5. edit_file
 
 ```
 edit_file(path, old_string, new_string, replace_all=false)
@@ -86,11 +87,11 @@ edit_file(path, old_string, new_string, replace_all=false)
 - 失败时给出最接近的候选片段（可选），帮助模型修正。
 - 权限级别同 `write_file`。
 
-这是目前代码修改场景里最有价值的一个缺口：局部精确修改既省 Token，又避免整文件重写带来的副作用。
+局部精确修改既省 Token，又避免整文件重写带来的副作用。已实现，增强（正则、多处编辑、行范围限定、换行与 BOM 保持）见 §13。
 
-## 6. 去掉 RAG 之后的代码定位
+## 6. 代码工程定位方案
 
-旧版靠 `rag_search` 做语义检索；去掉之后，定位代码完全依赖 `bash` 中的 `grep`、`rg`、`find`、`ls` 和 `view_file`。要让这套组合足够好用：
+系统定位代码完全依赖符号检索与文件工具（`bash` 中的 `grep`/`rg`/`find`、结构化 `grep`/`list_dir` 和 `view_file`）。为了保障该组合高效可靠：
 
 1. 在环境里确保 `rg`（ripgrep）可用，并在启动自检里检查，缺失则回退到 `grep -rn`，见 [Shell 工具 §4](03_shell_tool.md) 的命令规范。
 2. 考虑新增只读的 `list_dir(path, depth=2, max_entries=200)`，自动忽略 `.git`、`node_modules`、`__pycache__` 等噪音目录，比让模型反复拼 `find` 命令更稳。
@@ -129,7 +130,6 @@ edit_file(path, old_string, new_string, replace_all=false)
 ## 10. 待定
 
 - `write_file` 是否声明为幂等。
-- 是否内置 `list_dir` 与 `grep`，还是只靠 `bash`。倾向内置，理由见 §6。
 - 文件监视：任务期间用户在外部修改了文件，Agent 如何得知。目前不支持，写入前的哈希校验是最小可行的保护。
 
 ## 11. 实现状态
@@ -139,7 +139,7 @@ edit_file(path, old_string, new_string, replace_all=false)
 相对上文的差异与补强：
 
 - **`view_file` 流式读取。** 按行迭代到目标范围之后继续数总行数，不整文件读入内存；未指定行范围且文件超过 `view_max_file_mb` 时拒绝并提示指定范围；前 8 KB 含空字节判为二进制，返回“疑似二进制文件，大小 N 字节”（§2 缺口 1、2 已补）。`end_line` 超过单次上限时同样被截断并给出续读提示。
-- **`write_file` 原子写入。** 写同目录临时文件再 `os.replace`，失败时临时文件被清掉、原文件不动；保留已有文件的权限位；不做换行转译（按字节写入，CRLF 内容原样保留）；大小上限按**字节**计，不按字符。覆盖已有文件前若配置了备份目录（`backup_overwritten`，默认 `artifacts/{task_id}/overwritten/<相对路径>`，重名加 `.1`、`.2`），先拷贝一份；**备份失败则不写**，因为“不得静默丢失用户数据”比“写成功”重要（§3 缺口 1、2、5 已补；缺口 4 的哈希校验未做）。
+- **`write_file` 原子写入。** 写同目录临时文件再 `os.replace`，失败时临时文件被清掉、原文件不动；保留已有文件的权限位；不做换行转译（按字节写入，CRLF 内容原样保留）；大小上限按**字节**计，不按字符。覆盖已有文件前先拷贝一份到备份目录（`{数据目录}/backups/{task_id}/<相对路径>`，重名加 `.1`、`.2`；一直开启，没有开关）；**备份失败则不写**，因为“不得静默丢失用户数据”比“写成功”重要（§3 缺口 1、2、5 已补；缺口 4 的哈希校验未做）。
 - **路径沙箱只有一个函数。** `resolve_within_root`：相对路径按根解释、`resolve()` 之后必须在根内；目标尚不存在时也成立（指向工作区外的符号链接目录之下的新文件同样被拦）。空串、NUL 字节、符号链接环都报“路径不可用”。
 - **`read_artifact`。** `TaskArtifacts` 是任务绑定对象：工具执行每次进入时把 `state.artifacts` **整体替换**推给它（旧实现的 `ToolRunnerDeps.bind`），别的任务的产物不会残留；只接受已登记的 id（可带 `artifact://` 前缀），失败时列出已有 id 但不暴露路径；即使登记表被篡改，解析后的路径也必须在产物根目录内，符号链接指到外面同样被拒。`grep` 给出时忽略行范围，每行最多匹配前 2000 字符，结果上限 `grep_max_results`。
 - **产物来源信任。** 登记表里只有 `id -> 路径`，所以来源工具从句柄推：`obs_step_{n}_{工具}` 与 sidecar 的 `step_{n}_{工具}`。同一步的重名后缀（`_2`）与带数字的工具名分不开，所以**两种读法都在可信名单里才算可信**，认不出来源的取不可信；代价是同一步第二个 `bash` 的产物多包一层信封，无害。

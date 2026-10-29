@@ -78,7 +78,7 @@ temperature = 0.0
 # name / base_url / model / api_key_env / timeout_sec
 # context_window / max_output_tokens / temperature / reasoning_effort   新增
 [models.reasoning.endpoints.capabilities]
-# tools / parallel_tools / json_object / json_schema / usage_in_response
+# tools / json_object / json_schema / usage_in_response
 # reasoning_field / reasoning_passback
 
 [structured]

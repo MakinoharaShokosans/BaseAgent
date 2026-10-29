@@ -160,8 +160,6 @@ async def dispatch(calls: Sequence[tuple[str, str, Mapping]]) -> list[Dispatched
 - 工具层把它转成 `ToolResult.failure`，所以 sidecar 挂掉时模型看到的是一条可读的失败观察值。
 - 任务结束时由装配层逐个 `aclose()`。
 
-> 去掉 RAG 后，客户端只剩 shell 与 web 两个目标；`services.rag_url` 配置和对应健康探测随之删除。
-
 ## 10. 内置工具装配
 
 `build_builtin_tools(...)` 在任务启动时按需装配**可信**工具：
