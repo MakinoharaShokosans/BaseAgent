@@ -2,6 +2,8 @@
 
 Agent 运行时、HTTP API 与两个 sidecar（`bash_shell`、`web_search`）。设计见仓库根的 [`docs/`](../docs/)，启动与总览见仓库根的 [`README.md`](../README.md)。
 
+> 📖 **快速定位与修改指南**：详见 [**`DIRECTORY_GUIDE.md`**](DIRECTORY_GUIDE.md)，包含三层架构拓扑、任务执行时序图以及按修改需求的秒查索引表。
+
 ## 目录
 
 ```

@@ -35,6 +35,8 @@ subagents  context  llm      tools        guardrails
 
 ## 2. 目录布局与模块职责
 
+> 详尽的按改动场景索引与生命周期图见 [**`backend/DIRECTORY_GUIDE.md`**](../../backend/DIRECTORY_GUIDE.md)。
+
 ```
 backend/src/
 ├── baseagent_config/         配置系统：Pydantic 模型、加载器、多源合并与强校验
