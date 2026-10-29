@@ -200,10 +200,7 @@ export function Card({
   return (
     <section
       aria-label={title}
-      className={cn(
-        'soft-card px-4 py-3.5 transition-[box-shadow,transform] duration-200 hover:shadow-float',
-        className,
-      )}
+      className={cn('bg-transparent px-1 py-1.5', className)}
     >
       <header className="flex items-center gap-2">
         <button
