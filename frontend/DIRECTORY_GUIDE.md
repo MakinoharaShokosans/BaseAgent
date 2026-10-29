@@ -26,9 +26,8 @@
 ```
 
 | 界面区域 | 对应核心入口组件 | 内部子组件 / 辅助文件 | 核心职责 |
-|---|---|---|---|
 | **左侧导航栏** | [`features/sidebar/Sidebar.tsx`](src/features/sidebar/Sidebar.tsx) | [`components/ui/StatusDot.tsx`](src/components/ui/StatusDot.tsx)<br>[`components/modals/WorkspaceModal.tsx`](src/components/modals/WorkspaceModal.tsx) | 工作区列表、会话树、搜索、字体动态下划线、未读消除、新建/删除/分叉会话 |
-| **中央对话流** | [`features/conversation/ConversationPage.tsx`](src/features/conversation/ConversationPage.tsx) | [`features/conversation/RunView.tsx`](src/features/conversation/RunView.tsx)<br>[`features/conversation/useReplay.ts`](src/features/conversation/useReplay.ts) | 消息流呈现、自动滚动与“回到最新”、任务历史回放、首个任务自动生成标题 |
+| **中央对话流** | [`features/conversation/ConversationPage.tsx`](src/features/conversation/ConversationPage.tsx) | [`ConversationTimelineRail.tsx`](src/features/conversation/ConversationTimelineRail.tsx) (右侧时间轴滑动窗口节点导航)<br>[`features/conversation/RunView.tsx`](src/features/conversation/RunView.tsx)<br>[`features/conversation/useReplay.ts`](src/features/conversation/useReplay.ts) | 消息流呈现、时间轴节点滚动定位、自动滚动与“回到最新”、任务历史回放、首个任务自动生成标题 |
 | **消息/步骤块** | [`features/conversation/blocks/`](src/features/conversation/blocks/) | [`SayBlock.tsx`](src/features/conversation/blocks/SayBlock.tsx)<br>[`ReasoningBlock.tsx`](src/features/conversation/blocks/ReasoningBlock.tsx)<br>[`ToolCard.tsx`](src/features/conversation/blocks/ToolCard.tsx)<br>[`AgentGroup.tsx`](src/features/conversation/blocks/AgentGroup.tsx) | 单条消息内容渲染、深度思考折叠展开、终端/编辑工具调用卡片及实时日志流、子智能体嵌套分组 |
 | **底部输入区** | [`features/conversation/Composer.tsx`](src/features/conversation/Composer.tsx) | [`components/ui/Select.tsx`](src/components/ui/Select.tsx)<br>[`stores/useQueueStore.ts`](src/stores/useQueueStore.ts) | 多行自动伸缩输入框、快捷键、模型切换、权限挡位 (ask/auto/bypass)、排队与待生效提示 |
 | **右侧检视器** | [`features/inspector/Inspector.tsx`](src/features/inspector/Inspector.tsx) | [`TaskCard.tsx`](src/features/inspector/TaskCard.tsx)<br>[`ContextCard.tsx`](src/features/inspector/ContextCard.tsx) | 任务指标（回合/工具/Token/用时 SVG）、计划项 Checklist 跳转定位、产物列表、上下文窗口与记忆统计 |
