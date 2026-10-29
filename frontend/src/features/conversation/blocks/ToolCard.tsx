@@ -78,8 +78,8 @@ function Pre({ text, className, tone }: { text: string; className?: string; tone
   return (
     <pre
       className={cn(
-        'max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code px-3 py-2 font-mono text-[12px] leading-relaxed text-code-ink',
-        tone === 'err' && 'ring-1 ring-bad/40',
+        'max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-ink/[0.07] bg-code px-3 py-2 font-mono text-[12px] leading-relaxed text-code-ink dark:border-white/[0.08]',
+        tone === 'err' && 'border-bad/40 bg-bad/[0.06] text-bad',
         className,
       )}
     >
@@ -120,7 +120,7 @@ function Diff({ before, after, path }: { before: string; after: string; path?: s
         </span>
       }
     >
-      <div className="max-h-80 overflow-auto rounded-lg bg-code py-1 font-mono text-[12px] leading-[1.6] text-code-ink">
+      <div className="max-h-80 overflow-auto rounded-lg border border-ink/[0.07] bg-code py-1 font-mono text-[12px] leading-[1.6] text-code-ink dark:border-white/[0.08]">
         {lines.map((l, i) => (
           <div
             key={i}

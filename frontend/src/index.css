@@ -25,8 +25,8 @@
     --c-ok: 16 185 129;
     --c-warn: 245 158 11;
     --c-bad: 239 68 68;
-    --c-code: 15 23 42;
-    --c-code-ink: 241 245 249;
+    --c-code: 241 245 249;
+    --c-code-ink: 15 23 42;
     /* Linear/Raycast 电气蓝紫色微渐变，只用于最关键的高光点按与焦点引导 */
     --brand: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
     /* 1px 发丝倒角边框 + 顶部物理高光 + 多层超软漫射投影，塑造精密五金/高光屏幕质感 */
@@ -287,18 +287,26 @@
 }
 .hljs-string,
 .hljs-attr {
-  color: rgb(var(--c-ok));
+  color: #0d9488;
 }
 .hljs-number,
 .hljs-literal {
   color: rgb(var(--c-accent-2));
 }
 .hljs-comment {
-  color: rgb(var(--c-code-ink) / 0.45);
+  color: rgb(var(--c-code-ink) / 0.5);
   font-style: italic;
 }
 .hljs-title,
 .hljs-function {
+  color: #d97706;
+}
+[data-theme='dark'] .hljs-string,
+[data-theme='dark'] .hljs-attr {
+  color: rgb(var(--c-ok));
+}
+[data-theme='dark'] .hljs-title,
+[data-theme='dark'] .hljs-function {
   color: rgb(var(--c-warn));
 }
 

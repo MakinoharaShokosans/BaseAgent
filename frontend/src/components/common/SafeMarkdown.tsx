@@ -20,11 +20,11 @@ function CodeBlock({ children }: { children?: ReactNode }) {
       : '';
   const language = /language-([\w+#-]+)/.exec(className)?.[1] ?? '';
   return (
-    <div className="not-prose overflow-hidden rounded-2xl bg-code text-code-ink">
-      <div className="flex items-center px-4 pt-2.5 text-2xs text-code-ink/50">
+    <div className="not-prose overflow-hidden rounded-2xl border border-ink/[0.07] bg-code text-code-ink dark:border-white/[0.08]">
+      <div className="flex items-center px-4 pt-2.5 text-2xs text-code-ink/60">
         <span className="font-mono">{language || 'text'}</span>
         <button
-          className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-white/10 hover:text-code-ink"
+          className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-ink/[0.06] hover:text-code-ink dark:hover:bg-white/10"
           aria-label="复制代码"
           onClick={() => {
             void navigator.clipboard?.writeText(ref.current?.textContent ?? '');
