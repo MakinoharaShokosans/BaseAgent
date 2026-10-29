@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { ArrowDown, ChevronRight, Menu, MessageSquare, PanelRight, WifiOff } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/endpoints';
 import {
   hasSessionMeta,
@@ -32,6 +32,7 @@ import {
 import { cn } from '../../utils/text';
 import { Inspector } from '../inspector/Inspector';
 import { Composer } from './Composer';
+import { ConversationTimelineRail, type DialogueNode } from './ConversationTimelineRail';
 import { RunView } from './RunView';
 import { useReplay } from './useReplay';
 
@@ -273,6 +274,45 @@ export function ConversationPage() {
     : '';
   const known = run && ordered.some((t) => t.task_id === run.taskId);
 
+  const allTasks = useMemo(() => {
+    const list = [...ordered];
+    if (run && !known) {
+      list.push({
+        task_id: run.taskId,
+        task_goal: run.goal,
+        status: run.status,
+        session_id: sessionId,
+        workspace_id: workspaceId,
+        created_at: run.startedTs ?? 0,
+        updated_at: run.finishedTs ?? 0,
+        step_count: run.stepCount,
+      } as unknown as Task);
+    }
+    return list;
+  }, [ordered, run, known, sessionId, workspaceId]);
+
+  const timelineDialogues: DialogueNode[] = useMemo(() => {
+    return allTasks.map((t, index) => ({
+      id: t.task_id,
+      goal: t.task_goal,
+      index,
+    }));
+  }, [allTasks]);
+
+  const [activeTaskIndex, setActiveTaskIndex] = useState(0);
+
+  const scrollToTurn = useCallback(
+    (index: number) => {
+      const el = document.getElementById(`chat-turn-${index}`);
+      if (el) {
+        stick.current = index === timelineDialogues.length - 1;
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setActiveTaskIndex(index);
+      }
+    },
+    [timelineDialogues.length],
+  );
+
   return (
     <div className="flex h-full min-h-0">
       <div className="relative flex min-w-0 flex-1 flex-col">
@@ -351,42 +391,67 @@ export function ConversationPage() {
           </div>
         </header>
 
-        <div
-          ref={scroller}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-            stick.current = nearBottom;
-            setAway(!nearBottom);
-            if (nearBottom) {
-              markSessionRead(sessionId);
-            }
-          }}
-          className="min-h-0 flex-1 overflow-y-auto"
-        >
-          <div className="mx-auto w-full max-w-[780px] space-y-5 px-3 py-5 sm:px-5">
-            {ordered.map((t) => (
-              <div key={t.task_id} className="space-y-3">
-                <UserMessage text={t.task_goal} />
-                {run && run.taskId === t.task_id ? (
-                  <RunView run={run} live />
-                ) : (
-                  <PastTask task={t} turn={turnByTask.get(t.task_id)} />
-                )}
-              </div>
-            ))}
-            {run && !known && (
-              <div className="space-y-3">
-                <UserMessage text={run.goal} />
-                <RunView run={run} live />
-              </div>
-            )}
-            {!ordered.length && !run && tasks.isSuccess && (
-              <div className="flex flex-col items-center gap-3 py-28 text-mute/35" aria-hidden>
-                <MessageSquare size={30} strokeWidth={1.4} />
-              </div>
-            )}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            ref={scroller}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              stick.current = nearBottom;
+              setAway(!nearBottom);
+              if (nearBottom) {
+                markSessionRead(sessionId);
+                if (timelineDialogues.length) setActiveTaskIndex(timelineDialogues.length - 1);
+              } else if (el.scrollTop < 40) {
+                setActiveTaskIndex(0);
+              } else {
+                const containerTop = el.getBoundingClientRect().top;
+                let bestIndex = 0;
+                let minDiff = Infinity;
+                for (let i = 0; i < timelineDialogues.length; i++) {
+                  const turnEl = document.getElementById(`chat-turn-${i}`);
+                  if (!turnEl) continue;
+                  const rect = turnEl.getBoundingClientRect();
+                  const diff = Math.abs(rect.top - containerTop - 60);
+                  if (diff < minDiff) {
+                    minDiff = diff;
+                    bestIndex = i;
+                  }
+                }
+                setActiveTaskIndex(bestIndex);
+              }
+            }}
+            className="no-scrollbar min-h-0 flex-1 overflow-y-auto"
+          >
+            <div className="mx-auto w-full max-w-[780px] space-y-5 px-3 py-5 sm:px-5">
+              {allTasks.map((t, index) => (
+                <div
+                  key={t.task_id}
+                  id={`chat-turn-${index}`}
+                  data-task-index={index}
+                  className="scroll-mt-4 space-y-3"
+                >
+                  <UserMessage text={t.task_goal} />
+                  {run && run.taskId === t.task_id ? (
+                    <RunView run={run} live />
+                  ) : (
+                    <PastTask task={t} turn={turnByTask.get(t.task_id)} />
+                  )}
+                </div>
+              ))}
+              {!allTasks.length && !run && tasks.isSuccess && (
+                <div className="flex flex-col items-center gap-3 py-28 text-mute/35" aria-hidden>
+                  <MessageSquare size={30} strokeWidth={1.4} />
+                </div>
+              )}
+            </div>
           </div>
+
+          <ConversationTimelineRail
+            dialogues={timelineDialogues}
+            activeIndex={activeTaskIndex}
+            onSelect={scrollToTurn}
+          />
         </div>
 
         <AnimatePresence>
