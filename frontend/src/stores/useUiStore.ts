@@ -16,6 +16,10 @@ interface Prefs {
   openWorkspaces: string[];
   /** 用户是否手动开合过工作区；没动过时首次进入自动展开当前工作区 */
   workspacesTouched: boolean;
+  /** 各会话已读的时间戳（秒）：只要大于等于任务完成时间，就不再显示绿点 */
+  readSessions: Record<string, number>;
+  /** 首次引入已读机制的时间戳，旧会话历史任务默认视作已读，避免历史会话满屏绿点 */
+  initialReadCutoff: number;
 }
 
 interface UiState extends Prefs {
@@ -38,6 +42,8 @@ interface UiState extends Prefs {
   setTheme: (theme: ThemePref) => void;
   /** 侧栏底部的按钮：在浅色与暗色之间切换（"跟随系统"时按当前实际明暗翻转） */
   toggleTheme: () => void;
+  /** 标记会话已读（滑到最底部时触发，消除绿点） */
+  markSessionRead: (sessionId: string, timestamp?: number) => void;
 }
 
 const KEY = 'baseagent.ui.v2';
@@ -49,12 +55,21 @@ const DEFAULTS: Prefs = {
   thinking: 'expanded',
   openWorkspaces: [],
   workspacesTouched: false,
+  readSessions: {},
+  initialReadCutoff: Math.floor(Date.now() / 1000),
 };
 
 function load(): Prefs {
   try {
     const raw = window.localStorage.getItem(KEY);
-    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) } : DEFAULTS;
+    if (!raw) return DEFAULTS;
+    const parsed = JSON.parse(raw) as Partial<Prefs>;
+    return {
+      ...DEFAULTS,
+      ...parsed,
+      readSessions: parsed.readSessions ?? {},
+      initialReadCutoff: parsed.initialReadCutoff ?? Math.floor(Date.now() / 1000),
+    };
   } catch {
     return DEFAULTS;
   }
@@ -70,6 +85,8 @@ function save(state: Prefs): void {
       thinking,
       openWorkspaces,
       workspacesTouched,
+      readSessions,
+      initialReadCutoff,
     } = state;
     window.localStorage.setItem(
       KEY,
@@ -81,6 +98,8 @@ function save(state: Prefs): void {
         thinking,
         openWorkspaces,
         workspacesTouched,
+        readSessions,
+        initialReadCutoff,
       }),
     );
   } catch {
@@ -139,6 +158,17 @@ export const useUiStore = create<UiState>((set) => ({
   openCard: (id) => set((s) => ({ collapsedCards: s.collapsedCards.filter((c) => c !== id) })),
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((s) => ({ theme: resolvedDark(s.theme) ? 'light' : 'dark' })),
+  markSessionRead: (sessionId, timestamp = Date.now() / 1000) =>
+    set((s) => {
+      const prev = s.readSessions[sessionId] ?? 0;
+      if (prev >= timestamp) return s;
+      return {
+        readSessions: {
+          ...s.readSessions,
+          [sessionId]: timestamp,
+        },
+      };
+    }),
 }));
 
 useUiStore.subscribe(save);

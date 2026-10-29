@@ -27,4 +27,13 @@ describe('useUiStore persistence', () => {
       false,
     );
   });
+
+  it('marks sessions as read and persists timestamp', async () => {
+    const store = await freshStore();
+    store.getState().markSessionRead('sess-1', 12345);
+    expect(store.getState().readSessions['sess-1']).toBe(12345);
+    expect(
+      JSON.parse(window.localStorage.getItem('baseagent.ui.v2') ?? '{}').readSessions['sess-1'],
+    ).toBe(12345);
+  });
 });

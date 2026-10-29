@@ -260,9 +260,6 @@ export function Sidebar({ collapsedRail = false }: { collapsedRail?: boolean }) 
       className="relative z-drawer flex h-full w-[280px] max-w-[86vw] shrink-0 flex-col overflow-hidden border-r border-ink/[0.06] bg-side/80 backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.06]"
     >
       <div className="flex h-12 shrink-0 items-center gap-1 px-3">
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand text-[13px] font-bold text-white">
-          B
-        </span>
         <span className="min-w-0 flex-1" />
         <IconButton
           label={searching ? '关闭搜索' : '搜索会话'}
@@ -482,15 +479,15 @@ function WorkspaceNode({
     <section aria-label={workspace.name}>
       <div
         className={cn(
-          'group flex h-9 items-center gap-1 rounded-xl pl-1 pr-0.5 transition-colors hover:bg-ink/[0.045]',
-          current && 'bg-ink/[0.04]',
+          'group relative flex h-9 items-center gap-1 rounded-xl pl-1 pr-0.5 transition-colors',
+          current ? '' : 'hover:bg-ink/[0.035]',
         )}
       >
         <button
           aria-expanded={open}
           aria-label={open ? '折叠' : '展开'}
           onClick={onToggle}
-          className="flex h-7 w-6 shrink-0 items-center justify-center text-mute"
+          className="flex h-7 w-6 shrink-0 items-center justify-center text-mute hover:text-ink"
         >
           <ChevronRight
             size={14}
@@ -499,9 +496,21 @@ function WorkspaceNode({
         </button>
         <button
           onClick={onOpenPage}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13.5px] font-semibold"
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2 text-left text-[13.5px] font-semibold transition-colors',
+            current ? 'text-ink' : 'text-mute hover:text-ink',
+          )}
         >
-          <span className="truncate">{workspace.name}</span>
+          <span className="relative min-w-0 max-w-full">
+            <span className="block truncate">{workspace.name}</span>
+            {current && (
+              <motion.div
+                layoutId="active-workspace-underline"
+                className="absolute -bottom-0.5 inset-x-0 h-[2px] rounded-full bg-accent"
+                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+              />
+            )}
+          </span>
           {busy && <StatusDot status="running" size={6} />}
         </button>
         <div className="flex shrink-0 items-center opacity-100 sm:opacity-0 sm:transition-opacity sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
@@ -580,9 +589,16 @@ function SessionRow({
   onFork: () => void;
   onDelete: () => void;
 }) {
+  const readSessions = useUiStore((s) => s.readSessions);
+  const initialReadCutoff = useUiStore((s) => s.initialReadCutoff);
   const title = sessionTitle(session, activity);
   const when = session.updated_at ?? (activity?.status ? activity.at : session.created_at);
   const manageable = hasSessionMeta(session);
+
+  const readAt = readSessions[session.session_id] ?? initialReadCutoff;
+  const isRead = readAt >= (activity?.at ?? 0);
+  const displayStatus = activity?.status === 'succeeded' && isRead ? null : activity?.status;
+
   return (
     <motion.div layout="position" transition={{ duration: 0.18 }} className="group relative">
       <div
@@ -598,11 +614,13 @@ function SessionRow({
         }}
         onDoubleClick={manageable ? onStartRename : undefined}
         className={cn(
-          'flex h-8 cursor-pointer items-center gap-2 rounded-lg pl-2 pr-1 text-[13px] text-mute transition-colors hover:bg-ink/[0.05] hover:text-ink',
-          current && 'bg-ink/[0.07] font-medium text-ink',
+          'relative flex h-8 cursor-pointer items-center gap-2 rounded-lg pl-2 pr-1 text-[13px] transition-colors',
+          current
+            ? 'font-medium text-ink'
+            : 'text-mute hover:bg-ink/[0.035] hover:text-ink',
         )}
       >
-        <StatusDot status={activity?.status} size={7} />
+        {displayStatus && <StatusDot status={displayStatus} size={7} />}
         {editing ? (
           <InlineEdit
             label="会话标题"
@@ -612,7 +630,17 @@ function SessionRow({
           />
         ) : (
           <>
-            <span className="min-w-0 flex-1 truncate">{title}</span>
+            <span className="relative min-w-0 max-w-full">
+              <span className="block truncate">{title}</span>
+              {current && (
+                <motion.div
+                  layoutId="active-session-underline"
+                  className="absolute -bottom-0.5 inset-x-0 h-[2px] rounded-full bg-accent"
+                  transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                />
+              )}
+            </span>
+            <span className="min-w-0 flex-1" />
             {session.pinned && (
               <Pin size={11} className="shrink-0 text-accent" aria-label="已置顶" />
             )}

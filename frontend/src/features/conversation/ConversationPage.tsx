@@ -110,6 +110,7 @@ export function ConversationPage() {
   const inspectorOpen = useUiStore((s) => s.inspectorOpen);
   const drawerOpen = useUiStore((s) => s.drawerOpen);
   const toggleInspector = useUiStore((s) => s.toggleInspector);
+  const markSessionRead = useUiStore((s) => s.markSessionRead);
 
   const queue = useQueueStore((s) => queueOf(s, sessionId));
   const session = sessions.data?.find((s) => s.session_id === sessionId);
@@ -238,12 +239,16 @@ export function ConversationPage() {
   const tick = (run?.items.length ?? 0) + tailSize;
   useEffect(() => {
     const el = scroller.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [tick, run?.status, ordered.length]);
+    if (el && stick.current) {
+      el.scrollTop = el.scrollHeight;
+      markSessionRead(sessionId);
+    }
+  }, [sessionId, tick, run?.status, ordered.length, markSessionRead]);
   useEffect(() => {
     stick.current = true;
     setAway(false);
-  }, [sessionId]);
+    markSessionRead(sessionId);
+  }, [sessionId, markSessionRead]);
 
   const turnByTask = useMemo(() => {
     const map = new Map<string, Turn>();
@@ -348,6 +353,9 @@ export function ConversationPage() {
             const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
             stick.current = nearBottom;
             setAway(!nearBottom);
+            if (nearBottom) {
+              markSessionRead(sessionId);
+            }
           }}
           className="min-h-0 flex-1 overflow-y-auto"
         >
@@ -389,6 +397,8 @@ export function ConversationPage() {
                 className="pointer-events-auto h-9 w-9 rounded-full bg-raised shadow-float"
                 onClick={() => {
                   stick.current = true;
+                  setAway(false);
+                  markSessionRead(sessionId);
                   const el = scroller.current;
                   el?.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
                 }}
