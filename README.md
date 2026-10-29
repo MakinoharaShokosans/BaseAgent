@@ -2,8 +2,6 @@
 
 一个自研的 Agent 运行时底座，给想自己做 Agent、又不想被现成框架绑住的开发者，当作 vibe coding 的起点。
 
-> 项目原名 Aegis。命令行、环境变量、数据目录等已经全部改成 BaseAgent；旧名字仍然兼容（`aegis` 命令、`AEGIS_*` 变量、`~/.local/share/aegis` 数据目录），不需要你手动迁移，细节见 [配置 §9](docs/01_architecture/04_configuration.md)。
-
 ## 为什么有这个项目
 
 我想做的是"能放进自己产品里的 Agent"，找下来发现两头都不太合适：

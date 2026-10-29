@@ -35,7 +35,7 @@ node_modules/
 *.tsbuildinfo
 
 # 编辑器与系统
-.claude/settings.local.json
+.claude/
 .idea/
 .vscode/
 .DS_Store

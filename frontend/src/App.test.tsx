@@ -15,9 +15,11 @@ describe('App', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
-    expect(screen.getByRole('heading', { name: 'BaseAgent' })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText(/还没有工作区/)).toBeInTheDocument());
-    expect(screen.getByText('在左侧选择一个会话，或新建一个会话开始')).toBeInTheDocument();
+    expect(await screen.findByLabelText('侧栏')).toBeInTheDocument();
+    // 一个工作区都没有：侧栏与主区都只留添加动作（空状态不放文案）
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: '添加工作区' }).length).toBeGreaterThan(0),
+    );
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(calls.some((u) => u === '/api/v1/workspaces')).toBe(true);
     expect(calls.every((u) => !u.includes('token='))).toBe(true);

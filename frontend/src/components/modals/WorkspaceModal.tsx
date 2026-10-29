@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../../api/endpoints';
-import { useAppStore } from '../../stores/useAppStore';
+import { useNavigate } from '@tanstack/react-router';
 import { DirectoryPicker } from '../common/DirectoryPicker';
 import { Button, Modal } from '../ui/primitives';
 
 export function WorkspaceModal({ onClose }: { onClose: () => void }) {
   const client = useQueryClient();
-  const select = useAppStore((s) => s.selectWorkspace);
+  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [rootPath, setRootPath] = useState('');
   const [browsing, setBrowsing] = useState(false);
@@ -17,7 +17,7 @@ export function WorkspaceModal({ onClose }: { onClose: () => void }) {
       api.workspaces.create({ name: name.trim() || basename(rootPath), root_path: rootPath }),
     onSuccess: async (workspace) => {
       await client.invalidateQueries({ queryKey: ['workspaces'] });
-      select(workspace.workspace_id);
+      void navigate({ to: '/w/$workspaceId', params: { workspaceId: workspace.workspace_id } });
       onClose();
     },
   });

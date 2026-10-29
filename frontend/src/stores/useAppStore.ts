@@ -1,25 +1,29 @@
-/** 界面状态与当前任务的运行视图。快照走 TanStack Query，进度走 SSE 归约。 */
+/** 当前任务的运行视图与提示。当前位置（工作区 / 会话）由路由决定，这里不再保存。 */
 import { create } from 'zustand';
 import { api } from '../api/endpoints';
 import { subscribe, type ConnectionState, type SseHandle } from '../api/sse';
 import { http } from '../api/http';
 import type { PermissionLevel, Task } from '../types/api';
 import { TERMINAL_STATUSES } from '../types/api';
+import { usePendingStore } from './usePendingStore';
 import { emptyRun, reduceTaskEvent, runFromSnapshot, type RunState } from './taskReducer';
 
 interface AppState {
-  workspaceId: string | null;
-  sessionId: string | null;
+  /** run 属于哪个会话；切换会话时清空 */
+  runSession: string | null;
   run: RunState | null;
   connection: ConnectionState;
   /** 最近一次操作的错误（含 trace_id），界面提示后可清除 */
   notice: { message: string; traceId?: string; tone?: 'error' | 'info' } | null;
   /** 轻量提示：info 是成功反馈（如“已复制”），自动消失；error 需要手动关闭 */
   notify: (message: string, tone?: 'error' | 'info') => void;
-  selectWorkspace: (id: string | null) => void;
-  selectSession: (id: string | null) => void;
-  submit: (goal: string, level: PermissionLevel, confirmFull: boolean) => Promise<void>;
-  attach: (task: Task) => Promise<void>;
+  submit: (
+    sessionId: string,
+    goal: string,
+    level: PermissionLevel,
+    confirmFull: boolean,
+  ) => Promise<Task | null>;
+  attach: (sessionId: string, task: Task) => Promise<void>;
   approve: (decision: 'once' | 'always') => Promise<void>;
   reject: (reason: string) => Promise<void>;
   resume: () => Promise<void>;
@@ -55,77 +59,74 @@ export const useAppStore = create<AppState>((set, get) => {
     });
   }
 
-  async function guarded(action: () => Promise<void>): Promise<void> {
+  async function guarded<T>(action: () => Promise<T>): Promise<T | null> {
     try {
-      await action();
+      return await action();
     } catch (error) {
       const e = error as { message?: string; traceId?: string };
       set({ notice: { message: e.message ?? String(error), traceId: e.traceId || undefined } });
+      return null;
     }
   }
 
   return {
-    workspaceId: null,
-    sessionId: null,
+    runSession: null,
     run: null,
     connection: 'closed',
     notice: null,
-    selectWorkspace: (id) => {
-      stop();
-      set({ workspaceId: id, sessionId: null, run: null, connection: 'closed' });
-    },
-    selectSession: (id) => {
-      stop();
-      set({ sessionId: id, run: null, connection: 'closed' });
-    },
-    submit: (goal, level, confirmFull) =>
+    submit: (sessionId, goal, level, confirmFull) =>
       guarded(async () => {
-        const sessionId = get().sessionId;
-        if (!sessionId) throw new Error('请先选择或创建会话');
         const task = await api.tasks.submit(sessionId, {
           task_goal: goal,
           permission_level: level,
           confirm_full_permissions: confirmFull,
         });
-        set({ run: emptyRun(task.task_id, task.task_goal, task.status) });
+        set({ runSession: sessionId, run: emptyRun(task.task_id, task.task_goal, task.status) });
+        usePendingStore.getState().clear();
         follow(task.task_id, 0);
+        return task;
       }),
-    attach: (task) =>
-      guarded(async () => {
-        set({ run: runFromSnapshot(task) });
+    attach: async (sessionId, task) => {
+      await guarded(async () => {
+        set({ runSession: sessionId, run: runFromSnapshot(task) });
         // 从头订阅：事件库里有完整历史，所以刷新后时间线也能还原
         follow(task.task_id, 0);
-      }),
-    approve: (decision) =>
-      guarded(async () => {
+      });
+    },
+    approve: async (decision) => {
+      await guarded(async () => {
         const run = get().run;
         if (!run?.approval) return;
         await api.tasks.approve(run.taskId, run.approval.approval_id, decision);
-      }),
-    reject: (reason) =>
-      guarded(async () => {
+      });
+    },
+    reject: async (reason) => {
+      await guarded(async () => {
         const run = get().run;
         if (!run?.approval) return;
         await api.tasks.reject(run.taskId, run.approval.approval_id, reason);
-      }),
-    resume: () =>
-      guarded(async () => {
+      });
+    },
+    resume: async () => {
+      await guarded(async () => {
         const run = get().run;
         if (!run) return;
         await api.tasks.resume(run.taskId);
         follow(run.taskId, run.lastSeq);
-      }),
-    cancel: () =>
-      guarded(async () => {
+      });
+    },
+    cancel: async () => {
+      await guarded(async () => {
         const run = get().run;
         if (!run) return;
         await api.tasks.cancel(run.taskId);
-      }),
+      });
+    },
     clearNotice: () => set({ notice: null }),
     notify: (message, tone = 'info') => set({ notice: { message, tone } }),
     detach: () => {
       stop();
-      set({ connection: 'closed' });
+      set({ runSession: null, run: null, connection: 'closed' });
     },
   };
 });

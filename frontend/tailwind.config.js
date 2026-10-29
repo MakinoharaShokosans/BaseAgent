@@ -41,6 +41,8 @@ export default {
       },
       fontSize: { '2xs': ['11px', '16px'] },
       opacity: { 12: '0.12' },
+      // 层级令牌：抽屉 < 弹窗 < 弹层（下拉/菜单，可出现在弹窗里）< 气泡 < 提示条
+      zIndex: { sticky: '10', drawer: '30', modal: '50', pop: '60', tip: '70', toast: '80' },
       // 阶梯圆角与同心嵌套标尺：micro(6px), sm(8px), base(12px), md(14px), lg(18px), bento(22px), large(24px), full
       borderRadius: {
         micro: '6px',

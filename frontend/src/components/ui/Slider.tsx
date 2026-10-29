@@ -9,7 +9,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { cn } from '../../utils/text';
 
-export interface SliderProps {
+interface SliderProps {
   value: number;
   onChange: (value: number) => void;
   min: number;
@@ -71,6 +71,7 @@ export function Slider({
   }
 
   function onKey(e: KeyboardEvent) {
+    if (disabled) return;
     const big = step * 10;
     const next: Record<string, number> = log
       ? {

@@ -41,7 +41,7 @@
 
 ## 3. 前端测试
 
-Vitest 加 Testing Library，测试文件放在源文件旁边（`*.test.ts(x)`），共 13 个文件、80 个左右用例：API 客户端与错误信封、SSE 重连与游标、事件归约（`taskReducer`，用事件序列回放）、审批卡片、输入台、侧边栏与菜单、Markdown 渲染转义等。`frontend/e2e/` 目前只有一份 README，没有 Playwright 用例。
+Vitest 加 Testing Library，测试文件放在源文件旁边（`*.test.ts(x)`），共 13 个文件、80 个左右用例：API 客户端与错误信封、SSE 重连与游标、事件归约（`taskReducer`，用事件序列回放）、审批卡片、输入台、侧边栏与菜单、Markdown 渲染转义等。`frontend/e2e/` 目前只有一份 README，没有 E2E 用例，也没有安装 Playwright。
 
 ## 4. 评测框架（`baseagent-bench`）
 

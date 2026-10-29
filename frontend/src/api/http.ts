@@ -65,7 +65,7 @@ export async function toApiError(response: Response): Promise<ApiError> {
 
 export type Fetch = typeof fetch;
 
-export interface HttpOptions {
+interface HttpOptions {
   baseUrl?: string;
   fetchImpl?: Fetch;
   /** 不走同源代理时才需要；缺省不带令牌（令牌由代理在服务端侧注入）。 */

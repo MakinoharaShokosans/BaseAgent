@@ -172,26 +172,6 @@ export function GaugeGlyph({ size, className }: GlyphProps) {
   );
 }
 
-/** 文件图标：按扩展名着色 */
-const FILE_TINT: [RegExp, string][] = [
-  [/\.(tsx?|jsx?|mjs|cjs)$/i, 'text-[#6b8ba8]'],
-  [/\.(py|rb|go|rs|java|kt|c|cc|cpp|h|hpp|swift)$/i, 'text-accent-2'],
-  [/\.(json|toml|ya?ml|ini|env.*|lock)$/i, 'text-warn'],
-  [/\.(md|mdx|txt|rst)$/i, 'text-ok'],
-  [/\.(css|scss|html|svg)$/i, 'text-accent'],
-  [/\.(png|jpe?g|gif|webp|ico)$/i, 'text-bad'],
-];
-
-export function FileGlyph({ name, size = 15 }: { name: string; size?: number }) {
-  const tint = FILE_TINT.find(([re]) => re.test(name))?.[1] ?? 'text-mute';
-  return (
-    <Svg size={size} className={tint}>
-      <path d="M6.5 3.5h7l4 4v11.5a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1.5-1.5Z" />
-      <path d="M13.5 3.5V7.5h4" />
-    </Svg>
-  );
-}
-
 export function FolderGlyph({ open, size = 15 }: { open: boolean; size?: number }) {
   return (
     <Svg size={size} className={open ? 'text-ink' : 'text-mute'}>

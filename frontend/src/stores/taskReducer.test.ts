@@ -218,6 +218,7 @@ describe('reduceTaskEvent', () => {
         seq: 1,
         turn: 1,
         text: '现状：还没读过代码。下一步：先看入口文件。\n进度：了解结构 约 20%',
+        streaming: false,
       },
     ]);
     expect(state.lastSeq).toBe(3); // 没有进时间线的回复照样推进序号

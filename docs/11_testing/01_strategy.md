@@ -112,7 +112,7 @@ cfg = make_config(tmp_path, max_steps=5, permissions=…)
 
 ### 5.3 端到端
 
-起真实的 API 进程与假 sidecar（或真实 sidecar），用 HTTP 与 SSE 从外部驱动，覆盖：提交、订阅、审批、续跑、取消、重启后恢复。前端的 E2E 用 Playwright 驱动关键路径（审批、断线重连、错误展示），但数量控制在个位数。
+起真实的 API 进程与假 sidecar（或真实 sidecar），用 HTTP 与 SSE 从外部驱动，覆盖：提交、订阅、审批、续跑、取消、重启后恢复。前端目前没有 E2E；若引入（候选 Playwright），也只覆盖关键路径（审批、断线重连、错误展示），数量控制在个位数。
 
 ### 5.4 安全对抗
 

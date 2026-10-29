@@ -104,12 +104,10 @@ sidecar 与主进程共享代码库，但各自的依赖应当能单独安装：
 | 状态 | **Zustand** | 简洁；事件归约写成纯函数 | Redux Toolkit（过重） |
 | 服务端状态 | **TanStack Query** | 缓存与自动再拉取机制成熟 | |
 | SSE | **自写的 fetch 流式管理器** | 支持序号缺口检测、`STREAM_GAP` 处理、连接状态展示、可控重连 | `@microsoft/fetch-event-source` |
-| Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` + **`rehype-sanitize`** | 不启用原始 HTML，强隔离渲染 | |
-| 代码编辑与查看 | **CodeMirror 6** | 轻量、可完全本地打包、离线友好 | Monaco（体积庞大、默认依赖 CDN） |
+| Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` | 不启用原始 HTML，不用 `dangerouslySetInnerHTML`，链接只放行 http/https/mailto | |
 | 图标与工具 | lucide-react、clsx、tailwind-merge | 现代轻量工具链 | |
-| 面板布局 | react-resizable-panels | 声明式分栏 | |
 | 单元与组件测试 | **Vitest** + Testing Library + jsdom | 原生 Vite 适配 | |
-| E2E | **Playwright**，数量控制在个位数 | 覆盖审批、断线重连、关键流程 | Cypress |
+| E2E | 暂无；需要时再引入（候选 Playwright，数量控制在个位数） | 审批、断线重连、关键流程目前由组件与 API 层测试覆盖 | |
 | 代码质量 | ESLint + Prettier + `tsc --noEmit` | 标准静态质量门禁 | |
 
 ## 6. 工程化
@@ -157,7 +155,7 @@ sidecar 与主进程共享代码库，但各自的依赖应当能单独安装：
 | # | 问题 | 结论 | 若选另一边的影响 |
 |---|---|---|---|
 | 1 | **后端语言**：保持 Python？ | **Python 3.12** | 换 TypeScript 或 Go 要重估 MCP 生态、网页正文提取库、旧代码复用，工作量显著增加；整套文档里的并发与数据设计也要改写 |
-| 2 | **代码编辑器**：CodeMirror 6 还是 Monaco？ | **CodeMirror 6** | 选 Monaco 需要把本体改为本地打包，体积大，配置繁琐 |
+| 2 | **代码编辑器** | **暂不引入**（界面没有文件编辑画布） | 日后需要时再选型；候选 CodeMirror 6（轻量、可本地打包）或 Monaco（体积大、默认依赖 CDN） |
 | 3 | **联网检索提供者** | 接口可插拔；开发用 DuckDuckGo（`duckduckgo-search` 已更名为 `ddgs`，需核对）；正式用一个有 API 的服务（自部署 SearXNG，或 Brave、Tavily 等，需要账号和费用） | 只用 DDG 是抓取式的非官方接口，易被限流或失效；用付费接口需要你提供账号与预算 |
 | 4 | **沙箱加固时机** | 首版保持 `rlimit` 加最小环境，`bwrap` 与 cgroup 作为第二阶段 | 首版就上会增加复杂度与 SELinux 调试成本，但安全性更高 |
 | 5 | **生产形态** | 前端构建后由后端静态托管，单进程分发 | 只提供开发服务器则前后端分开启动，令牌注入与同源要靠开发代理，不适合分发 |
@@ -201,7 +199,7 @@ sidecar 与主进程共享代码库，但各自的依赖应当能单独安装：
 4. ~~`mcp` SDK 在“专用后台任务”模式下建立与关闭连接无残留子进程。~~ **已验证**（用本地 stdio 服务器），见 §10。接真实的第三方服务器（npx 类）时仍要再确认进程树被回收。
 5. `trafilatura` 对常见技术文档页面的提取质量，以及对恶意或超大页面的行为。
 6. `aiosqlite` 在 WAL、单连接、并发读写下的表现与锁等待。
-7. CodeMirror 6 满足查看与简单编辑需求，包体积可接受。
+7. ~~CodeMirror 6 满足查看与简单编辑需求~~ 已不适用：当前没有编辑器依赖。
 8. 自写 SSE 管理器在断网、重启后端、慢消费者三种情形下的行为。
 
 ## 12. 待定

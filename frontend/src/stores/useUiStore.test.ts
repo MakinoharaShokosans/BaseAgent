@@ -8,9 +8,9 @@ async function freshStore() {
 describe('useUiStore persistence', () => {
   beforeEach(() => window.localStorage.clear());
 
-  it('picks up preferences saved under the pre-rename key', async () => {
+  it('restores saved preferences', async () => {
     window.localStorage.setItem(
-      'aegis.ui.v2',
+      'baseagent.ui.v2',
       JSON.stringify({ theme: 'dark', inspectorOpen: false }),
     );
     const store = await freshStore();
@@ -18,8 +18,7 @@ describe('useUiStore persistence', () => {
     expect(store.getState().inspectorOpen).toBe(false);
   });
 
-  it('prefers the new key and writes new changes there', async () => {
-    window.localStorage.setItem('aegis.ui.v2', JSON.stringify({ theme: 'dark' }));
+  it('writes changes back to the same key', async () => {
     window.localStorage.setItem('baseagent.ui.v2', JSON.stringify({ theme: 'light' }));
     const store = await freshStore();
     expect(store.getState().theme).toBe('light');

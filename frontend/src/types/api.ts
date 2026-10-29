@@ -30,6 +30,18 @@ export interface Session {
   session_id: string;
   workspace_id: string;
   created_at: number;
+  /** 以下字段后端补齐前可能缺失 */
+  title?: string | null;
+  pinned?: boolean;
+  archived?: boolean;
+  updated_at?: number;
+}
+
+/** 工作区级设置；null 表示沿用上层（全局缺省） */
+export interface WorkspaceSettings {
+  permission_level: PermissionLevel | null;
+  model: string | null;
+  rules_enabled: boolean | null;
 }
 
 export interface Turn {
@@ -202,10 +214,73 @@ export interface McpServer {
   name: string;
   transport: 'stdio' | 'sse';
   status: 'disabled' | 'idle' | 'connected' | 'failed';
+  /** 以下字段后端补齐前可能缺失 */
+  enabled?: boolean;
+  exposure?: 'pinned' | 'deferred';
+  command_preview?: string;
+  disabled_tools?: string[];
   tool_count: number;
   tools: string[];
   rejected: { tool: string; reason: string }[];
   last_error: string;
   /** 失败后距离下次重试的秒数 */
   retry_in_sec: number;
+}
+
+export interface SkillInfo {
+  name: string;
+  source: 'builtin' | 'global' | 'workspace';
+  description: string;
+  triggers: string[];
+  required_tools: string[];
+  high_privilege: string[];
+  warnings: string[];
+  /** 后端补齐前缺失，视为启用 */
+  enabled?: boolean;
+  workspace_id?: string;
+  workspace_name?: string;
+}
+
+export interface SkillSource {
+  source: 'builtin' | 'global' | 'workspace';
+  enabled: boolean;
+  count: number;
+  trusted: boolean;
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export type PromptKind = 'template' | 'dynamic' | 'fixed';
+
+export interface PromptInfo {
+  name: string;
+  kind: PromptKind;
+  title: string;
+  usage: string;
+  size: number;
+  customized: boolean;
+  max_chars: number;
+}
+
+export interface PromptDetail {
+  name: string;
+  content: string;
+  /** 随发行版的初始版本 */
+  default: string;
+  customized: boolean;
+  max_chars: number;
+}
+
+export interface ContextSegmentText {
+  id: string;
+  text: string;
+  tokens: number;
+}
+
+export interface McpSettings {
+  enabled: boolean;
 }

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ApprovalRequest, PermissionLevel } from '../../types/api';
 import { cn, dangerLabels, stripControl } from '../../utils/text';
 import { HandGlyph } from '../icons/Glyphs';
+import { Checkbox } from '../ui/Checkbox';
 import { Badge, Button } from '../ui/primitives';
 
 const ACTION_LABELS: Record<string, string> = {
@@ -25,9 +26,9 @@ const LEVEL_LABELS: Record<PermissionLevel, string> = {
 };
 
 const REJECT_PRESETS = ['只在本地生成补丁，不要推送', '不要联网', '换一种方式完成'];
-export const DANGER_DELAY_MS = 1500;
+const DANGER_DELAY_MS = 1500;
 
-export interface HitlApprovalCardProps {
+interface HitlApprovalCardProps {
   request: ApprovalRequest;
   onApprove: (decision: 'once' | 'always') => void | Promise<void>;
   onReject: (reason: string) => void | Promise<void>;
@@ -194,32 +195,29 @@ export function HitlApprovalCard({
         </div>
       ) : (
         <div className="mt-3 space-y-2">
-          <label className="flex items-start gap-2 text-xs text-ink">
-            <input
-              type="checkbox"
-              className="mt-0.5 accent-[rgb(var(--c-accent))]"
-              checked={always}
-              disabled={submitted}
-              onChange={(e) => {
-                setAlways(e.target.checked);
-                setConfirmAlways(false);
-              }}
-            />
-            <span>
-              本会话内完全相同的命令不再询问。将加入白名单的内容：
-              <code className="ml-1 break-all rounded bg-card px-1 font-mono">{lines[0]}</code>
-            </span>
-          </label>
+          <Checkbox
+            label="本会话内完全相同的命令不再询问"
+            checked={always}
+            disabled={submitted}
+            onChange={(next) => {
+              setAlways(next);
+              setConfirmAlways(false);
+            }}
+          >
+            本会话内完全相同的命令不再询问。将加入白名单的内容：
+            <code className="ml-1 break-all rounded bg-card px-1 font-mono">{lines[0]}</code>
+          </Checkbox>
           {always && (
-            <label className="flex items-center gap-2 text-xs font-semibold text-bad">
-              <input
-                type="checkbox"
-                checked={confirmAlways}
-                disabled={submitted}
-                onChange={(e) => setConfirmAlways(e.target.checked)}
-              />
+            <Checkbox
+              label="我确认以后同样的命令会被直接执行"
+              tone="danger"
+              checked={confirmAlways}
+              disabled={submitted}
+              onChange={setConfirmAlways}
+              className="font-semibold"
+            >
               我确认以后同样的命令会被直接执行
-            </label>
+            </Checkbox>
           )}
           <div className="flex flex-wrap gap-2">
             <Button

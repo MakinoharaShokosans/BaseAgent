@@ -11,7 +11,7 @@ import {
 } from '../components/icons/Glyphs';
 import type { Tone } from '../components/ui/primitives';
 
-export interface StatusMeta {
+interface StatusMeta {
   label: string;
   tone: Tone;
   icon: ReactNode;

@@ -34,7 +34,7 @@ export function formatTokens(n: number): string {
 }
 
 /** 越级命令里的高危模式：命中时审批卡片用强提示并延迟启用批准。 */
-export const DANGEROUS_PATTERNS: readonly { pattern: RegExp; label: string }[] = [
+const DANGEROUS_PATTERNS: readonly { pattern: RegExp; label: string }[] = [
   { pattern: /\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r/i, label: '递归强制删除' },
   { pattern: /\bsudo\b/, label: '提权（sudo）' },
   { pattern: /git\s+push\b.*(--force|-f\b)/, label: '强制推送' },

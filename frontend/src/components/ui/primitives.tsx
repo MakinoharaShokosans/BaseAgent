@@ -4,6 +4,8 @@ import { useEffect, useRef, type ComponentProps, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useUiStore } from '../../stores/useUiStore';
 import { cn } from '../../utils/text';
+import { Tip } from './Tooltip';
+import type { Side } from './useAnchor';
 
 /** 动效令牌，见 docs/10_frontend/03_visual_design.md §8 */
 export const EASE_OUT = [0.22, 1, 0.36, 1] as const;
@@ -44,20 +46,23 @@ export function IconButton({
   className,
   active,
   label,
+  hint,
+  side,
   ...props
-}: ComponentProps<'button'> & { label: string; active?: boolean }) {
+}: ComponentProps<'button'> & { label: string; active?: boolean; hint?: string; side?: Side }) {
   return (
-    <button
-      aria-label={label}
-      title={label}
-      className={cn(
-        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-mute transition-[background-color,color,transform] duration-150',
-        'hover:bg-ink/[0.07] hover:text-ink active:scale-[0.94]',
-        active && 'bg-ink/[0.07] text-ink',
-        className,
-      )}
-      {...props}
-    />
+    <Tip label={label} hint={hint} side={side}>
+      <button
+        aria-label={label}
+        className={cn(
+          'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-mute transition-[background-color,color,transform] duration-150',
+          'hover:bg-ink/[0.07] hover:text-ink active:scale-[0.94] disabled:cursor-not-allowed disabled:opacity-40',
+          active && 'bg-ink/[0.07] text-ink',
+          className,
+        )}
+        {...props}
+      />
+    </Tip>
   );
 }
 
@@ -101,17 +106,21 @@ export function StatusPill({
   live,
   children,
   className,
+  label,
 }: {
   tone: Tone;
   icon?: ReactNode;
   live?: boolean;
   children: ReactNode;
   className?: string;
+  /** 只显示图标时给读屏用的完整状态 */
+  label?: string;
 }) {
   return (
     <span
+      aria-label={label}
       className={cn(
-        'relative inline-flex items-center gap-1.5 overflow-hidden rounded-full py-1 pl-2 pr-2.5 text-xs font-semibold',
+        'relative inline-flex shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full py-1 pl-2 pr-2.5 text-xs font-semibold',
         TONES[tone],
         className,
       )}
@@ -233,7 +242,7 @@ export function Card({
  * 信封的封舌：弹窗顶部一片朝下的 V 形，内衬铺防窥纹，尖端一枚蜡封小圆点。
  * 纯装饰，不拦截点击；颜色全部来自令牌，明暗主题自动切换。
  */
-export function EnvelopeFlap() {
+function EnvelopeFlap() {
   return (
     <div aria-hidden className="pointer-events-none relative h-[30px] shrink-0">
       <div
@@ -294,7 +303,7 @@ export function Overlay({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-modal flex items-center justify-center p-4">
       <motion.div
         aria-hidden
         className="absolute inset-0 bg-ink/15 backdrop-blur-md dark:bg-black/50"
@@ -318,9 +327,7 @@ export function Overlay({
         )}
       >
         {flap && <EnvelopeFlap />}
-        <div className={cn('min-h-0 flex-1 overflow-auto no-scrollbar', bodyClassName)}>
-          {children}
-        </div>
+        <div className={cn('min-h-0 flex-1 overflow-auto', bodyClassName)}>{children}</div>
       </motion.div>
     </div>,
     document.body,

@@ -10,7 +10,7 @@ import type { ServerEvent } from '../types/api';
 
 export type ConnectionState = 'connecting' | 'open' | 'reconnecting' | 'closed' | 'gap';
 
-export interface SseOptions {
+interface SseOptions {
   url: string;
   headers?: () => Record<string, string>;
   fetchImpl?: Fetch;
@@ -161,6 +161,11 @@ export function subscribe(options: SseOptions): SseHandle {
       options.onGap?.();
       setState('gap');
       return 'gap';
+    }
+    // 瞬态事件（流式增量、命令输出）不带序号、不持久化：直接交付，不参与连续性检查
+    if (name === 'model.delta' || name === 'tool.output') {
+      options.onEvent({ ...event, event: name, seq: 0 });
+      return 'ignored';
     }
     if (typeof event.seq !== 'number' || event.seq <= cursor) return 'ignored'; // 重复或乱序
     if (event.seq > cursor + 1 && cursor > 0) {

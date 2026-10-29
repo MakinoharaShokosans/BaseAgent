@@ -16,110 +16,120 @@
 |---|---|---|
 | 框架 | React 19 + TypeScript | |
 | 构建 | Vite 6，开发服务器监听 `127.0.0.1:5173` | 同源代理 `/api`、`/docs`、`/openapi.json` 到 `127.0.0.1:11328` |
-| 样式 | Tailwind CSS 3 | |
-| 状态 | Zustand（任务、工作区、界面三个 store） | |
-| 服务端缓存 | TanStack Query | |
-| SSE | `@microsoft/fetch-event-source` | 支持自定义请求头与重连 |
-| Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` | |
-| 编辑器 | Monaco | 文件查看与编辑 |
-| 布局 | `react-resizable-panels` | |
-| 测试 | Vitest + Testing Library + jsdom | |
+| 样式 | Tailwind CSS 3 | 颜色全部来自 CSS 变量，明暗主题只切换变量 |
+| 路由 | `@tanstack/react-router` | URL 是可恢复的界面状态：工作区、会话、`?task`、设置分区 |
+| 状态 | Zustand（当前任务、队列、待生效、界面偏好） | 队列与偏好存 `localStorage`；业务事实不落在前端 |
+| 服务端缓存 | TanStack Query | 同一份数据在侧栏、对话、检视器、设置间共享 |
+| SSE | 自写的 fetch 流式管理器（`api/sse.ts`） | 自定义请求头、指数退避重连、序号缺口检测、瞬态增量 |
+| Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` | 不启用原始 HTML |
+| 动效 | `motion` | 侧栏、检视器、气泡与弹层 |
+| 测试 | Vitest + Testing Library + jsdom | 暂无 E2E |
 
 ## 3. 目录结构
 
 ```
 src/
-├── api/          HTTP 客户端、SSE 订阅、按资源划分的 API 模块
-├── stores/       useTaskStore（≈800 行）、useWorkspaceStore、useUiStore
+├── app/          router.tsx（路由树）、Shell.tsx（外壳、快捷键、提示条）、Home.tsx（根路径去向）
+├── api/          http.ts（请求封装与错误信封）、sse.ts（SSE 管理器）、endpoints.ts（按资源划分）、
+│                 queries.ts（会话活动与标题）、useSettings.ts（模型、会话设置、上下文快照）
+├── stores/       taskReducer.ts（事件归约，纯函数）、useAppStore.ts（当前任务、连接、提示）、
+│                 useQueueStore.ts（排队）、usePendingStore.ts（待生效计数）、useUiStore.ts（界面偏好）
 ├── types/        与后端 DTO 对应的类型
 ├── components/
-│   ├── layout/   AppLayout、AppHeader、StatusBar
-│   ├── sidebar/  Sidebar、ProjectsTree、WorkspaceTree、SessionList
-│   ├── chat/     ChatPane、MessageBubble、InputConsole、TraceTimeline、
-│   │             HitlApprovalCard、SubagentReportCard、LlmInvocationInspector
-│   ├── canvas/   CanvasPane、TabBar、MarkdownReader（文件与产物查看）
-│   ├── drawer/   ContextDrawer（上下文检视）、MemoryDrawer
-│   ├── modals/   WorkspaceModal、SettingsModal
-│   ├── domain/   MilestoneItem、WaterLevelMeter、FileMutationCard、…
-│   ├── common/   DirectoryPickerModal、Logo、Avatar
-│   └── ui/       Button、Modal、Drawer、Tabs、Badge、CodeBlock
+│   ├── common/   SafeMarkdown、DirectoryPicker
+│   ├── domain/   HitlApprovalCard（审批）、McpStatus（顶栏在线数）
+│   ├── layout/   ThemeToggle
+│   ├── modals/   WorkspaceModal、RenameWorkspaceModal、ConfirmDialog
+│   ├── icons/    Glyphs
+│   └── ui/       Select、Slider、Toggle、Checkbox、MoreMenu、Tooltip、InlineEdit、StatusDot、CopyButton、primitives
+├── features/
+│   ├── sidebar/      Sidebar（工作区 → 会话、待办、搜索）
+│   ├── workspace/    WorkspacePage（概览、设置、记忆、目录树）
+│   ├── conversation/ ConversationPage、Composer、RunView、useReplay、
+│   │                 blocks/{ReasoningBlock,SayBlock,ToolCard,AgentGroup}
+│   ├── inspector/    Inspector、TaskCard、ContextCard
+│   └── settings/     SettingsPage、parts、sections/{General,Models,Prompts,Skills,Mcp,Tools,Diagnostics}
 └── utils/、test/
 ```
 
-去掉 RAG 后删除：`RagCenterModal`、`useRagStore`、`rag.api.ts`、`CitationBadge` 中针对 RAG 切片的部分、`SidecarStatusPill` 中的 RAG 项、`types` 里的 RAG 类型，以及各处的 RAG 状态展示（`AppHeader`、`StatusBar`、`InputConsole`、`MemoryDrawer`、`SettingsModal`、`SubagentReportCard`、`DirectoryPickerModal`、`WorkspaceTree`、`AppLayout`）。
+组件职责与后端降级矩阵见 [04_redesign.md](04_redesign.md) §8、§13。
 
 ## 4. 界面布局
 
 ```
-┌ AppHeader：工作区切换、模型与权限基线、系统状态 ───────────────┐
-├──────────┬──────────────────────────────┬──────────────────────┤
-│ Sidebar  │ ChatPane                     │ CanvasPane           │
-│ 工作区树  │ 消息、回合时间线、审批卡片、   │ 文件 / 产物 / 报告    │
-│ 会话列表  │ 子智能体报告、调用检视         │ 多标签               │
-│          ├──────────────────────────────┤                      │
-│          │ InputConsole：输入、权限选择   │                      │
-├──────────┴──────────────────────────────┴──────────────────────┤
-│ StatusBar：任务状态、步数、Token、水位                           │
-└────────────────────────────────────────────────────────────────┘
-        ContextDrawer / MemoryDrawer 从侧边滑出
+┌────────────┬───────────────────────────────────────────┬─────────────┐
+│ 侧栏        │ 主区（路由决定）                            │ 检视器       │
+│ 工作区→会话  │  /w/:wid/s/:sid   对话 + 输入台             │ 任务         │
+│ 待办 / 搜索  │  /w/:wid          工作区概览                │ 上下文       │
+│ 底部设置     │  /settings/...    全屏设置                  │ （可折叠）    │
+└────────────┴───────────────────────────────────────────┴─────────────┘
 ```
+
+- 每个主页面自带顶栏（面包屑、状态、检视器开关），没有全局 TopBar；更少的层级，更多内容宽度。
+- 宽度不足以放下检视器时改为右侧抽屉；手机宽度下侧栏也变成左侧抽屉，输入台贴底并留出安全区。
+- 卡片、弹窗、下拉、气泡都按层级令牌分层（`sticky < drawer < modal < pop < tip < toast`），并渲染到 `body`，不被祖先的 `overflow` 或 `backdrop-filter` 裁切。
 
 ## 5. 数据流
 
 ```mermaid
 flowchart LR
     API[(HTTP API)] -->|快照 / 列表| Q[TanStack Query]
-    SSE[(SSE 事件流)] -->|事件| S[useTaskStore reducer]
+    SSE[(SSE 事件流)] -->|事件| S[taskReducer]
     Q --> C[组件]
     S --> C
     C -->|用户动作| API
 ```
 
-- **快照用请求，进度用事件。** 工作区、会话、记忆、文件树这类查询走 HTTP 与缓存；任务执行中的变化走 SSE，在 `useTaskStore` 里按事件类型归约成界面状态。
-- 事件到状态的映射在一个集中的归约函数里（按事件名分支）。新增事件在这里加一个分支。
+- **快照用请求，进度用事件。** 工作区、会话、记忆、文件树、设置这类查询走 HTTP 与缓存；任务执行中的变化走 SSE，在 `stores/taskReducer.ts` 里按事件类型归约成 `RunState`。
+- URL 决定“看哪个工作区 / 会话 / 任务 / 设置分区”，不把导航状态塞进 store；`useUiStore` 只存侧栏、检视器、主题、思考链默认值这类纯界面偏好。
+- 排队只存在于前端：`useQueueStore` 按会话保存消息，任务正常结束后由 `ConversationPage` 依次提交；失败 / 取消会暂停。
 
 ### 5.1 事件归约
 
-`useTaskStore` 处理的事件：`task.started`、`model.reply`、`plan.updated`、`turn.finished`、`context.compacted`、`tool.call`、`tool.result`、`task.waiting_for_approval`、`task.approved`、`task.rejected`、`llm.call`、`task.finished`、`task.error`，以及子智能体与研究事件。契约见 [09_api/02](../09_api/02_events_contract.md)。
+`reduceTaskEvent` 处理的事件：`task.started`、`model.reply`、`plan.updated`、`turn.finished`、`context.compacted`、`tool.call`、`tool.result`、`task.waiting_for_approval`、`task.approved`、`task.rejected`、`llm.call`、`task.finished`、`task.error`，以及 `websearch.*`、`subagent.*`、`guard.*`。瞬态事件 `model.delta` 与 `tool.output` 不占序号，直接合并进正在流式的块；`model.reply` 到达后以权威内容覆盖。契约见 [09_api/02](../09_api/02_events_contract.md)。
 
 ## 6. 关键界面
 
 | 界面 | 职责 | 要点 |
 |---|---|---|
-| 回合时间线 `TraceTimeline` | 展示计划与工具调用往返 | 按回合序号归组，用 `turn.finished` 的回合序号而不是事件条数估计进度（见 [事件契约 §4](../09_api/02_events_contract.md)） |
+| 侧栏 `Sidebar` | 工作区 → 会话、待办、搜索、置顶 / 归档 / 重命名 / 分支 / 删除 | 状态点由最近任务决定；字段缺失时相关菜单项置灰 |
+| 工作区 `WorkspacePage` | 信息、工作区级设置、记忆、只读目录树 | 目录树只读；记忆按四层分别增删 |
+| 对话 `ConversationPage` | 消息流、运行块、审批、输入台、滚动跟随 | 事件块化渲染；历史任务可回放；`?task` 深链接 |
+| 运行块 `RunView` | reasoning / say / tool / agent / decision / delivery | 相邻同类 agent 事件合并；终态显示回合、Token、用时与终止原因 |
+| 思考 `ReasoningBlock` | 流式展开、完成折叠 | 纯文本；`thinking` 偏好控制展开 / 折叠 / 隐藏 |
+| 工具 `ToolCard` | 按工具展开参数、命令、diff、输出、耗时、退出码、产物 | 长结果可加载完整产物；MCP 工具标注不可信来源 |
+| 输入台 `Composer` | 输入、模型、权限、排队、压缩入口 | `full_permissions` 每次确认；运行中提交进可撤回队列 |
 | 审批卡片 `HitlApprovalCard` | 展示越级动作并收集决策 | 见 [02](02_approval_and_safety_ux.md) |
-| 子智能体卡片 | 展示委派的角色、步骤、被拒绝的越级尝试、结论与引用 | `subagent.blocked` 要突出；未经验证的结论要标注 |
-| 调用检视器 `LlmInvocationInspector` | 查看每次模型调用的消息体、工具、响应、耗时、Token | 按需拉取完整内容；展示前对金丝雀脱敏；折叠思考内容 |
-| 上下文抽屉 | 展示模型此刻看到的各层 | 每层 Token 估算、是否被截断，见 [提示词装配 §6](../03_context/03_prompt_assembly.md) |
-| 记忆抽屉 | 查看与管理工作区与会话记忆 | 可删除条目，标明来源，见 [记忆 §5](../03_context/04_memory.md) |
-| 画布 | 查看文件、产物、研究报告 | Markdown 与代码高亮；文件编辑带冲突检测 |
-| 状态栏 | 状态、回合数、累计 Token（统计值）、上下文规模 | 无预算水位；上下文规模接近窗口时提示 |
+| 检视器 `Inspector` | 任务卡、上下文占比卡 | 上下文数字取自后端 `/context`；任务卡含计划、产物、历史 |
+| 设置 `SettingsPage` | 通用、模型、提示词、技能、MCP、工具、诊断 | 全屏页；每个写操作标明作用域与“下个任务生效” |
+| 通用控件 | Select、Slider、Toggle、Checkbox、Tooltip、MoreMenu | 全部自绘并走 Portal；禁用态用 `aria-disabled`，气泡仍可用 |
 
-## 7. 现状发现的问题
+## 7. 历史缺口与现状
 
-读前端代码与后端契约对照，发现下列不一致与缺口：
+重设计前读过一轮旧前端，下列问题多数已在新结构里解决；保留这张表是为了记住为什么改：
 
-| # | 问题 | 级别 |
+| # | 旧缺口 | 现状 |
 |---|---|---|
-| 1 | **前端解析不了后端的错误体。** 后端返回 `{ "error": { "code", "message", "details", "trace_id" } }`，前端的 `HttpClient` 只认 `{detail: …}`（FastAPI 默认形状）或顶层 `message`，字段名也对不上（`error_code`、`context`）。结果是服务端精心设计的错误信息到了用户这里只剩 "API Request Failed [409] Conflict" | 高 |
-| 2 | **SSE 断开后不重连。** 订阅封装的 `onerror` 里重新抛出了异常，库的约定是抛出即停止重试。网络抖动、服务重启都会让事件流永久中断，界面停在旧状态，用户并不知情 | 高 |
-| 3 | **没有序号连续性检查，也没有 `STREAM_GAP` 处理。** 即便重连成功，也无法发现丢了事件 | 中 |
-| 4 | **令牌同时放在请求头和 URL 查询参数里。** SSE 的 URL 上带着 `?token=`，会进入后端访问日志、浏览器历史。而 `fetch-event-source` 本身支持自定义头，查询参数是多余的。令牌还存放在 `localStorage`，任何同源脚本都可读 | 中 |
-| 5 | **`llm.call` 事件整体进入 store。** 事件内联完整提示词，长任务里会积累大量内存，且这些数据只在打开检视器时才需要 | 中 |
-| 6 | **`useTaskStore` 近 800 行**，混合事件归约、任务提交、审批、取消、估算。难以测试和演进 | 低 |
-| 7 | 任务与事件只在内存。刷新页面后当前任务的界面状态丢失，因为没有任务列表接口可用于恢复 | 中 |
-| 8 | 上下文 Token 的估算在前端用固定常数（系统提示词约 1200、每条记忆 60），与后端实际装配结果不一致，应该直接用后端的检视接口给出的数 | 低 |
-| 9 | 构建只有开发服务器的配置，没有生产形态的服务方案（谁来托管静态文件、如何与 API 同源） | 低 |
+| 1 | 解析不了后端 `{error:{code,message,details,trace_id}}` 信封 | 已解决：`ApiError` 带 `code`、`traceId`，提示条可复制 `trace_id` |
+| 2 | SSE 断开不重连 | 已解决：指数退避、`Last-Event-ID`、终态停止 |
+| 3 | 没有序号连续性检查与 `STREAM_GAP` 处理 | 已解决：缺口触发快照同步后重新订阅 |
+| 4 | 令牌进 URL / `localStorage` | 已解决：同源代理在服务端注入，浏览器代码不持有令牌 |
+| 5 | `llm.call` 整体进 store | 已解决：归约只推进序号，不进时间线 |
+| 6 | 单个 store 近 800 行 | 已拆：`taskReducer` 纯函数 + 多个小 store |
+| 7 | 刷新后任务状态丢失 | 已解决：任务列表 + 快照恢复，事件从头回放 |
+| 8 | 上下文 Token 前端估算 | 已解决：一律取后端 `/context` |
+| 9 | 没有生产形态静态托管 | 仍未做，见 §11 |
 
-## 8. 新版设计要点
+## 8. 设计要点（已落地）
 
-1. **统一的请求封装**：解析 `{error:{…}}` 信封，`ApiError` 暴露 `code`、`message`、`details`、`traceId`；界面错误提示展示 `message` 并提供"复制 trace_id"。
-2. **SSE 管理器**：独立模块，负责订阅、重连（指数退避，上限 30 秒）、`Last-Event-ID`、序号连续性检测、`STREAM_GAP` 与 `stream.dropped` 的处理、终态后停止。对外只暴露一个事件回调与连接状态。界面显示连接状态（已连接、重连中、已断开），断开时有明确提示，而不是静默。
-3. **令牌**：优先走同源代理注入，浏览器不持有令牌；不做代理时用请求头，**去掉 URL 查询参数**。`localStorage` 改为内存加可选的会话存储，并在界面说明风险。见 [09_api/03 §3](../09_api/03_access_and_errors.md)。
-4. **按需加载重内容**：`llm.call` 事件只存摘要，完整内容在打开检视器时拉取。
-5. **拆分 store**：事件归约单独成纯函数（`reduceTaskEvent(state, event)`），与存储解耦，可以用事件序列快照直接测试。
-6. **状态恢复**：页面加载时调用会话任务列表与任务快照恢复当前任务；若任务仍在运行，从快照的最新序号重新订阅。
+1. **统一的请求封装**：解析 `{error:{…}}` 信封，`ApiError` 暴露 `code`、`message`、`details`、`traceId`；界面错误提示展示 `message` 并提供“复制 trace_id”。
+2. **SSE 管理器**：独立模块，负责订阅、重连（指数退避，上限 30 秒）、`Last-Event-ID`、序号连续性检测、`STREAM_GAP` 与 `stream.dropped` 的处理、终态后停止。瞬态 `model.delta` / `tool.output` 单独交付，不参与连续性检查。
+3. **令牌**：同源代理注入，浏览器不持有令牌，也不出现在 URL。
+4. **按需加载重内容**：工具结果被截断时按 `artifact_id` 拉全文；提示词分段按需查看。
+5. **拆分 store**：事件归约是纯函数 `reduceTaskEvent(state, event)`，与存储解耦，可用事件序列回放测试。
+6. **状态恢复**：页面加载时按路由恢复工作区 / 会话 / 任务；运行中的任务从快照与事件库重建。
 7. **后端为准**：所有用量、上下文规模、状态都取自后端字段，不在前端估算。
+8. **URL 化**：工作区、会话、任务、设置分区都在地址里；`/` 回到最近位置。
 
 ## 9. 不变量
 
@@ -132,23 +142,23 @@ flowchart LR
 
 ## 10. 测试要点
 
-- 归约函数：用录制的事件序列回放，断言最终状态；覆盖乱序、重复、未知事件、缺字段。
+- 归约函数：用录制的事件序列回放，断言最终状态；覆盖乱序、重复、未知事件、缺字段、流式增量与 `model.reply` 覆盖。
 - SSE 管理器：断线重连带正确的 `Last-Event-ID`；序号缺口触发重连；`STREAM_GAP` 触发快照同步；终态后不再重连；退避上限。
 - 错误：各类状态码的信封解析；非 JSON 响应体的回退。
-- 组件：审批卡片、时间线、子智能体卡片、检视器的渲染与交互。
+- 组件：审批卡片、工具卡、选择器、菜单、检视器、设置的渲染与交互。
 - 安全：含 `<script>`、内联事件、`javascript:` 链接的 Markdown 不被执行。
-- 恢复：刷新后恢复运行中的任务。
+- 恢复：刷新后恢复运行中的任务与历史任务。
 
 ## 11. 待定
 
-- 是否把前端打包进后端静态托管，成为单进程分发。这会简化令牌与同源问题，也让"一键启动"更干净。
+- 是否把前端打包进后端静态托管，成为单进程分发。这会简化令牌与同源问题，也让“一键启动”更干净。
 - 是否支持多任务并排查看（服务端目前默认单任务并发）。
-- 国际化。界面文案目前是中英混杂的硬编码，若要面向更多用户需要抽取。
+- 国际化。界面文案目前是中文硬编码；本轮已确定不预留多语言。
 
 ## 12. 实现状态
 
-已迁入并按本文的新版设计实现：`api/http.ts`（解析错误信封，`ApiError` 带 `code`、`traceId`）、`api/sse.ts`（自写的 fetch 流式管理器，不依赖 `EventSource`：指数退避上限 30 秒、`Last-Event-ID`、序号不连续与 `stream.dropped` 触发重连、`STREAM_GAP` 触发快照同步、终态后停止）、`stores/taskReducer.ts`（纯函数归约，可回放事件序列）、`stores/useAppStore.ts`、审批卡片、时间线、输入台（`full_permissions` 每次确认且不被记住）、文件画布（带 `base_hash` 冲突检测）、记忆抽屉、工作区弹窗（目录浏览）、状态栏（事件流连接状态、sidecar 健康、错误提示可复制 `trace_id`）。令牌不出现在 URL，也不进浏览器代码（同源代理在服务端侧注入）。刷新后从会话任务列表恢复未结束的任务并从头订阅事件。
+前端已按本文与 [04_redesign.md](04_redesign.md) 落地：路由、侧栏、工作区概览、对话块、工具卡、思考链、可撤回队列、任务卡 / 上下文卡、全屏设置（提示词 / 技能 / MCP / 工具 / 诊断）、自绘控件与响应式布局。所有需要后端新接口的功能按 04 §9 降级，缺接口时置灰并提示“后端未提供”，不会抛错或卡住。
 
-**视觉层**按 [03_visual_design.md](03_visual_design.md) 重做：无边框浅色风格、自定义下拉与滑动条、工作区 → 会话侧栏（底部主题与设置）、设置面板（会话模型、上下文上限、系统提示词）、输入台里的模型下拉（选项来自 `GET /models`）与“压缩记忆”按钮（`POST /sessions/{id}/memory/compact`；任务运行中禁用，结果显示并入的条数，失败进错误提示）、对话节点轨道、右侧可折叠的任务卡片与上下文占比卡片。文件画布组件 `canvas/FilePane.tsx` 保留但目前未挂到界面上。
+**视觉层**按 [03_visual_design.md](03_visual_design.md)：浅色为默认、暗色可切换；图标为主、含义放悬停气泡；下拉 / 滑动条 / 开关 / 复选框 / 菜单 / 滚动条全部自绘；层级令牌统一管理遮挡关系。
 
-**与 §3 目录的差异**：没有 Monaco（文件编辑用 `textarea`，避免一个很重的依赖）、子智能体与联网搜索事件以时间线上的行显示，没有独立的卡片和调用检视器；`react-resizable-panels` 用 v2 的 `PanelGroup` 接口。**未做**：生产形态的静态托管（构建产物目前只由开发服务器的同源代理使用）、调用检视界面。上下文占比由右侧栏的上下文卡片显示（后端 `/context` 检视器）。
+**未做**：生产形态的静态托管（构建产物目前只由开发服务器的同源代理使用）；文件查看与编辑界面（只有只读目录树）；调用检视界面；前端 E2E；后端 §9 的高优先级缺口（G1 / G2 / G4 / G5 / G6 / G7）。

@@ -42,7 +42,7 @@
 
 ## 2. 权限基线选择
 
-`InputConsole` 允许在提交任务时选择权限基线，并把值作为 `permission_level` 发送。
+`Composer` 允许在提交任务时选择权限基线，并把值作为 `permission_level` 发送。
 
 | 级别 | 界面表达 |
 |---|---|

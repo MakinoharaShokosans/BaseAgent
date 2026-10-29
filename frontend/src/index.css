@@ -369,7 +369,7 @@
   @apply rounded-md bg-ink/[0.06] px-1.5 py-0.5 font-mono text-[0.85em];
 }
 .prose-agent pre {
-  @apply overflow-x-auto px-4 pb-4 pt-2 font-mono text-[12.5px] leading-relaxed no-scrollbar;
+  @apply overflow-x-auto px-4 pb-4 pt-2 font-mono text-[12.5px] leading-relaxed;
 }
 .prose-agent pre code {
   @apply bg-transparent p-0;

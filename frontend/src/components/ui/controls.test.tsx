@@ -145,3 +145,49 @@ describe('Slider', () => {
     expect(onChange).toHaveBeenLastCalledWith(576000);
   });
 });
+
+describe('Checkbox', () => {
+  it('is a custom checkbox with role semantics and toggles on click', async () => {
+    const { Checkbox } = await import('./Checkbox');
+    function Controlled() {
+      const [on, setOn] = useState(false);
+      return (
+        <Checkbox label="本会话免审" checked={on} onChange={setOn}>
+          本会话免审
+        </Checkbox>
+      );
+    }
+    render(<Controlled />);
+    const box = screen.getByRole('checkbox', { name: '本会话免审' });
+    expect(box).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(box);
+    expect(box).toHaveAttribute('aria-checked', 'true');
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(box).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('does not toggle when disabled', async () => {
+    const { Checkbox } = await import('./Checkbox');
+    const onChange = vi.fn();
+    render(
+      <Checkbox label="禁用项" checked={false} disabled onChange={onChange}>
+        禁用项
+      </Checkbox>,
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: '禁用项' }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('Toggle', () => {
+  it('uses aria-disabled instead of native disabled so the tooltip and focus still work', async () => {
+    const { Toggle } = await import('./Toggle');
+    const onChange = vi.fn();
+    render(<Toggle label="MCP 总开关" checked tip="后端未提供" disabled onChange={onChange} />);
+    const toggle = screen.getByRole('switch', { name: 'MCP 总开关' });
+    expect(toggle).toHaveAttribute('aria-disabled', 'true');
+    expect(toggle).not.toBeDisabled();
+    fireEvent.click(toggle);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

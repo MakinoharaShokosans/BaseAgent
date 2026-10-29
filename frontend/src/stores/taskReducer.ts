@@ -7,7 +7,27 @@
  */
 import type { ApprovalRequest, PlanItem, ServerEvent, TaskStatus } from '../types/api';
 
+export interface ChangedFile {
+  path: string;
+  added?: number;
+  removed?: number;
+}
+
+export type AgentGroup = 'websearch' | 'subagent' | 'compaction';
+
 export type TimelineItem =
+  /** 思考链：流式时逐段追加，model.reply 到达后以权威内容覆盖 */
+  | {
+      kind: 'reasoning';
+      seq: number;
+      turn: number;
+      text: string;
+      streaming: boolean;
+      startTs: number;
+      endTs?: number;
+    }
+  /** 模型每一步的汇报（带工具调用的回复里的话） */
+  | { kind: 'say'; seq: number; turn: number; text: string; streaming: boolean }
   | {
       kind: 'tool';
       seq: number;
@@ -18,12 +38,29 @@ export type TimelineItem =
       state: 'running' | 'ok' | 'failed';
       result?: string;
       artifactId?: string;
+      startTs: number;
+      endTs?: number;
+      durationMs?: number;
+      exitCode?: number;
+      timedOut?: boolean;
+      truncated?: boolean;
+      bytes?: number;
+      changedFiles?: ChangedFile[];
+      folded?: boolean;
+      /** 命令执行期间的实时输出（瞬态，刷新后只剩 result） */
+      stdout: string;
+      stderr: string;
     }
   | { kind: 'decision'; seq: number; approved: boolean; text: string }
   | { kind: 'guard'; seq: number; name: string; text: string }
-  | { kind: 'agent'; seq: number; name: string; text: string; tone: 'info' | 'warn' }
-  /** 模型在调用工具之前的简短说明：已完成什么、下一步做什么、子任务进度 */
-  | { kind: 'say'; seq: number; turn: number; text: string }
+  | {
+      kind: 'agent';
+      seq: number;
+      group: AgentGroup;
+      name: string;
+      text: string;
+      tone: 'info' | 'warn';
+    }
   | { kind: 'unknown'; seq: number; name: string };
 
 export interface RunState {
@@ -39,6 +76,10 @@ export interface RunState {
   error: string | null;
   stepCount: number;
   totalTokens: number;
+  /** 事件时间戳（秒） */
+  startedTs: number | null;
+  finishedTs: number | null;
+  compactions: number;
 }
 
 export function emptyRun(taskId: string, goal = '', status: TaskStatus = 'running'): RunState {
@@ -55,6 +96,9 @@ export function emptyRun(taskId: string, goal = '', status: TaskStatus = 'runnin
     error: null,
     stepCount: 0,
     totalTokens: 0,
+    startedTs: null,
+    finishedTs: null,
+    compactions: 0,
   };
 }
 
@@ -106,20 +150,102 @@ function approvalOf(event: ServerEvent): ApprovalRequest {
   };
 }
 
+/** 流式增量：追加到该回合最后一个仍在流式的同类块，没有就新建 */
+function applyDelta(state: RunState, event: ServerEvent): RunState {
+  const turn = num(event['turn']);
+  const kind = event['kind'] === 'reasoning' ? 'reasoning' : 'content';
+  const text = str(event['text']);
+  if (!text) return state;
+  const items = [...state.items];
+  const want = kind === 'reasoning' ? 'reasoning' : 'say';
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (
+      it &&
+      (it.kind === 'reasoning' || it.kind === 'say') &&
+      it.turn === turn &&
+      it.kind === want &&
+      it.streaming
+    ) {
+      items[i] = { ...it, text: it.text + text };
+      return { ...state, items };
+    }
+    if (it && it.kind === 'tool') break; // 工具调用之后的文字属于新的块
+  }
+  const base = { seq: 0, turn, text, streaming: true };
+  items.push(
+    want === 'reasoning'
+      ? { kind: 'reasoning', ...base, startTs: event.ts }
+      : { kind: 'say', ...base },
+  );
+  return { ...state, items };
+}
+
+function appendOutput(state: RunState, event: ServerEvent): RunState {
+  const text = str(event['text']);
+  if (!text) return state;
+  const callId = str(event['call_id']);
+  const field = event['stream'] === 'stderr' ? 'stderr' : 'stdout';
+  const items = [...state.items];
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it?.kind === 'tool' && it.state === 'running' && (!callId || it.callId === callId)) {
+      items[i] = { ...it, [field]: it[field] + text };
+      return { ...state, items };
+    }
+  }
+  return state;
+}
+
+function changedFilesOf(value: unknown): ChangedFile[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: ChangedFile[] = [];
+  for (const raw of value) {
+    if (typeof raw === 'string') out.push({ path: raw });
+    else {
+      const m = record(raw);
+      if (typeof m['path'] === 'string')
+        out.push({
+          path: m['path'],
+          added: typeof m['added'] === 'number' ? m['added'] : undefined,
+          removed: typeof m['removed'] === 'number' ? m['removed'] : undefined,
+        });
+    }
+  }
+  return out;
+}
+
 export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
+  // 瞬态事件：不带序号、不持久化，不推进游标
+  if (event.event === 'model.delta') return applyDelta(state, event);
+  if (event.event === 'tool.output') return appendOutput(state, event);
   if (typeof event.seq !== 'number' || event.seq <= state.lastSeq) return state;
   const next: RunState = { ...state, lastSeq: event.seq };
   const seq = event.seq;
   switch (event.event) {
     case 'model.reply': {
-      // 带工具调用的回复里的话是“每一步的汇报”；没有工具调用的是最终交付，由 task.finished 给出
+      const turn = num(event['turn']);
       const text = str(event['content']).trim();
+      const reasoning = str(event['reasoning']).trim();
       const calls = Array.isArray(event['tool_calls']) ? event['tool_calls'].length : 0;
-      if (!text || !calls) return next;
-      return {
-        ...next,
-        items: [...state.items, { kind: 'say', seq, turn: num(event['turn']), text }],
-      };
+      // 去掉本回合流式累计的块，以权威内容重建
+      const prior = state.items.find((i) => i.kind === 'reasoning' && i.turn === turn);
+      const items = state.items.filter(
+        (i) => !((i.kind === 'reasoning' || i.kind === 'say') && i.turn === turn && i.streaming),
+      );
+      if (reasoning)
+        items.push({
+          kind: 'reasoning',
+          seq,
+          turn,
+          text: reasoning,
+          streaming: false,
+          startTs: prior?.kind === 'reasoning' ? prior.startTs : event.ts,
+          endTs: event.ts,
+        });
+      if (text && calls) items.push({ kind: 'say', seq, turn, text, streaming: false });
+      // 没有工具调用的回复是最终交付；task.finished 会给出脱敏后的版本并覆盖
+      return { ...next, items, delivery: text && !calls ? text : state.delivery };
     }
     case 'plan.updated':
       return { ...next, plan: planOf(event['plan']) ?? state.plan };
@@ -133,7 +259,13 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
     case 'llm.call':
       return next;
     case 'task.started':
-      return { ...next, status: 'running', goal: str(event['task_goal'], state.goal), error: null };
+      return {
+        ...next,
+        status: 'running',
+        goal: str(event['task_goal'], state.goal),
+        error: null,
+        startedTs: event.ts,
+      };
     case 'tool.call':
       return {
         ...next,
@@ -147,22 +279,33 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
             args: record(event['args']),
             step: num(event['step']),
             state: 'running',
+            startTs: event.ts,
+            stdout: '',
+            stderr: '',
           },
         ],
       };
     case 'tool.result': {
       const callId = str(event['call_id']);
       const ok = event['ok'] !== false;
+      const detail = {
+        state: ok ? ('ok' as const) : ('failed' as const),
+        result: str(event['result']),
+        artifactId: str(event['artifact_id']) || undefined,
+        endTs: event.ts,
+        durationMs: typeof event['duration_ms'] === 'number' ? event['duration_ms'] : undefined,
+        exitCode: typeof event['exit_code'] === 'number' ? event['exit_code'] : undefined,
+        timedOut: event['timed_out'] === true || undefined,
+        truncated: event['truncated'] === true || undefined,
+        bytes: typeof event['bytes'] === 'number' ? event['bytes'] : undefined,
+        changedFiles: changedFilesOf(event['changed_files']),
+        folded: event['folded'] === true || undefined,
+      };
       let matched = false;
       const items = state.items.map((item) => {
         if (item.kind === 'tool' && item.callId === callId && item.state === 'running') {
           matched = true;
-          return {
-            ...item,
-            state: ok ? ('ok' as const) : ('failed' as const),
-            result: str(event['result']),
-            artifactId: str(event['artifact_id']) || undefined,
-          };
+          return { ...item, ...detail };
         }
         return item;
       });
@@ -174,9 +317,10 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
           tool: str(event['tool']),
           args: {},
           step: num(event['step']),
-          state: ok ? 'ok' : 'failed',
-          result: str(event['result']),
-          artifactId: str(event['artifact_id']) || undefined,
+          startTs: event.ts,
+          stdout: '',
+          stderr: '',
+          ...detail,
         });
       }
       return { ...next, items };
@@ -211,6 +355,13 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
         terminationReason: str(event['termination_reason']),
         stepCount: num(event['step_count'], state.stepCount),
         totalTokens: num(event['total_tokens'], state.totalTokens),
+        finishedTs: event.ts,
+        // 流式块若因中断没被 model.reply 收尾，到终态一律收尾
+        items: state.items.map((i) =>
+          (i.kind === 'reasoning' || i.kind === 'say') && i.streaming
+            ? { ...i, streaming: false }
+            : i,
+        ),
       };
     }
     case 'task.error':
@@ -226,6 +377,7 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
       ) {
         return {
           ...next,
+          compactions: state.compactions + (event.event === 'context.compacted' ? 1 : 0),
           items: [...state.items, { kind: 'agent', seq, ...describeAgent(event) }],
         };
       }
@@ -243,7 +395,26 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
   }
 }
 
-function describeAgent(event: ServerEvent): { name: string; text: string; tone: 'info' | 'warn' } {
+function describeAgent(event: ServerEvent): {
+  group: AgentGroup;
+  name: string;
+  text: string;
+  tone: 'info' | 'warn';
+} {
+  const raw = describeAgentText(event);
+  const group: AgentGroup = event.event.startsWith('websearch.')
+    ? 'websearch'
+    : event.event.startsWith('subagent.')
+      ? 'subagent'
+      : 'compaction';
+  return { group, ...raw };
+}
+
+function describeAgentText(event: ServerEvent): {
+  name: string;
+  text: string;
+  tone: 'info' | 'warn';
+} {
   const name = event.event;
   switch (name) {
     case 'websearch.started':
@@ -335,6 +506,8 @@ export function runFromSnapshot(task: {
   step_count: number;
   total_tokens: number;
   termination_reason: string;
+  started_at?: number | null;
+  finished_at?: number | null;
 }): RunState {
   return {
     ...emptyRun(task.task_id, task.task_goal, task.status),
@@ -343,6 +516,8 @@ export function runFromSnapshot(task: {
     stepCount: task.step_count,
     totalTokens: task.total_tokens,
     terminationReason: task.termination_reason,
+    startedTs: task.started_at ?? null,
+    finishedTs: task.finished_at ?? null,
   };
 }
 

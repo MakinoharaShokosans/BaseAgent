@@ -9,12 +9,14 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../utils/text';
 import { IconButton } from './primitives';
 
-export interface MenuItem {
+interface MenuItem {
   label: string;
   icon?: ReactNode;
   onSelect: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /** 右侧的短说明，如“未提供” */
+  note?: string;
   /** 在此项之前画一条分隔线 */
   separated?: boolean;
 }
@@ -133,7 +135,7 @@ export function MoreMenu({
               width: MENU_WIDTH,
               visibility: pos ? 'visible' : 'hidden',
             }}
-            className="z-[60] rounded-[18px] bg-raised/95 p-1.5 shadow-float backdrop-blur-2xl border border-ink/[0.07] dark:border-white/[0.08]"
+            className="z-pop rounded-[18px] bg-raised/95 p-1.5 shadow-float backdrop-blur-2xl border border-ink/[0.07] dark:border-white/[0.08]"
           >
             {items.map((item) => (
               <div key={item.label}>
@@ -154,6 +156,7 @@ export function MoreMenu({
                 >
                   {item.icon && <span className="shrink-0 opacity-80">{item.icon}</span>}
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {item.note && <span className="shrink-0 text-2xs text-mute">{item.note}</span>}
                 </button>
               </div>
             ))}
