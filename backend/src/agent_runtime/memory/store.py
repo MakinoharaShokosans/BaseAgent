@@ -355,6 +355,34 @@ class MemoryStore:
         ).fetchall()
         return [_session_info(row) for row in rows]
 
+    async def search_sessions(
+        self, query: str, *, workspace_id: str | None = None, limit: int = 50
+    ) -> list[SessionInfo]:
+        cleaned = query.strip()
+        if not cleaned:
+            return []
+        pattern = f"%{cleaned}%"
+        if workspace_id:
+            await self.get_workspace(workspace_id)
+            sql = (
+                f"SELECT {self._SESSION_COLUMNS} FROM sessions "
+                "WHERE workspace_id = ? AND (title LIKE ? OR session_id LIKE ?) "
+                "ORDER BY pinned DESC, updated_at DESC, created_at DESC LIMIT ?"
+            )
+            rows = await (
+                await self._require().execute(sql, (workspace_id, pattern, pattern, limit))
+            ).fetchall()
+        else:
+            sql = (
+                f"SELECT {self._SESSION_COLUMNS} FROM sessions "
+                "WHERE (title LIKE ? OR session_id LIKE ?) "
+                "ORDER BY pinned DESC, updated_at DESC, created_at DESC LIMIT ?"
+            )
+            rows = await (
+                await self._require().execute(sql, (pattern, pattern, limit))
+            ).fetchall()
+        return [_session_info(row) for row in rows]
+
     async def update_session(
         self,
         session_id: str,

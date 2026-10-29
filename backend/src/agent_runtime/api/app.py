@@ -5,8 +5,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from agent_runtime.api.deps import ApiServices
 from agent_runtime.api.errors import TRACE_HEADER, install_handlers
@@ -41,9 +46,25 @@ def create_app(services: ApiServices, *, token: str | None) -> FastAPI:
     for module in (workspaces, sessions, settings, tasks, files, system, prompts, skills, mcp):
         app.include_router(module.router, prefix=API_PREFIX)
 
-    @app.get("/", include_in_schema=False)
-    async def root() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
-        return {"name": "BaseAgent", "api": API_PREFIX}
+    @app.get("/events", include_in_schema=False)
+    async def global_events_root() -> Any:
+        return await system.global_events(services)
+
+    dist_dir = Path(__file__).resolve().parents[4] / "frontend" / "dist"
+    if dist_dir.is_dir() and (dist_dir / "index.html").is_file():
+        if (dist_dir / "assets").is_dir():
+            app.mount("/assets", StaticFiles(directory=dist_dir / "assets"), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str) -> Any:
+            target = dist_dir / full_path
+            if target.is_file():
+                return FileResponse(target)
+            return FileResponse(dist_dir / "index.html")
+    else:
+        @app.get("/", include_in_schema=False)
+        async def root() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
+            return {"name": "BaseAgent", "api": API_PREFIX}
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]

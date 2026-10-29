@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from agent_runtime.api.deps import ApiServices, services_of
 from agent_runtime.api.errors import ApiError
 from agent_runtime.api.fsguard import BrowseDeniedError, list_directories
 from agent_runtime.api.schemas import DirectoryListing
+from agent_runtime.observability.events import HEARTBEAT
 
 router = APIRouter(tags=["system"])
 Services = Annotated[ApiServices, Depends(services_of)]
@@ -85,3 +89,33 @@ async def tools(svc: Services) -> list[dict[str, Any]]:
 @router.get("/models")
 async def models(svc: Services) -> list[dict[str, Any]]:
     return svc.introspection.models()
+
+
+@router.get("/events")
+async def global_events(svc: Services) -> StreamingResponse:
+    """全局轻量事件流：广播所有任务生命周期状态变更（供侧栏与待办更新）。"""
+    heartbeat = float(svc.settings.server.sse_heartbeat_sec)
+
+    async def body() -> AsyncIterator[str]:
+        events = svc.hub.global_stream(heartbeat_sec=heartbeat)
+        try:
+            async for event in events:
+                if event.name == HEARTBEAT:
+                    yield f"event: {HEARTBEAT}\ndata: {{}}\n\n"
+                else:
+                    payload = {
+                        "task_id": event.task_id,
+                        "name": event.name,
+                        "ts": event.ts,
+                        "data": event.data,
+                    }
+                    raw = json.dumps(payload, ensure_ascii=False)
+                    yield f"event: {event.name}\ndata: {raw}\n\n"
+        finally:
+            await events.aclose()
+
+    return StreamingResponse(
+        body(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

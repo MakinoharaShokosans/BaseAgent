@@ -101,6 +101,20 @@ class TaskEvents:
                 },
             )
 
+    async def tool_output(self, call_id: str, stream: str, text: str) -> None:
+        """命令实时输出增量（stdout / stderr）；不持久化。"""
+        if not text:
+            return
+        await self._hub.transient(
+            self._task_id,
+            "tool.output",
+            {
+                "call_id": call_id,
+                "stream": "stderr" if stream == "stderr" else "stdout",
+                "text": self._redactor.text(text),
+            },
+        )
+
     # ------------------------------------------------------------------ EventSink
 
     async def model_replied(self, message: Message, state: AgentState) -> None:
@@ -145,8 +159,11 @@ class TaskEvents:
         )
 
     async def approval_requested(self, request: PendingApproval, state: AgentState) -> None:
+        payload = approval_payload(request, self._redactor)
+        payload["session_id"] = state.session_id
+        payload["workspace_id"] = state.workspace_id
         await self._hub.emit(
-            self._task_id, "task.waiting_for_approval", approval_payload(request, self._redactor)
+            self._task_id, "task.waiting_for_approval", payload
         )
 
     async def context_compacted(self, result: Compaction, state: AgentState) -> None:
@@ -307,7 +324,13 @@ class LifecycleEvents:
 
     async def task_started(self, task_id: str, state: AgentState) -> None:
         await self._hub.emit(
-            task_id, "task.started", {"task_goal": self._redactor.text(state.task_goal)}
+            task_id,
+            "task.started",
+            {
+                "task_goal": self._redactor.text(state.task_goal),
+                "session_id": state.session_id,
+                "workspace_id": state.workspace_id,
+            },
         )
 
     async def task_finished(self, snapshot: TaskSnapshot) -> None:
@@ -319,13 +342,20 @@ class LifecycleEvents:
             await self._hub.emit(
                 snapshot.task_id,
                 "task.error",
-                {"code": "TASK_FAILED", "message": redactor.text(snapshot.reason)},
+                {
+                    "code": "TASK_FAILED",
+                    "message": redactor.text(snapshot.reason),
+                    "session_id": state.session_id if state else "",
+                    "workspace_id": state.workspace_id if state else "",
+                },
             )
         await self._hub.emit(
             snapshot.task_id,
             "task.finished",
             {
                 "status": snapshot.status,
+                "session_id": state.session_id if state else "",
+                "workspace_id": state.workspace_id if state else "",
                 "termination_reason": redactor.text(snapshot.reason),
                 "step_count": turns_of(state),
                 "turns": turns_of(state),

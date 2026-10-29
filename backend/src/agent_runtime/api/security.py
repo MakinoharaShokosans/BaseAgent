@@ -19,7 +19,7 @@ from agent_runtime.api.token import FailureLimiter, tokens_match
 _WRITE_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOOPBACK_HOSTS: Final = frozenset({"127.0.0.1", "localhost", "::1"})
 _TRACE_OK: Final = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-EXEMPT_PATHS: Final = frozenset({"/", "/health", "/api/v1/health"})
+EXEMPT_PATHS: Final = frozenset({"/", "/health", "/api/v1/health", "/events", "/api/v1/events"})
 DOC_PATHS: Final = frozenset({"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"})
 
 
@@ -129,7 +129,12 @@ class AccessGate:
             and origin.rstrip("/").lower() not in self._origins
         ):
             return 403, "ORIGIN_NOT_ALLOWED", "Origin 不在允许范围内"
-        if method == "OPTIONS" or path in self._exempt or self._token is None:
+        if (
+            method == "OPTIONS"
+            or path in self._exempt
+            or (method == "GET" and not path.startswith("/api/"))
+            or self._token is None
+        ):
             return None
         source = (scope.get("client") or ("-", 0))[0]
         if self._limiter is not None and self._limiter.blocked(source):

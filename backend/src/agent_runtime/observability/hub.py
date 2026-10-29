@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections import OrderedDict, deque
 from collections.abc import AsyncGenerator, Callable, Mapping
@@ -28,6 +29,16 @@ from agent_runtime.observability.events import (
 
 _PAGE: Final = 500
 STREAM_GAP: Final = "STREAM_GAP"
+GLOBAL_LIFECYCLE_EVENTS: Final = frozenset(
+    {
+        "task.started",
+        "task.waiting_for_approval",
+        "task.approved",
+        "task.rejected",
+        "task.finished",
+        "task.error",
+    }
+)
 
 
 class _Subscriber:
@@ -61,6 +72,7 @@ class EventHub:
         self._subs: dict[str, set[_Subscriber]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._sinks: list[Callable[[Event], None]] = []
+        self._global_subs: set[_Subscriber] = set()
 
     def add_sink(self, sink: Callable[[Event], None]) -> None:
         """旁路：每个事件发布后同步调用（如轨迹写入）。sink 抛出的异常只告警。"""
@@ -136,6 +148,10 @@ class EventHub:
                 if not sub.lost_from:
                     sub.lost_from = event.seq
                 sub.lost_to = event.seq
+        if event.name in GLOBAL_LIFECYCLE_EVENTS:
+            for sub in list(self._global_subs):
+                with contextlib.suppress(asyncio.QueueFull):
+                    sub.queue.put_nowait(event)
 
     def _evict_cold_tasks(self) -> None:
         while len(self._buffers) > self._max_tasks:
@@ -238,6 +254,21 @@ class EventHub:
                 subs.discard(sub)
                 if not subs:
                     del self._subs[task_id]
+
+    async def global_stream(self, *, heartbeat_sec: float = 15.0) -> AsyncGenerator[Event, None]:
+        """全局事件流：持续广播所有任务的生命周期事件（started, finished, approval 等）。"""
+        sub = _Subscriber(self._queue_size)
+        self._global_subs.add(sub)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(sub.queue.get(), timeout=heartbeat_sec)
+                except TimeoutError:
+                    yield self._transport("", HEARTBEAT, {})
+                    continue
+                yield event
+        finally:
+            self._global_subs.discard(sub)
 
     async def _event_at(self, task_id: str, seq: int) -> Event | None:
         buffer = self._buffers.get(task_id)

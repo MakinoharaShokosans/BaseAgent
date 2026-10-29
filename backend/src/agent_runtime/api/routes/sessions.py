@@ -58,6 +58,17 @@ def _failure(f: Failure) -> FailureOut:
     )
 
 
+@router.get("/sessions/search", response_model=list[SessionOut])
+async def search_sessions(
+    svc: Services,
+    q: Annotated[str, Query(min_length=1, max_length=100)],
+    workspace_id: Annotated[str | None, Query(pattern=r"^[A-Za-z0-9_-]{1,64}$")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> list[SessionOut]:
+    results = await svc.memory.search_sessions(q, workspace_id=workspace_id, limit=limit)
+    return [session_out(info) for info in results]
+
+
 @router.get("/sessions/{session_id}", response_model=SessionOut)
 async def get_session(session_id: SessionId, svc: Services) -> SessionOut:
     return session_out(await svc.memory.get_session(session_id))
