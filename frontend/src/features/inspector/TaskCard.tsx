@@ -226,30 +226,32 @@ export function TaskCard({ sessionId }: { sessionId: string }) {
 
           {run.plan.length > 0 && <Plan plan={run.plan} />}
 
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 py-1 sm:grid-cols-4 sm:gap-2">
-            <div className="flex items-center gap-1.5 text-[12.5px]">
+          <div className="flex items-center justify-between py-1 text-[12.5px]">
+            <div className="flex items-center gap-1.5" title={`回合数：${run.stepCount}`}>
               <RotateCw size={13} className="shrink-0 text-mute/60" />
-              <span className="font-semibold tabular-nums text-ink">{run.stepCount}</span>
-              <span className="text-2xs text-mute/70">回合</span>
+              <span className="font-medium tabular-nums text-ink">{run.stepCount}</span>
             </div>
-            <div className="flex items-center gap-1.5 text-[12.5px]">
+            <div className="flex items-center gap-1.5" title={`工具调用：${toolCount}`}>
               <Wrench size={13} className="shrink-0 text-mute/60" />
-              <span className="font-semibold tabular-nums text-ink">{toolCount}</span>
-              <span className="text-2xs text-mute/70">工具</span>
+              <span className="font-medium tabular-nums text-ink">{toolCount}</span>
             </div>
-            <div className="flex items-center gap-1.5 text-[12.5px]">
+            <div
+              className="flex items-center gap-1.5"
+              title={`Token 消耗：${formatTokens(run.totalTokens)}`}
+            >
               <Cpu size={13} className="shrink-0 text-mute/60" />
-              <span className="font-semibold tabular-nums text-ink">
+              <span className="font-medium tabular-nums text-ink">
                 {formatTokens(run.totalTokens)}
               </span>
-              <span className="text-2xs text-mute/70">Token</span>
             </div>
-            <div className="flex items-center gap-1.5 text-[12.5px]">
+            <div
+              className="flex items-center gap-1.5"
+              title={`用时：${elapsed !== null ? formatDuration(Math.max(0, elapsed)) : '—'}`}
+            >
               <Clock size={13} className="shrink-0 text-mute/60" />
-              <span className="font-semibold tabular-nums text-ink">
+              <span className="font-medium tabular-nums text-ink">
                 {elapsed !== null ? formatDuration(Math.max(0, elapsed)) : '—'}
               </span>
-              <span className="text-2xs text-mute/70">用时</span>
             </div>
           </div>
 
@@ -275,16 +277,6 @@ export function TaskCard({ sessionId }: { sessionId: string }) {
               ))}
             </ul>
           )}
-
-          <div className="flex justify-end pt-1">
-            <IconButton
-              label="下载轨迹"
-              className="h-7 w-7"
-              onClick={() => window.open(api.tasks.traceUrl(run.taskId))}
-            >
-              <Download size={14} />
-            </IconButton>
-          </div>
         </div>
       ) : (
         <p className="py-2 text-center text-mute">—</p>
