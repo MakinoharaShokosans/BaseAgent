@@ -336,8 +336,13 @@ class TaskContextConfig(_Section):
     soft_tokens: PosInt = 100_000
     hard_tokens: PosInt = 160_000
     fold_keep_recent_steps: PosInt = 3
-    compaction_enabled: bool = False
+    compaction_enabled: bool = True
+    #: 压缩摘要的字符上限，以及送去总结的旧步骤的字符上限（超出的每条结果会被截短）
+    compaction_summary_chars: PosInt = 4000
+    compaction_input_chars: PosInt = 60_000
     fold_exempt_tools: list[str] = ["load_skill", "mcp_describe"]
+    #: 结果可以靠“用同样的参数再调一次”取回的工具：折叠时不需要离线副本，只留一行存根
+    fold_reproducible_tools: list[str] = ["view_file", "grep", "list_dir", "read_artifact"]
 
     @model_validator(mode="after")
     def _ordered(self) -> Self:
@@ -370,6 +375,9 @@ class ObservationConfig(_Section):
     scalar_preview_chars: PosInt = 120
     exempt_tools: list[str] = ["load_skill", "mcp_describe"]
     exempt_multiplier: PosInt = 8
+    #: 读类工具自己有行数、条数上限与翻页提示，不再按头尾截断；只受下面这条更高的上限约束
+    passthrough_tools: list[str] = ["view_file", "grep", "list_dir", "read_artifact", "websearch"]
+    passthrough_max_tokens: PosInt = 12_000
 
 
 class MemoryConfig(_Section):

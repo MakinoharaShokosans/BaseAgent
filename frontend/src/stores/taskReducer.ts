@@ -260,7 +260,11 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
     case 'stream.dropped':
       return state; // 传输事件不改变业务状态，也不推进序号
     default:
-      if (event.event.startsWith('websearch.') || event.event.startsWith('subagent.')) {
+      if (
+        event.event.startsWith('websearch.') ||
+        event.event.startsWith('subagent.') ||
+        event.event === 'context.compacted'
+      ) {
         return {
           ...next,
           items: [...state.items, { kind: 'agent', seq, ...describeAgent(event) }],
@@ -306,6 +310,17 @@ function describeAgent(event: ServerEvent): { name: string; text: string; tone: 
         tone: 'info',
         text: `研究结束：${num(event['rounds'])} 轮，${num(event['sources'])} 个来源，${num(event['findings'])} 条结论，用了 ${num(event['tokens'])} Token`,
       };
+    case 'context.compacted': {
+      // 机械清单没有各步要点，要让用户知道这次压缩是降级的
+      const mechanical = event['via'] === 'mechanical';
+      return {
+        name,
+        tone: mechanical ? 'warn' : 'info',
+        text:
+          `上下文压缩：较早的 ${num(event['steps'])} 步并成了一份摘要（压缩前约 ${num(event['before_tokens'])} Token，摘要 ${num(event['summary_chars'])} 字符）` +
+          (mechanical ? '。模型总结不可用，摘要只是调用清单' : ''),
+      };
+    }
     case 'subagent.started':
       return {
         name,

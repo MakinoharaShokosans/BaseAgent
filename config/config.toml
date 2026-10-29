@@ -234,8 +234,11 @@ hard_ratio = 0.80
 soft_tokens = 100000                # 实际触发线 = min(窗口 × 比例, 绝对 Token)
 hard_tokens = 160000
 fold_keep_recent_steps = 3          # 折叠时保持完整的最近步数
-compaction_enabled = false          # 任务内 LLM 压缩（级别 3）；先只做折叠，数据证明不够再开
+compaction_enabled = true           # 任务内 LLM 压缩（级别 3）：折叠之后仍超过 hard 线时，把较早的步骤总结成摘要
+compaction_summary_chars = 4000     # 摘要的字符上限
+compaction_input_chars = 60000      # 送去总结的旧步骤的字符上限；超出的每条结果会被截短
 fold_exempt_tools = ["load_skill", "mcp_describe"]   # 永不折叠的工具（截断流程文档会让做法残缺）
+fold_reproducible_tools = ["view_file", "grep", "list_dir", "read_artifact"]   # 结果能靠同样的调用取回：折叠只留一行存根
 
 [context.observation]
 max_tokens = 1500                   # 超过则摘要加落盘
@@ -247,6 +250,8 @@ json_outline_array_items = 5
 scalar_preview_chars = 120
 exempt_tools = ["load_skill", "mcp_describe"]
 exempt_multiplier = 8               # 豁免工具的放宽倍数（仍有上限）
+passthrough_tools = ["view_file", "grep", "list_dir", "read_artifact", "websearch"]   # 读类工具自带行数与翻页上限，不按头尾截断
+passthrough_max_tokens = 12000      # 它们的单条结果上限；超过才摘要加落盘
 
 [context.memory]
 max_facts = 50                      # 会话记忆事实上限；超出触发整合

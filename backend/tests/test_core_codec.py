@@ -14,6 +14,7 @@ from agent_runtime.core import (
     AgentState,
     ApprovalDecision,
     FailedAttempt,
+    InvalidUpdateError,
     Message,
     PendingApproval,
     PlanItem,
@@ -173,7 +174,7 @@ def _valid() -> dict[str, Any]:
 
 @pytest.mark.unit
 def test_schema_version_is_recorded() -> None:
-    assert _valid()["schema_version"] == CURRENT_SCHEMA_VERSION == 3
+    assert _valid()["schema_version"] == CURRENT_SCHEMA_VERSION == 4
 
 
 @pytest.mark.unit
@@ -317,8 +318,9 @@ def test_invalid_schema_version_is_rejected(bad: object) -> None:
 
 @pytest.mark.unit
 def test_older_versions_are_migrated_step_by_step() -> None:
-    """用注入的迁移表验证机制；v3 之前的版本不迁移，表是空的。"""
+    """用注入的迁移表验证机制；v3 之前的版本不迁移。"""
     data = _valid()
+    data["schema_version"] = 3
 
     def v3_to_v4(d: dict[str, Any]) -> dict[str, Any]:
         d = dict(d)
@@ -333,5 +335,27 @@ def test_older_versions_are_migrated_step_by_step() -> None:
 @pytest.mark.unit
 def test_missing_migration_step_is_an_error() -> None:
     data = _valid()
+    data["schema_version"] = 3
     with pytest.raises(StateDecodeError, match="迁移"):
         state_from_dict(data, migrations={}, current_version=4, minimum_version=3)
+
+
+@pytest.mark.unit
+def test_a_v3_checkpoint_loads_with_no_compaction_recorded() -> None:
+    """v3 的检查点没有压缩字段：用真实的迁移表加载，得到“没压缩过”。"""
+    data = _valid()
+    del data["stream_summary"], data["stream_cut"]
+    data["schema_version"] = 3
+    state = state_from_dict(data)
+    assert state.schema_version == 4 and state.stream_summary == "" and state.stream_cut == 0
+    assert state.messages[0].content == "x"
+
+
+@pytest.mark.unit
+def test_compaction_fields_round_trip_and_are_validated() -> None:
+    state = apply_update(base_state(), {"stream_summary": "读了 a.py", "stream_cut": 6})
+    again = loads_state(dumps_state(state))
+    assert (again.stream_summary, again.stream_cut) == ("读了 a.py", 6)
+    for bad in ({"stream_cut": -1}, {"stream_cut": True}, {"stream_summary": 3}):
+        with pytest.raises(InvalidUpdateError):
+            apply_update(base_state(), bad)

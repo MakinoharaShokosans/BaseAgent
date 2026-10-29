@@ -268,3 +268,43 @@ def test_only_steps_with_tool_calls_count_toward_the_keep_window() -> None:
     out = run(msgs, p=policy(trigger=300, keep=2)).messages
     tools = [m for m in out if m.role == "tool"]
     assert [is_stub(m) for m in tools] == [True, True, True, False, False]
+
+
+# ==============================================================================
+# 可重现的读类结果：没有离线副本也能折叠
+# ==============================================================================
+
+
+def reproducible_policy(trigger: int = 300, keep: int = 2) -> FoldPolicy:
+    return FoldPolicy(
+        trigger_tokens=trigger,
+        keep_recent_steps=keep,
+        exempt_tools=frozenset(),
+        reproducible_tools=frozenset({"view_file", "grep"}),
+    )
+
+
+@pytest.mark.unit
+def test_old_read_results_fold_to_a_stub_that_says_how_to_get_them_back() -> None:
+    msgs = stream(5, name="view_file", size=200, handle=False, args={"path": "a.py"})
+    out = run(msgs, p=reproducible_policy())
+    stubs = [m for m in out.messages if is_stub(m)]
+    assert out.folded == 3 and len(stubs) == 3  # 最近 2 步保持完整
+    assert "view_file" in stubs[0].content and '"path": "a.py"' in stubs[0].content
+    assert "重新调用 view_file" in stubs[0].content and "artifact://" not in stubs[0].content
+    assert not is_stub(out.messages[-1]) and not is_stub(out.messages[-3])
+
+
+@pytest.mark.unit
+def test_results_that_cannot_be_reproduced_stay_even_without_a_copy() -> None:
+    msgs = stream(5, name="bash", size=200, handle=False)  # bash 的输出没有离线副本，重跑可能不同
+    assert run(msgs, p=reproducible_policy()).folded == 0
+
+
+@pytest.mark.unit
+def test_a_copy_is_preferred_over_re_running_and_pairs_stay_intact() -> None:
+    msgs = stream(5, name="grep", size=200, handle=True)
+    out = run(msgs, p=reproducible_policy())
+    first = next(m for m in out.messages if is_stub(m))
+    assert "artifact://obs_step_1_grep" in first.content
+    assert_atomic_pairs(out.messages)

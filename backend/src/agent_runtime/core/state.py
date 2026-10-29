@@ -25,7 +25,7 @@ PERMISSION_LEVELS: tuple[str, ...] = get_args(PermissionLevel)
 Verification = Literal["none", "unchecked", "failed", "passed"]
 VERIFICATIONS: tuple[str, ...] = get_args(Verification)
 
-CURRENT_SCHEMA_VERSION: Final = 3
+CURRENT_SCHEMA_VERSION: Final = 4
 
 #: 会话草稿的上限（docs/02_runtime/05_plan_and_scratch.md）
 MAX_PLAN_ITEMS: Final = 12
@@ -102,6 +102,10 @@ class AgentState:
     # 控制
     pending_approval: PendingApproval | None = None
     approval_decision: ApprovalDecision | None = None
+    # 任务内压缩：目标消息之后的前 ``stream_cut`` 条往返已并入 ``stream_summary``，
+    # 装配视图用摘要代替它们；``messages`` 本身不动（检查点与轨迹仍是完整的）
+    stream_summary: str = ""
+    stream_cut: int = 0
     schema_version: int = CURRENT_SCHEMA_VERSION
 
 
@@ -174,6 +178,12 @@ def _optional[T](kind: type[T]) -> _Check:
     return check
 
 
+def _text(field: str, value: object) -> str:
+    if not isinstance(value, str):
+        raise _bad(field, "必须是字符串")
+    return value
+
+
 def _permission(field: str, value: object) -> str:
     if value not in PERMISSION_LEVELS:
         raise _bad(field, f"未知权限级别 {value!r}")
@@ -223,6 +233,8 @@ VALIDATORS: Final[dict[str, _Check]] = {
     "verification": _verification,
     "pending_approval": _optional(PendingApproval),
     "approval_decision": _optional(ApprovalDecision),
+    "stream_summary": _text,
+    "stream_cut": _count,
     "schema_version": _count,
 }
 assert set(VALIDATORS) == set(FIELD_NAMES)

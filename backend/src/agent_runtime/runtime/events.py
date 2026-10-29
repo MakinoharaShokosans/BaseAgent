@@ -14,6 +14,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
+from agent_runtime.context.task_compaction import Compaction
 from agent_runtime.core import (
     AgentState,
     Message,
@@ -109,6 +110,21 @@ class TaskEvents:
     async def approval_requested(self, request: PendingApproval, state: AgentState) -> None:
         await self._hub.emit(
             self._task_id, "task.waiting_for_approval", approval_payload(request, self._redactor)
+        )
+
+    async def context_compacted(self, result: Compaction, state: AgentState) -> None:
+        """任务内压缩：较早的几步换成了一份摘要。只发数字，不含摘要正文。"""
+        await self._hub.emit(
+            self._task_id,
+            "context.compacted",
+            {
+                "turn": self._turn + 1,
+                "steps": result.steps,
+                "cut": state.stream_cut,
+                "before_tokens": result.before_tokens,
+                "summary_chars": result.summary_chars,
+                "via": result.via,
+            },
         )
 
     # ------------------------------------------------------------------ 内部

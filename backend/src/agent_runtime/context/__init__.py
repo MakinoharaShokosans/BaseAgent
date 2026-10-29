@@ -18,9 +18,18 @@ from agent_runtime.context.prompt import (
     PromptAssets,
 )
 from agent_runtime.context.rules import PromptLibrary, RulesCache, RulesResult
+from agent_runtime.context.task_compaction import (
+    Compaction,
+    CompactStep,
+    TaskCompactionConfig,
+    TaskCompactor,
+    TaskSummary,
+)
 
 __all__ = [
     "CANARY_INSTRUCTION",
+    "CompactStep",
+    "Compaction",
     "FoldPolicy",
     "FoldResult",
     "Governed",
@@ -34,5 +43,8 @@ __all__ = [
     "PromptLibrary",
     "RulesCache",
     "RulesResult",
+    "TaskCompactionConfig",
+    "TaskCompactor",
+    "TaskSummary",
     "fold_stream",
 ]

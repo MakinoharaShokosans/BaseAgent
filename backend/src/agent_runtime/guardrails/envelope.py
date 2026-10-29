@@ -22,6 +22,7 @@ ENVELOPE_TAGS: Final = (
     "session_memory",
     "task_data",
     "task_progress",
+    "task_summary",
     "scratch",
     "available_mcp_tools",
     "workspace",

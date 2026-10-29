@@ -249,6 +249,35 @@ describe('reduceTaskEvent', () => {
     expect(state.lastSeq).toBe(3);
   });
 
+  it('shows a context compaction on the timeline and flags the degraded one', () => {
+    seq = 0;
+    const state = replay([
+      ev('context.compacted', {
+        turn: 9,
+        steps: 6,
+        cut: 12,
+        before_tokens: 84000,
+        summary_chars: 1800,
+        via: 'llm',
+      }),
+      ev('context.compacted', {
+        turn: 14,
+        steps: 4,
+        cut: 20,
+        before_tokens: 90000,
+        summary_chars: 700,
+        via: 'mechanical',
+      }),
+    ]);
+    const agents = state.items.flatMap((i) => (i.kind === 'agent' ? [i] : []));
+    expect(agents[0]?.tone).toBe('info');
+    expect(agents[0]?.text).toBe(
+      '上下文压缩：较早的 6 步并成了一份摘要（压缩前约 84000 Token，摘要 1800 字符）',
+    );
+    expect(agents[1]?.tone).toBe('warn');
+    expect(agents[1]?.text).toContain('摘要只是调用清单');
+  });
+
   it('splits a narration into its text and the sub-task progress', () => {
     expect(parseSay('已完成：读了配置。下一步：改端口。\n进度：调整配置 约 60%')).toEqual({
       body: '已完成：读了配置。下一步：改端口。',

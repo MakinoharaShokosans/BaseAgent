@@ -37,6 +37,9 @@ class NullSink:
     async def approval_requested(self, request: PendingApproval, state: AgentState) -> None:
         pass
 
+    async def context_compacted(self, result: object, state: AgentState) -> None:
+        pass
+
 
 def pending_for(state: AgentState, call_id: str = "c1") -> PendingApproval:
     return PendingApproval(

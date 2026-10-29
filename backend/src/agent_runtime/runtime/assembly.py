@@ -71,6 +71,8 @@ def observation_limits_from_settings(settings: Settings) -> ObservationLimits:
         scalar_preview_chars=o.scalar_preview_chars,
         exempt_tools=tuple(o.exempt_tools),
         exempt_multiplier=o.exempt_multiplier,
+        passthrough_tools=tuple(o.passthrough_tools),
+        passthrough_max_tokens=o.passthrough_max_tokens,
     )
 
 
@@ -155,6 +157,7 @@ def fold_policy_from_settings(settings: Settings, context_window: int) -> FoldPo
         trigger_tokens=t.soft_trigger(context_window),
         keep_recent_steps=t.fold_keep_recent_steps,
         exempt_tools=frozenset(t.fold_exempt_tools),
+        reproducible_tools=frozenset(t.fold_reproducible_tools),
     )
 
 

@@ -255,3 +255,32 @@ async def test_a_hostile_task_id_cannot_escape_either(tmp_path: Path) -> None:
     assert out.artifact_path is not None
     root = (tmp_path / "artifacts").resolve()
     assert Path(out.artifact_path).resolve().is_relative_to(root)  # noqa: ASYNC240
+
+
+@pytest.mark.unit
+async def test_read_tools_pass_through_up_to_their_own_ceiling(tmp_path: Path) -> None:
+    """读类工具自己有行数与翻页上限：不按头尾截断，否则读 300 行只剩 50 行。"""
+    g = governor(tmp_path, passthrough_tools=("view_file", "grep"), passthrough_max_tokens=2_000)
+    text = numbered(100, width=12)  # 1200 字符，远超 200 的普通上限
+    for name in ("view_file", "grep"):
+        out = await g.govern(text, task_id="t", step=1, tool_name=name, taken=frozenset())
+        assert out.summary == text and out.truncated is False and out.artifact_id is None
+    shell = await g.govern(text, task_id="t", step=1, tool_name="bash", taken=frozenset())
+    assert shell.truncated is True  # 其他工具照旧
+
+
+@pytest.mark.unit
+async def test_a_read_result_above_the_ceiling_is_still_distilled_and_saved(tmp_path: Path) -> None:
+    g = governor(tmp_path, passthrough_tools=("view_file",), passthrough_max_tokens=500)
+    out = await g.govern(
+        numbered(200), task_id="t", step=1, tool_name="view_file", taken=frozenset()
+    )
+    assert out.truncated is True and out.artifact_id is not None
+
+
+@pytest.mark.unit
+async def test_the_ceiling_never_goes_below_the_ordinary_limit(tmp_path: Path) -> None:
+    g = governor(tmp_path, passthrough_tools=("view_file",), passthrough_max_tokens=50)
+    text = "y" * 200  # 刚好等于普通上限 200
+    out = await g.govern(text, task_id="t", step=1, tool_name="view_file", taken=frozenset())
+    assert out.summary == text

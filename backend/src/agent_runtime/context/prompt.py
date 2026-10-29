@@ -138,6 +138,7 @@ class PromptAssembler:
             "session_memory": guard("session_memory", self._session_memory),
             "task_data": guard("task_data", self._task_data),
             "scratch": guard("scratch", lambda: self._scratch(state)),
+            "task_summary": "",
         }
         messages = [Message(role="system", content=_join([a.system, layers["canary"]]))]
         for name in (
@@ -151,7 +152,7 @@ class PromptAssembler:
             if layers[name]:
                 messages.append(Message(role="user", content=layers[name]))
 
-        goal_at = _goal_index(state)
+        goal_at = goal_index(state)
         split = goal_at if goal_at is not None else 0
         messages += state.messages[:split]
         if layers["task_data"]:
@@ -160,6 +161,17 @@ class PromptAssembler:
         if goal_at is not None:
             messages.append(Message(role="user", content=wrap("user_task", state.task_goal)))
             rest = rest[1:]
+            if state.stream_summary:
+                # 任务内压缩：前 stream_cut 条往返换成摘要。摘要出自对不可信观察值的总结，仍标不可信
+                layers["task_summary"] = wrap(
+                    "task_summary",
+                    state.stream_summary,
+                    source="compactor",
+                    trust="untrusted",
+                    steps_summarised=str(state.stream_cut),
+                )
+                messages.append(Message(role="user", content=layers["task_summary"]))
+                rest = rest[state.stream_cut :]
         tail = Message(role="user", content=layers["scratch"])
         folded = 0
         if self._fold is not None and rest:
@@ -266,7 +278,7 @@ class PromptAssembler:
             return {"chars": len(text), "tokens": self._count(text) if text else 0}
 
         request = "".join(m.content for m in built.messages)
-        goal = state.task_goal if _goal_index(state) is not None else ""
+        goal = state.task_goal if goal_index(state) is not None else ""
         return {
             "tools": {"count": len(a.tool_names), "names": list(a.tool_names)},
             "system": {"chars": len(a.system), "tokens": self._count(a.system)},
@@ -296,6 +308,7 @@ class PromptAssembler:
             "skills": {"present": bool(a.skills_manifest), **size("skills")},
             "mcp_index": {"present": bool(a.mcp_index), **size("mcp_index")},
             "scratch": size("scratch"),
+            "task_summary": {"present": bool(layers["task_summary"]), **size("task_summary")},
             "request": {
                 "messages": len(built.messages),
                 "chars": len(request),
@@ -309,7 +322,7 @@ def _join(parts: Sequence[str]) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
-def _goal_index(state: AgentState) -> int | None:
+def goal_index(state: AgentState) -> int | None:
     """当前任务的目标消息：最后一条与目标逐字相同的 user 消息（历史里可能有同样的问题）。"""
     for i in range(len(state.messages) - 1, -1, -1):
         m = state.messages[i]

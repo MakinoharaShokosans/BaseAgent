@@ -19,10 +19,18 @@ from typing import Any, Final
 from loguru import logger
 
 from agent_runtime.checkpoint import CheckpointStore
-from agent_runtime.context import ObservationGovernor, ObservationStore, PromptLibrary, RulesCache
+from agent_runtime.context import (
+    ObservationGovernor,
+    ObservationStore,
+    PromptLibrary,
+    RulesCache,
+    TaskCompactionConfig,
+    TaskCompactor,
+    TaskSummary,
+)
 from agent_runtime.core import AgentState, AgentTool, Message, ToolSchema, new_state
 from agent_runtime.guardrails.envelope import observation_envelope
-from agent_runtime.llm import LLMGateway, PreferredEndpoint
+from agent_runtime.llm import Degraded, LLMGateway, LLMRequest, PreferredEndpoint
 from agent_runtime.llm.tokens import estimate_tokens
 from agent_runtime.loop import (
     McpProxy,
@@ -281,12 +289,27 @@ class RuntimeFactory:
                 guards=(check_urls,),
             )
         )
+        task_cfg = settings.context.task
+        compactor = TaskCompactor(
+            self._summarise_task,
+            assembler,
+            self.count_tokens,
+            TaskCompactionConfig(
+                enabled=task_cfg.compaction_enabled,
+                trigger_tokens=task_cfg.hard_trigger(self._smallest_window()),
+                keep_recent_steps=task_cfg.fold_keep_recent_steps,
+                summary_max_chars=task_cfg.compaction_summary_chars,
+                input_max_chars=task_cfg.compaction_input_chars,
+            ),
+            prompt=self.library.get("task_compactor"),
+        )
         return TaskRuntime(
             model=model,
             tools=tool_runner,
             checkpoints=self.checkpoints,
             events=events,
             max_consecutive_blocks=limits.max_consecutive_blocks,
+            compact=compactor,
         )
 
     async def inspect_context(self, session_id: str) -> Mapping[str, Any]:
@@ -498,6 +521,24 @@ class RuntimeFactory:
             default_timeout_sec=float(cfg.timeout_sec),
             max_timeout_sec=float(cfg.max_timeout_sec),
         )
+
+    async def _summarise_task(self, system: str, user: str) -> str | None:
+        """任务内压缩用的总结：便宜的档位，结构化输出；不可用就返回 None，由压缩器退回调用清单。"""
+        request = LLMRequest(
+            tier="fast",
+            messages=(
+                Message(role="system", content=system),
+                Message(role="user", content=user),
+            ),
+            purpose="task_compaction",
+        )
+        result = await self.gateway.invoke_structured(request, TaskSummary)
+        return None if isinstance(result, Degraded) else result.value.summary
+
+    def _smallest_window(self) -> int:
+        """所有已装配端点里最小的上下文窗口：用户可以换模型，压缩线按最保守的来。"""
+        windows = [e.context_window for eps in self.loaded.endpoints.values() for e in eps]
+        return min(windows) if windows else 64_000
 
     def _context_window(self) -> int:
         endpoints = self.loaded.endpoints.get("fast", ())

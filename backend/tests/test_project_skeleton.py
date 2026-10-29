@@ -138,7 +138,6 @@ def test_removed_features_are_not_configured(cfg: dict[str, Any]) -> None:
 def test_dangerous_defaults_are_off(cfg: dict[str, Any]) -> None:
     assert cfg["skills"]["allow_workspace"] is False
     assert cfg["context"]["rules"]["allow_workspace"] is False
-    assert cfg["context"]["task"]["compaction_enabled"] is False
     assert cfg["tracing"]["export_content"] is False
     assert cfg["tracing"]["otlp"]["enabled"] is False
     assert cfg["tracing"]["langfuse"]["enabled"] is False

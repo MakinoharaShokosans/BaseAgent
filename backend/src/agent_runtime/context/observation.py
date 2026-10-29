@@ -35,6 +35,9 @@ class ObservationLimits:
     scalar_preview_chars: int
     exempt_tools: tuple[str, ...]
     exempt_multiplier: int
+    #: 读类工具：自己有行数与翻页上限，不按头尾截断，只受 ``passthrough_max_tokens`` 约束
+    passthrough_tools: tuple[str, ...] = ()
+    passthrough_max_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +109,8 @@ class ObservationGovernor:
 
     def _limit_for(self, tool_name: str) -> int:
         limits = self._limits
+        if tool_name in limits.passthrough_tools:
+            return max(limits.passthrough_max_tokens, limits.max_tokens)
         exempt = tool_name in limits.exempt_tools
         return limits.max_tokens * (limits.exempt_multiplier if exempt else 1)
 

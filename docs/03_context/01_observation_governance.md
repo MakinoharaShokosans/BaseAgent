@@ -41,6 +41,8 @@
 | `observation_head_lines` | 20 | 文本摘要保留的头部行数 |
 | `observation_tail_lines` | 30 | 文本摘要保留的尾部行数 |
 
+**读取类工具不按头尾截断。** `passthrough_tools`（`view_file`、`grep`、`list_dir`、`read_artifact`、`websearch`）自带行数与翻页上限，把读到的文件截成“头 20 行 + 尾 30 行”会让模型看不到它明明读了的中间部分（实测 300 行的 `view_file` 从 4658 Token 被砍到 1194）。它们的单条结果允许到 `passthrough_max_tokens`（默认 12000），超过才摘要加落盘；这类结果的瘦身交给折叠（可重放的读取折成一行存根，见 [窗口与压缩 §3.2](02_window_and_compaction.md)）。
+
 计量使用全系统统一的分词函数，见 [记忆 §7](04_memory.md)，裁剪器本身通过注入的计数函数工作，不直接依赖分词库，便于测试替换。
 
 ### 3.2 摘要策略

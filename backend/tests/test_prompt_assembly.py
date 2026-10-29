@@ -523,3 +523,61 @@ def test_the_built_in_system_prompt_keeps_the_security_protocol_and_the_working_
     for phrase in ("先确认需求", "先判断要不要规划", "规划", "确认", "执行", "评估", "进度："):
         assert phrase in text
     assert "websearch" in text and "update_plan" in text
+
+
+def _step(i: int, size: int = 30) -> tuple[Message, Message]:
+    call = ToolCall(id=f"c{i}", name="view_file", args={"path": f"f{i}.py"})
+    return (
+        Message(role="assistant", content=f"第 {i} 步", tool_calls=(call,)),
+        Message(role="tool", content="x" * size, tool_call_id=f"c{i}", name="view_file"),
+    )
+
+
+@pytest.mark.unit
+def test_a_compacted_stream_shows_the_summary_in_place_of_the_summarised_round_trips(
+    make_state: MakeState,
+) -> None:
+    steps = [m for i in range(1, 6) for m in _step(i)]
+    state = with_state(turn(make_state(), *steps), stream_summary="读过 f1、f2、f3", stream_cut=6)
+    msgs = build(state)
+    body = texts(msgs)
+    summary = next(m for m in msgs if m.content.startswith("<task_summary"))
+    assert 'trust="untrusted"' in summary.content and "读过 f1、f2、f3" in summary.content
+    assert 'steps_summarised="6"' in summary.content
+    assert "第 1 步" not in body and "第 3 步" not in body  # 前 6 条（3 步）被摘要取代
+    assert "第 4 步" in body and "第 5 步" in body  # 最近的往返保持原样
+    # 摘要紧跟在任务目标之后，其后是完整的往返：每个 assistant 的调用都有配对的 tool
+    goal_at = next(i for i, m in enumerate(msgs) if m.content.startswith("<user_task>"))
+    assert msgs[goal_at + 1] is summary or msgs[goal_at + 1].content == summary.content
+    assert msgs[goal_at + 2].role == "assistant"
+    assert state.messages == turn(make_state(), *steps).messages  # 状态里的消息没被动
+
+
+@pytest.mark.unit
+def test_without_a_summary_nothing_changes_and_the_cut_alone_does_nothing(
+    make_state: MakeState,
+) -> None:
+    steps = [m for i in range(1, 4) for m in _step(i)]
+    plain = build(turn(make_state(), *steps))
+    assert "<task_summary" not in texts(plain)
+    cut_only = build(with_state(turn(make_state(), *steps), stream_cut=2))
+    assert cut_only == plain  # 没有摘要就没有切点：不能把往返凭空丢掉
+
+
+@pytest.mark.unit
+def test_the_summary_keeps_the_prefix_stable_between_compactions(make_state: MakeState) -> None:
+    steps = [m for i in range(1, 6) for m in _step(i)]
+    base = with_state(turn(make_state(), *steps[:8]), stream_summary="S", stream_cut=4)
+    more = with_state(turn(make_state(), *steps), stream_summary="S", stream_cut=4)
+    first, second = build(base), build(more)
+    assert second[: len(first) - 1] == first[:-1]  # 只在末尾追加（最后一条是每次重算的 scratch）
+
+
+@pytest.mark.unit
+def test_describe_reports_the_summary_layer(make_state: MakeState) -> None:
+    steps = [m for i in range(1, 4) for m in _step(i)]
+    plain = PromptAssembler(assets()).describe(turn(make_state(), *steps))
+    assert plain["task_summary"]["present"] is False
+    state = with_state(turn(make_state(), *steps), stream_summary="S" * 40, stream_cut=2)
+    described = PromptAssembler(assets()).describe(state)
+    assert described["task_summary"]["present"] is True and described["task_summary"]["chars"] > 40

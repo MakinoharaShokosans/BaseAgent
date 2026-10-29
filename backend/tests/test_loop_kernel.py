@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from agent_runtime.checkpoint import CheckpointStore
+from agent_runtime.context import Compaction
 from agent_runtime.core import (
     AgentState,
     Message,
@@ -17,6 +18,7 @@ from agent_runtime.core import (
     apply_update,
     check_invariants,
 )
+from agent_runtime.llm import LLMBadRequest
 from agent_runtime.loop import (
     LoopAborted,
     TaskOutcome,
@@ -47,6 +49,9 @@ class Recorder:
 
     async def approval_requested(self, request: Any, state: AgentState) -> None:
         self.log.append("event:approval")
+
+    async def context_compacted(self, result: Any, state: AgentState) -> None:
+        self.log.append(f"event:compacted:{state.stream_cut}")
 
 
 @pytest.fixture
@@ -231,3 +236,204 @@ async def test_event_failures_do_not_fail_the_task(
     )  # type: ignore[arg-type]
     outcome = await run(runtime, start(make_state))
     assert isinstance(outcome, TaskOutcome) and outcome.status == "succeeded"
+
+
+# ==============================================================================
+# 任务内压缩
+# ==============================================================================
+
+
+def _compaction(cut: int = 2) -> Compaction:
+    return Compaction({"stream_summary": "摘要", "stream_cut": cut}, 2, 900, 2, "llm")
+
+
+@pytest.mark.unit
+async def test_compaction_is_committed_before_the_model_is_asked_and_announced_after(
+    world: ScriptedWorld, make_state: MakeState
+) -> None:
+    rec = Recorder(world.store)
+    asked: list[tuple[int, str]] = []
+
+    async def compact(state: AgentState, force: bool) -> Compaction | None:
+        return _compaction() if not state.stream_summary else None
+
+    async def model(state: AgentState) -> Message:
+        asked.append((state.stream_cut, state.stream_summary))
+        return FINAL
+
+    runtime = TaskRuntime(
+        model=model,
+        tools=world.tools,
+        checkpoints=rec,
+        events=rec,
+        compact=compact,  # type: ignore[arg-type]
+    )
+    outcome = await run(runtime, start(make_state))
+    assert outcome.status == "succeeded"
+    assert asked == [(2, "摘要")]  # 模型看到的是压缩之后的状态
+    assert rec.log[:2] == ["commit:1", "event:compacted:2"]  # 先提交，再发事件
+    assert outcome.state.messages[0].content == "fix the bug"  # transcript 不动
+    stored = await world.store.load("t1")
+    assert stored is not None and stored.stream_cut == 2
+
+
+@pytest.mark.unit
+async def test_no_compaction_means_no_commit_and_no_event(
+    world: ScriptedWorld, make_state: MakeState
+) -> None:
+    rec = Recorder(world.store)
+
+    async def compact(state: AgentState, force: bool) -> Compaction | None:
+        return None
+
+    runtime = TaskRuntime(
+        model=world.model,
+        tools=world.tools,
+        checkpoints=rec,
+        events=rec,
+        compact=compact,  # type: ignore[arg-type]
+    )
+    await run(runtime, start(make_state))
+    assert not any("compacted" in line for line in rec.log)
+
+
+@pytest.mark.unit
+async def test_a_failing_compactor_never_fails_the_task(
+    world: ScriptedWorld, make_state: MakeState
+) -> None:
+    async def compact(state: AgentState, force: bool) -> Compaction | None:
+        raise RuntimeError("summariser exploded")
+
+    runtime = TaskRuntime(
+        model=world.model,
+        tools=world.tools,
+        checkpoints=world.store,
+        events=NullSink(),
+        compact=compact,  # type: ignore[arg-type]
+    )
+    outcome = await run(runtime, start(make_state))
+    assert outcome.status == "succeeded"
+
+
+def _overflow() -> LLMBadRequest:
+    return LLMBadRequest("context length exceeded", context_overflow=True)
+
+
+@pytest.mark.unit
+async def test_a_context_overflow_compacts_once_and_retries(
+    world: ScriptedWorld, make_state: MakeState
+) -> None:
+    forced: list[bool] = []
+    calls = 0
+
+    async def compact(state: AgentState, force: bool) -> Compaction | None:
+        forced.append(force)
+        return _compaction() if force else None
+
+    async def model(state: AgentState) -> Message:
+        nonlocal calls
+        calls += 1
+        if not state.stream_summary:
+            raise _overflow()
+        return FINAL
+
+    runtime = TaskRuntime(
+        model=model,
+        tools=world.tools,
+        checkpoints=world.store,
+        events=NullSink(),
+        compact=compact,  # type: ignore[arg-type]
+    )
+    outcome = await run(runtime, start(make_state))
+    assert outcome.status == "succeeded" and calls == 2
+    assert forced == [False, True, False]  # 正常检查 → 溢出后强制 → 重试前再检查
+    assert outcome.state.stream_cut == 2
+
+
+@pytest.mark.unit
+async def test_overflow_after_recovery_is_not_retried_forever(
+    world: ScriptedWorld, make_state: MakeState
+) -> None:
+    calls = 0
+
+    async def compact(state: AgentState, force: bool) -> Compaction | None:
+        return _compaction(state.stream_cut + 2) if force else None
+
+    async def model(state: AgentState) -> Message:
+        nonlocal calls
+        calls += 1
+        raise _overflow()
+
+    runtime = TaskRuntime(
+        model=model,
+        tools=world.tools,
+        checkpoints=world.store,
+        events=NullSink(),
+        compact=compact,  # type: ignore[arg-type]
+    )
+    with pytest.raises(LLMBadRequest):
+        await run(runtime, start(make_state))
+    assert calls == 2  # 原调用 + 压缩后的一次重试
+
+
+@pytest.mark.unit
+async def test_overflow_with_nothing_left_to_compact_is_raised(
+    world: ScriptedWorld, make_state: MakeState
+) -> None:
+    async def compact(state: AgentState, force: bool) -> Compaction | None:
+        return None
+
+    async def model(state: AgentState) -> Message:
+        raise _overflow()
+
+    runtime = TaskRuntime(
+        model=model,
+        tools=world.tools,
+        checkpoints=world.store,
+        events=NullSink(),
+        compact=compact,  # type: ignore[arg-type]
+    )
+    with pytest.raises(LLMBadRequest):
+        await run(runtime, start(make_state))
+
+
+@pytest.mark.unit
+async def test_other_bad_requests_are_not_treated_as_overflow(
+    world: ScriptedWorld, make_state: MakeState
+) -> None:
+    forced: list[bool] = []
+
+    async def compact(state: AgentState, force: bool) -> Compaction | None:
+        forced.append(force)
+        return None
+
+    async def model(state: AgentState) -> Message:
+        raise LLMBadRequest("invalid tool schema")
+
+    runtime = TaskRuntime(
+        model=model,
+        tools=world.tools,
+        checkpoints=world.store,
+        events=NullSink(),
+        compact=compact,  # type: ignore[arg-type]
+    )
+    with pytest.raises(LLMBadRequest):
+        await run(runtime, start(make_state))
+    assert forced == [False]
+
+
+@pytest.mark.unit
+async def test_overflow_without_a_compactor_propagates(
+    world: ScriptedWorld, make_state: MakeState
+) -> None:
+    async def model(state: AgentState) -> Message:
+        raise _overflow()
+
+    runtime = TaskRuntime(
+        model=model,
+        tools=world.tools,
+        checkpoints=world.store,
+        events=NullSink(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(LLMBadRequest):
+        await run(runtime, start(make_state))

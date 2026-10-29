@@ -184,6 +184,8 @@ def test_observation_limits_follow_the_reference_config(raw: dict[str, Any]) -> 
         scalar_preview_chars=120,
         exempt_tools=("load_skill", "mcp_describe"),
         exempt_multiplier=8,
+        passthrough_tools=("view_file", "grep", "list_dir", "read_artifact", "websearch"),
+        passthrough_max_tokens=12_000,
     )
 
 
@@ -316,7 +318,10 @@ def test_the_fold_policy_follows_the_task_section_and_takes_the_smaller_trigger(
 
     s = Settings.model_validate(raw)
     assert fold_policy_from_settings(s, 128_000) == FoldPolicy(
-        76_800, 3, frozenset({"load_skill", "mcp_describe"})
+        76_800,
+        3,
+        frozenset({"load_skill", "mcp_describe"}),
+        frozenset({"view_file", "grep", "list_dir", "read_artifact"}),
     )
     assert fold_policy_from_settings(s, 1_000_000).trigger_tokens == 100_000  # 绝对上限生效
 

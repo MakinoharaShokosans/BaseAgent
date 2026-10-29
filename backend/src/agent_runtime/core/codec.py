@@ -32,7 +32,10 @@ MINIMUM_SCHEMA_VERSION: Final = 3
 
 #: 第 n 版升到第 n+1 版的迁移函数。v1、v2 是五阶段工作流的状态（含阶段、里程碑、预算计数），
 #: 与纯 agent loop 的状态不兼容，不迁移（docs/12_decisions/0006）
-MIGRATIONS: Final[dict[int, Migration]] = {}
+MIGRATIONS: Final[dict[int, Migration]] = {
+    # v3 → v4：加任务内压缩的两个字段（没压缩过：摘要为空、切点为 0）
+    3: lambda data: {**data, "stream_summary": "", "stream_cut": 0},
+}
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",

@@ -53,7 +53,8 @@ def test_a_new_state_has_no_workflow_fields() -> None:
     state = make_state()
     assert (state.plan, state.facts, state.failed_attempts) == ((), (), ())
     assert (state.consecutive_blocks, state.verification) == (0, "none")
-    assert state.schema_version == 3
+    assert state.schema_version == 4
+    assert (state.stream_summary, state.stream_cut) == ("", 0)
 
 
 @pytest.mark.unit

@@ -29,6 +29,8 @@ class FoldPolicy:
     keep_recent_steps: int
     #: 永不折叠的工具（如 ``load_skill``：截断流程文档会让做法残缺）
     exempt_tools: frozenset[str]
+    #: 结果能靠“用同样的参数再调一次”取回的工具（读文件、搜索）：折叠不需要离线副本，只留一行存根
+    reproducible_tools: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,22 +94,32 @@ def _step_index(items: Sequence[Message]) -> dict[int, int]:
 def _stubs(
     items: Sequence[Message], policy: FoldPolicy, count: Callable[[str], int]
 ) -> dict[int, Message]:
-    """每条可折叠的 tool 消息对应的存根。没有离线副本的不折叠：折叠会让它永远取不回。"""
+    """每条可折叠的 tool 消息对应的存根。
+
+    能取回才折叠：有离线副本的，存根指向产物；读类工具（``reproducible_tools``）没有副本也行，
+    存根写明调用参数，需要时用同样的参数再调一次。其余没有副本的不折叠：折叠会让它永远取不回。
+    """
     calls = {c.id: c for m in items for c in m.tool_calls}
     out: dict[int, Message] = {}
     for i, m in enumerate(items):
         if m.role != "tool" or (m.name or "") in policy.exempt_tools:
             continue
-        handles = _HANDLE.findall(m.content)
-        if not handles:
-            continue
         call = calls.get(m.tool_call_id or "")
         shown = _summarise(call.args) if call is not None else ""
         lines = m.content.count("\n") + 1
-        text = (
-            f"[已折叠] {m.name}: {shown}（{lines} 行，{len(m.content)} 字符）"
-            f"→ 完整输出见产物 artifact://{handles[-1]}，可用 read_artifact 取回"
-        )
+        handles = _HANDLE.findall(m.content)
+        if handles:
+            text = (
+                f"[已折叠] {m.name}: {shown}（{lines} 行，{len(m.content)} 字符）"
+                f"→ 完整输出见产物 artifact://{handles[-1]}，可用 read_artifact 取回"
+            )
+        elif (m.name or "") in policy.reproducible_tools:
+            text = (
+                f"[已折叠] {m.name}: {shown}（{lines} 行，{len(m.content)} 字符）"
+                f"→ 需要时用同样的参数重新调用 {m.name}"
+            )
+        else:
+            continue
         if count(text) < count(m.content):
             out[i] = dataclasses.replace(m, content=text)
     return out

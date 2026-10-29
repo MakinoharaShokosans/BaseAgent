@@ -15,6 +15,7 @@ from typing import Literal, Protocol
 
 from loguru import logger
 
+from agent_runtime.context.task_compaction import Compaction, CompactStep
 from agent_runtime.core import (
     AgentState,
     ApprovalRequired,
@@ -25,6 +26,7 @@ from agent_runtime.core import (
     check_invariants,
     unanswered_calls,
 )
+from agent_runtime.llm import LLMBadRequest
 from agent_runtime.loop.errors import CanaryLeak, LoopAborted
 from agent_runtime.loop.model import ModelStep
 
@@ -50,6 +52,8 @@ class EventSink(Protocol):
 
     async def approval_requested(self, request: PendingApproval, state: AgentState) -> None: ...
 
+    async def context_compacted(self, result: Compaction, state: AgentState) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class TaskRuntime:
@@ -59,6 +63,8 @@ class TaskRuntime:
     events: EventSink
     #: 连续被拦截的批次数达到它即 ``LoopAborted``；0 不检查
     max_consecutive_blocks: int = 5
+    #: 任务内压缩：每次调模型前问一次要不要压；窗口溢出时强制压一次再重试。None 表示不压缩
+    compact: CompactStep | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,12 +95,24 @@ async def run(rt: TaskRuntime, state: AgentState) -> TaskOutcome:
     - 事件发送失败不影响任务：状态已经落盘。
     """
     pending = unanswered_calls(state.messages)
+    recovered = False  # 本次溢出恢复过了吗：恢复后再溢出就不再试，原样失败
     while True:
         if not pending:
+            state = await _compacted(rt, state, force=False)
             try:
                 reply = await rt.model(state)
             except CanaryLeak as leak:
                 return TaskOutcome(state, termination_reason=leak.reason)
+            except LLMBadRequest as overflow:
+                if not overflow.context_overflow or recovered or rt.compact is None:
+                    raise
+                recovered = True
+                shrunk = await _compacted(rt, state, force=True)
+                if shrunk is state:
+                    raise  # 已经没有可压的了
+                state = shrunk
+                continue
+            recovered = False
             state = apply_update(state, {"messages": [reply]})
             check_invariants(state)
             await rt.checkpoints.commit(state)
@@ -121,6 +139,24 @@ async def run(rt: TaskRuntime, state: AgentState) -> TaskOutcome:
             raise LoopAborted(
                 f"同一批调用连续 {state.consecutive_blocks} 次被重复拦截，模型在原地打转"
             )
+
+
+async def _compacted(rt: TaskRuntime, state: AgentState, *, force: bool) -> AgentState:
+    """需要时做一次任务内压缩并提交；没有压缩就原样返回同一个状态对象。压缩从不让任务失败。"""
+    if rt.compact is None:
+        return state
+    try:
+        result = await rt.compact(state, force)
+    except Exception:
+        logger.exception("任务内压缩出错；本回合不压缩，任务继续")
+        return state
+    if result is None:
+        return state
+    state = apply_update(state, result.update)
+    check_invariants(state)
+    await rt.checkpoints.commit(state)
+    await _notify(rt.events.context_compacted(result, state))
+    return state
 
 
 async def _notify(event: Awaitable[None]) -> None:
