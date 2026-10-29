@@ -6,16 +6,16 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { api } from '../../api/endpoints';
 import { useAppStore } from '../../stores/useAppStore';
-import type { Milestone } from '../../types/api';
+import type { PlanItem } from '../../types/api';
 import { statusMeta } from '../../utils/status';
 import { cn, formatTokens } from '../../utils/text';
-import { CheckDraw, CrossGlyph, OrbitGlyph, PlanGlyph } from '../icons/Glyphs';
+import { CheckDraw, OrbitGlyph, PlanGlyph } from '../icons/Glyphs';
 import { Card, EASE_OUT, StatusPill } from '../ui/primitives';
 
-function MilestoneList({ milestones }: { milestones: Milestone[] }) {
+function PlanList({ plan }: { plan: PlanItem[] }) {
   return (
-    <ol aria-label="里程碑" className="space-y-0">
-      {milestones.map((m, i) => (
+    <ol aria-label="计划" className="space-y-0">
+      {plan.map((m, i) => (
         <motion.li
           key={m.id}
           initial={{ opacity: 0, x: -6 }}
@@ -23,7 +23,7 @@ function MilestoneList({ milestones }: { milestones: Milestone[] }) {
           transition={{ delay: i * 0.04, duration: 0.22 }}
           className="relative flex gap-2.5 pb-3 last:pb-0"
         >
-          {i < milestones.length - 1 && (
+          {i < plan.length - 1 && (
             <span
               aria-hidden
               className={cn(
@@ -37,7 +37,6 @@ function MilestoneList({ milestones }: { milestones: Milestone[] }) {
               'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center',
               m.status === 'completed' && 'text-ok',
               m.status === 'in_progress' && 'text-accent',
-              m.status === 'failed' && 'text-bad',
               m.status === 'pending' && 'text-mute/50',
             )}
           >
@@ -45,8 +44,6 @@ function MilestoneList({ milestones }: { milestones: Milestone[] }) {
               <CheckDraw size={16} />
             ) : m.status === 'in_progress' ? (
               <OrbitGlyph size={16} />
-            ) : m.status === 'failed' ? (
-              <CrossGlyph size={16} />
             ) : (
               <span className="h-2 w-2 rounded-full border-[1.5px] border-current" />
             )}
@@ -61,9 +58,6 @@ function MilestoneList({ milestones }: { milestones: Milestone[] }) {
             >
               {m.title}
             </div>
-            {m.description && m.status === 'in_progress' && (
-              <div className="mt-0.5 text-xs leading-snug text-mute">{m.description}</div>
-            )}
           </div>
         </motion.li>
       ))}
@@ -84,7 +78,7 @@ export function TaskCard() {
     ? {
         goal: run.goal,
         status: run.status,
-        milestones: run.milestones,
+        plan: run.plan,
         steps: run.stepCount,
         tokens: run.totalTokens,
       }
@@ -92,75 +86,63 @@ export function TaskCard() {
       ? {
           goal: latest.task_goal,
           status: latest.status,
-          milestones: latest.milestones,
+          plan: latest.plan,
           steps: latest.step_count,
           tokens: latest.total_tokens,
         }
       : null;
   const meta = view ? statusMeta(view.status) : null;
-  const done = view?.milestones.filter((m) => m.status === 'completed').length ?? 0;
-  const total = view?.milestones.length ?? 0;
+  const done = view?.plan.filter((m) => m.status === 'completed').length ?? 0;
+  const total = view?.plan.length ?? 0;
 
-  return (
-    <Card
-      id="task"
-      title="任务"
-      aside={
-        meta && (
+  const aside = view && (
+    <div className="flex items-center gap-2">
+      <span className="text-xs font-mono tabular-nums text-mute">
+        {view.steps} 步{view.tokens ? ` · ${formatTokens(view.tokens)} Token` : ''}
+      </span>
+      {meta &&
+        (view.status === 'succeeded' ? (
+          <span title="已完成" aria-label="已完成" className="flex items-center text-ok">
+            <CheckDraw size={18} />
+          </span>
+        ) : (
           <StatusPill tone={meta.tone} icon={meta.icon} live={meta.live}>
             {meta.label}
           </StatusPill>
-        )
-      }
-    >
+        ))}
+    </div>
+  );
+
+  return (
+    <Card id="task" title="任务" aside={aside}>
       {!view ? (
-        <div className="flex flex-col items-center py-6 text-center">
-          <PlanGlyph size={20} className="text-mute" />
-          <p className="mt-2 text-xs text-mute">
+        <div className="flex flex-col items-center py-5 text-center">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-ink/[0.04] text-mute mb-1 dark:bg-white/[0.06]">
+            <PlanGlyph size={16} />
+          </div>
+          <p className="mt-1 text-xs text-mute leading-relaxed">
             {sessionId ? '还没有任务。在下方输入目标开始。' : '选择会话后显示任务'}
           </p>
         </div>
-      ) : (
-        <div className="space-y-4">
-          <p className="line-clamp-3 text-[13px] leading-relaxed text-ink/80" title={view.goal}>
-            {view.goal}
-          </p>
-          <div className="flex gap-4 text-xs text-mute">
-            <span>
-              <span className="font-semibold tabular-nums text-ink">{view.steps}</span> 步
+      ) : total > 0 ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-mute">
+            <span>里程碑进度</span>
+            <span className="font-semibold tabular-nums text-ink">
+              {done}/{total}
             </span>
-            <span>
-              <span className="font-semibold tabular-nums text-ink">
-                {formatTokens(view.tokens)}
-              </span>{' '}
-              Token
-            </span>
-            {total > 0 && (
-              <span className="ml-auto">
-                <span className="font-semibold tabular-nums text-ink">
-                  {done}/{total}
-                </span>{' '}
-                里程碑
-              </span>
-            )}
           </div>
-          {total > 0 ? (
-            <>
-              <div className="h-1 overflow-hidden rounded-full bg-ink/[0.07]">
-                <motion.div
-                  className="h-full rounded-full bg-brand"
-                  initial={false}
-                  animate={{ width: `${(done / total) * 100}%` }}
-                  transition={{ duration: 0.5, ease: EASE_OUT }}
-                />
-              </div>
-              <MilestoneList milestones={view.milestones} />
-            </>
-          ) : (
-            <p className="text-xs text-mute">Agent 还没有给出计划。</p>
-          )}
+          <div className="h-1.5 overflow-hidden rounded-full bg-ink/[0.07] dark:bg-white/[0.08]">
+            <motion.div
+              className="h-full rounded-full bg-brand"
+              initial={false}
+              animate={{ width: `${(done / total) * 100}%` }}
+              transition={{ duration: 0.5, ease: EASE_OUT }}
+            />
+          </div>
+          <PlanList plan={view.plan} />
         </div>
-      )}
+      ) : null}
     </Card>
   );
 }

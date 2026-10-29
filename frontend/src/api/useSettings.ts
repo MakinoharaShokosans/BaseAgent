@@ -39,15 +39,6 @@ export function useSessionSettings(sessionId: string | null) {
   return { query, save };
 }
 
-/** 上下文窗口：会话选了模型就用它的窗口，否则取各端点里最小的 */
-export function contextWindowOf(models: ModelEndpoint[] | undefined, model: string | null): number {
-  const list = models ?? [];
-  const chosen = model ? list.find((m) => m.name === model) : undefined;
-  if (chosen) return chosen.context_window;
-  const windows = list.map((m) => m.context_window).filter((n) => n > 0);
-  return windows.length ? Math.min(...windows) : 0;
-}
-
 /** 会话下一次请求的各段占比。设置、系统提示词、记忆、对话任何一项变化后都要让它失效。 */
 export function useContextSnapshot(sessionId: string | null) {
   return useQuery({

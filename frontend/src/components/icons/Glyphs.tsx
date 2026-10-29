@@ -162,14 +162,6 @@ export function MemoryGlyph({ size, className }: GlyphProps) {
   );
 }
 
-export function PulseGlyph({ size, className }: GlyphProps) {
-  return (
-    <Svg size={size} className={className}>
-      <path d="M3.5 12h3.5l2-5 3.5 10 2-5h6" />
-    </Svg>
-  );
-}
-
 export function GaugeGlyph({ size, className }: GlyphProps) {
   return (
     <Svg size={size} className={className}>
@@ -182,7 +174,7 @@ export function GaugeGlyph({ size, className }: GlyphProps) {
 
 /** 文件图标：按扩展名着色 */
 const FILE_TINT: [RegExp, string][] = [
-  [/\.(tsx?|jsx?|mjs|cjs)$/i, 'text-[#3b82f6]'],
+  [/\.(tsx?|jsx?|mjs|cjs)$/i, 'text-[#6b8ba8]'],
   [/\.(py|rb|go|rs|java|kt|c|cc|cpp|h|hpp|swift)$/i, 'text-accent-2'],
   [/\.(json|toml|ya?ml|ini|env.*|lock)$/i, 'text-warn'],
   [/\.(md|mdx|txt|rst)$/i, 'text-ok'],

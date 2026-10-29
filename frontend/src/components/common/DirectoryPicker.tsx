@@ -16,7 +16,7 @@ export function DirectoryPicker({ onPick }: { onPick: (path: string) => void }) 
   }
   const data = listing.data;
   return (
-    <div className="overflow-hidden rounded-2xl bg-ink/[0.035]">
+    <div className="overflow-hidden rounded-2xl bg-ink/[0.035] border border-ink/[0.06] dark:border-white/[0.07]">
       <div className="flex items-center gap-2 bg-ink/[0.04] px-2 py-1.5 text-xs">
         <button
           className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold hover:bg-ink/[0.06] disabled:text-mute/40"

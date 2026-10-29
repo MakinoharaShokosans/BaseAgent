@@ -12,6 +12,7 @@ import { ChatPane } from '../chat/ChatPane';
 import { Inspector } from '../inspector/Inspector';
 import { Sidebar } from '../sidebar/Sidebar';
 import { IconButton, SPRING } from '../ui/primitives';
+import { cn } from '../../utils/text';
 import { useThemeEffect } from './ThemeToggle';
 import { TopBar } from './TopBar';
 
@@ -68,11 +69,16 @@ function NoticeBar() {
           animate={{ opacity: 1, y: 0, x: '-50%' }}
           exit={{ opacity: 0, y: -12, x: '-50%' }}
           transition={SPRING}
-          className="absolute left-1/2 top-3 z-50 flex max-w-xl items-center gap-3 rounded-2xl bg-raised/95 py-2 pl-4 pr-2 text-sm text-bad shadow-float backdrop-blur-xl"
+          className={cn(
+            'absolute left-1/2 top-4 z-50 flex max-w-xl items-center gap-3 rounded-2xl bg-raised/95 py-2 pl-4 pr-2 text-sm shadow-float backdrop-blur-2xl border border-ink/[0.08] dark:border-white/[0.08]',
+            info ? 'text-ink' : 'text-bad',
+          )}
         >
           <span
             className={
-              info ? 'h-2 w-2 shrink-0 rounded-full bg-ok' : 'h-2 w-2 shrink-0 rounded-full bg-bad'
+              info
+                ? 'h-2 w-2 shrink-0 rounded-full bg-ok shadow-[0_0_8px_rgb(var(--c-ok)/0.5)]'
+                : 'h-2 w-2 shrink-0 rounded-full bg-bad shadow-[0_0_8px_rgb(var(--c-bad)/0.5)]'
             }
           />
           <span className="min-w-0 flex-1 text-ink">{notice.message}</span>
@@ -159,7 +165,7 @@ export function AppLayout() {
             initial={false}
             animate={{ width: inspectorOpen ? inspectorWidth : 0, opacity: inspectorOpen ? 1 : 0 }}
             transition={SPRING}
-            className="relative z-10 shrink-0 overflow-hidden"
+            className="relative z-10 shrink-0 overflow-hidden border-l border-ink/[0.05] dark:border-white/[0.05]"
           >
             <div style={{ width: inspectorWidth }} className="h-full">
               {inspectorOpen && <Inspector />}
@@ -181,7 +187,7 @@ export function AppLayout() {
                 <motion.aside
                   key="inspector"
                   aria-label="检视器"
-                  className="fixed inset-y-0 right-0 z-40 w-[min(352px,92vw)] bg-canvas/95 shadow-float backdrop-blur-xl"
+                  className="fixed inset-y-0 right-0 z-40 w-[min(352px,92vw)] bg-canvas/95 shadow-float backdrop-blur-2xl border-l border-ink/[0.07] dark:border-white/[0.08]"
                   initial={{ x: 360 }}
                   animate={{ x: 0 }}
                   exit={{ x: 360 }}

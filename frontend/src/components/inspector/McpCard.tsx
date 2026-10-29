@@ -32,9 +32,14 @@ export function McpCard() {
   return (
     <Card id="mcp" title="MCP 服务器" icon={<Plug size={15} />}>
       {enabled.length === 0 ? (
-        <p className="py-3 text-center text-xs text-mute">
-          没有启用的服务器。在 config.toml 的 [mcp.servers.*] 里设置 enabled = true。
-        </p>
+        <div className="flex flex-col items-center py-5 text-center">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-ink/[0.04] text-mute mb-1">
+            <Plug size={15} />
+          </div>
+          <p className="mt-1 text-xs text-mute leading-relaxed max-w-[240px]">
+            没有启用的服务器。在 config.toml 的 [mcp.servers.*] 中配置。
+          </p>
+        </div>
       ) : (
         <ul className="space-y-2.5">
           {enabled.map((s) => (

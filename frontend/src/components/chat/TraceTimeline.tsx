@@ -1,7 +1,6 @@
 import { motion } from 'motion/react';
 import { MessageSquareText } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import type { Milestone } from '../../types/api';
 import { parseSay, type TimelineItem } from '../../stores/taskReducer';
 import { cn, stripControl } from '../../utils/text';
 import {
@@ -12,33 +11,11 @@ import {
   GlobeGlyph,
   GuardGlyph,
   OrbitGlyph,
-  PlanGlyph,
   ShieldCheckGlyph,
   TerminalGlyph,
   ToolGlyph,
 } from '../icons/Glyphs';
 import { Chevron, EASE_OUT, Reveal } from '../ui/primitives';
-
-const NODE_LABELS: Record<string, string> = {
-  planner: '规划',
-  budget_guard: '预算检查',
-  executor: '执行',
-  tool_runner: '工具',
-  evaluator: '验收',
-};
-
-export function MilestoneList({ milestones }: { milestones: Milestone[] }) {
-  if (!milestones.length) return null;
-  return (
-    <ol aria-label="里程碑" className="space-y-1">
-      {milestones.map((m) => (
-        <li key={m.id} className="text-sm">
-          {m.title}
-        </li>
-      ))}
-    </ol>
-  );
-}
 
 type RowTone = 'mute' | 'accent' | 'violet' | 'ok' | 'bad' | 'warn';
 
@@ -64,7 +41,7 @@ function Row({
     <div className="flex items-start gap-3">
       <span
         className={cn(
-          'relative z-[1] mt-px flex h-7 w-7 shrink-0 items-center justify-center rounded-full backdrop-blur',
+          'relative z-[1] mt-px flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-ink/[0.06] backdrop-blur shadow-sm dark:border-white/[0.08]',
           TONE_CLASS[tone],
         )}
       >
@@ -109,7 +86,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   return (
     <Row icon={<Icon size={14} />} tone={tone}>
       <button
-        className="-mx-2 -my-1 flex w-[calc(100%+1rem)] items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-ink/[0.04]"
+        className="-mx-2 -my-1 flex w-[calc(100%+1rem)] items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-ink/[0.05]"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
@@ -137,13 +114,13 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
       <Reveal open={open}>
         <div className="space-y-2 pt-2">
           {command && (
-            <pre className="whitespace-pre-wrap break-all rounded-xl bg-code p-3 font-mono text-xs leading-relaxed text-code-ink">
-              <span className="select-none text-accent">$ </span>
+            <pre className="whitespace-pre-wrap break-all rounded-[14px] bg-code p-3.5 font-mono text-xs leading-relaxed text-code-ink border border-white/[0.06]">
+              <span className="select-none text-accent font-semibold">$ </span>
               {stripControl(command)}
             </pre>
           )}
           {item.result !== undefined && (
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-ink/[0.04] p-3 font-mono text-xs leading-relaxed">
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-[14px] bg-ink/[0.035] p-3.5 font-mono text-xs leading-relaxed border border-ink/[0.05]">
               {stripControl(item.result)}
             </pre>
           )}
@@ -154,11 +131,6 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
       </Reveal>
     </Row>
   );
-}
-
-/** 时间线里真正显示的条目：旧的阶段行（“#2 工具 executed”）只是内部记账，不显示 */
-export function visibleItems(items: TimelineItem[]): TimelineItem[] {
-  return items.filter((i) => i.kind !== 'stage');
 }
 
 /** 模型每一步的汇报：正文加一条细进度。进度是模型对当前子任务的估计，不是精确值。 */
@@ -197,13 +169,12 @@ function SayRow({ text }: { text: string }) {
 }
 
 export function TraceTimeline({ items }: { items: TimelineItem[] }) {
-  const visible = visibleItems(items);
   return (
     <ol
       aria-label="执行过程"
       className="relative space-y-3 before:absolute before:bottom-3 before:left-3.5 before:top-3 before:w-px before:bg-gradient-to-b before:from-line before:via-line before:to-transparent"
     >
-      {visible.map((item) => (
+      {items.map((item) => (
         <motion.li
           key={`${item.kind}-${item.seq}`}
           className="relative"
@@ -211,29 +182,6 @@ export function TraceTimeline({ items }: { items: TimelineItem[] }) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.24, ease: EASE_OUT }}
         >
-          {item.kind === 'plan' && (
-            <Row icon={<PlanGlyph size={14} />} tone="violet">
-              <p className="text-[13.5px] leading-snug">
-                <span className="mr-2 font-semibold text-accent-2">规划</span>
-                {stripControl(item.directive || item.thought)}
-              </p>
-            </Row>
-          )}
-          {item.kind === 'stage' && (
-            <Row icon={<GaugeGlyph size={14} />}>
-              <p className="flex flex-wrap items-center gap-1.5 text-xs text-mute">
-                <span className="font-mono tabular-nums text-mute/70">#{item.ordinal}</span>
-                <span className="font-medium text-ink/80">
-                  {NODE_LABELS[item.node] ?? item.node}
-                </span>
-                {item.decision && (
-                  <span className="rounded-full bg-ink/[0.05] px-2 py-0.5 font-mono text-2xs">
-                    {item.decision.slice(0, 40)}
-                  </span>
-                )}
-              </p>
-            </Row>
-          )}
           {item.kind === 'say' && <SayRow text={item.text} />}
           {item.kind === 'tool' && <ToolRow item={item} />}
           {item.kind === 'decision' && (

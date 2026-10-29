@@ -3,20 +3,11 @@
  * 契约见 docs/09_api/02_events_contract.md。
  *
  * 规则：忽略未知事件和未知字段；按 seq 去重（重复或回退的事件不改变状态）；
- * 进度用 `node.finished` 的阶段序号，不用事件条数估计。
+ * 回合数与 Token 取自 `turn.finished` 与 `task.finished`，不用事件条数估计。
  */
-import type { ApprovalRequest, Milestone, ServerEvent, TaskStatus } from '../types/api';
+import type { ApprovalRequest, PlanItem, ServerEvent, TaskStatus } from '../types/api';
 
 export type TimelineItem =
-  | { kind: 'plan'; seq: number; directive: string; thought: string }
-  | {
-      kind: 'stage';
-      seq: number;
-      node: string;
-      ordinal: number;
-      decision: string;
-      summary: string;
-    }
   | {
       kind: 'tool';
       seq: number;
@@ -40,7 +31,7 @@ export interface RunState {
   lastSeq: number;
   status: TaskStatus;
   goal: string;
-  milestones: Milestone[];
+  plan: PlanItem[];
   items: TimelineItem[];
   approval: ApprovalRequest | null;
   delivery: string;
@@ -48,7 +39,6 @@ export interface RunState {
   error: string | null;
   stepCount: number;
   totalTokens: number;
-  stageOrdinal: number;
 }
 
 export function emptyRun(taskId: string, goal = '', status: TaskStatus = 'running'): RunState {
@@ -57,7 +47,7 @@ export function emptyRun(taskId: string, goal = '', status: TaskStatus = 'runnin
     lastSeq: 0,
     status,
     goal,
-    milestones: [],
+    plan: [],
     items: [],
     approval: null,
     delivery: '',
@@ -65,7 +55,6 @@ export function emptyRun(taskId: string, goal = '', status: TaskStatus = 'runnin
     error: null,
     stepCount: 0,
     totalTokens: 0,
-    stageOrdinal: 0,
   };
 }
 
@@ -81,7 +70,7 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function milestonesOf(value: unknown): Milestone[] | undefined {
+function planOf(value: unknown): PlanItem[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.map((raw, index) => {
     const m = record(raw);
@@ -89,10 +78,9 @@ function milestonesOf(value: unknown): Milestone[] | undefined {
     return {
       id: num(m['id'], index),
       title: str(m['title']),
-      description: str(m['description']),
-      status: (['pending', 'in_progress', 'completed', 'failed'].includes(status)
+      status: (['pending', 'in_progress', 'completed'].includes(status)
         ? status
-        : 'pending') as Milestone['status'],
+        : 'pending') as PlanItem['status'],
     };
   });
 }
@@ -133,48 +121,19 @@ export function reduceTaskEvent(state: RunState, event: ServerEvent): RunState {
         items: [...state.items, { kind: 'say', seq, turn: num(event['turn']), text }],
       };
     }
+    case 'plan.updated':
+      return { ...next, plan: planOf(event['plan']) ?? state.plan };
+    case 'turn.finished':
+      return {
+        ...next,
+        stepCount: num(event['turn'], state.stepCount),
+        totalTokens: num(event['tokens'], state.totalTokens),
+      };
     // 与界面无关的内部事件：只推进序号，不进时间线
     case 'llm.call':
-    case 'turn.finished':
-    case 'plan.updated':
       return next;
     case 'task.started':
       return { ...next, status: 'running', goal: str(event['task_goal'], state.goal), error: null };
-    case 'plan': {
-      const milestones = milestonesOf(event['milestones']) ?? state.milestones;
-      return {
-        ...next,
-        milestones,
-        items: [
-          ...state.items,
-          { kind: 'plan', seq, directive: str(event['directive']), thought: str(event['thought']) },
-        ],
-      };
-    }
-    case 'node.finished': {
-      const milestones = milestonesOf(event['milestones']) ?? state.milestones;
-      const ordinal = num(event['stage'], state.stageOrdinal + 1);
-      const item: TimelineItem = {
-        kind: 'stage',
-        seq,
-        node: str(event['node']),
-        ordinal,
-        decision: str(event['decision']),
-        summary: str(event['output_summary']),
-      };
-      return {
-        ...next,
-        milestones,
-        stageOrdinal: Math.max(state.stageOrdinal, ordinal),
-        stepCount: num(event['step_count'], state.stepCount),
-        totalTokens: num(event['total_tokens'], state.totalTokens),
-        items: [...state.items, item],
-        delivery:
-          event['node'] === 'planner' && event['decision'] === 'reply'
-            ? str(event['content'], state.delivery)
-            : state.delivery,
-      };
-    }
     case 'tool.call':
       return {
         ...next,
@@ -357,8 +316,8 @@ function describeGuard(event: ServerEvent): string {
   switch (event.event) {
     case 'guard.loop_blocked':
       return '检测到重复的相同调用，已拦截';
-    case 'guard.replan_notice':
-      return `连续出错 ${num(event['consecutive_errors'])} 次，已通知重新规划`;
+    case 'guard.error_notice':
+      return `连续出错 ${num(event['consecutive_errors'])} 次，已提醒模型调整做法`;
     case 'guard.approval_decided':
       return event['approved'] === true ? '审批已通过' : '审批被拒绝';
     default:
@@ -371,7 +330,7 @@ export function runFromSnapshot(task: {
   task_id: string;
   task_goal: string;
   status: TaskStatus;
-  milestones: Milestone[];
+  plan: PlanItem[];
   approval_request: ApprovalRequest | null;
   step_count: number;
   total_tokens: number;
@@ -379,7 +338,7 @@ export function runFromSnapshot(task: {
 }): RunState {
   return {
     ...emptyRun(task.task_id, task.task_goal, task.status),
-    milestones: task.milestones,
+    plan: task.plan,
     approval: task.approval_request,
     stepCount: task.step_count,
     totalTokens: task.total_tokens,

@@ -11,64 +11,77 @@
 @layer base {
   :root {
     color-scheme: light;
-    /* 纸质：温润的米白底，没有纯白。95% 是这组中性色，下面的语义色只占 5% */
-    --c-canvas: 244 240 232;
-    --c-side: 237 232 222;
-    --c-card: 252 250 245;
-    --c-raised: 253 251 247;
-    --c-line: 222 215 201;
-    --c-ink: 38 34 28;
-    --c-mute: 128 121 108;
-    --c-accent: 186 98 66;
-    --c-accent-soft: 245 229 219;
-    --c-accent-2: 128 118 176;
-    --c-ok: 98 150 120;
-    --c-warn: 190 140 62;
-    --c-bad: 184 84 68;
-    --c-code: 30 28 26;
-    --c-code-ink: 236 232 222;
-    /* 低饱和的暖陶色，只用在极少数“活的”地方 */
-    --brand: linear-gradient(135deg, #d99467 0%, #c47a5c 55%, #a8687e 100%);
-    /* 发丝边 + 顶部内侧高光 + 三层不同半径的漫射影，不用单层浑浊黑影 */
-    --hairline: 0 0 0 1px rgb(40 32 20 / 0.07);
+    /* 现代高精密基准色：冷调演播室石板白（Studio Slate），彻底告别发黄的纸质感与庸俗纯白 */
+    --c-canvas: 248 250 252;
+    --c-side: 241 245 249;
+    --c-card: 255 255 255;
+    --c-raised: 255 255 255;
+    --c-line: 226 232 240;
+    --c-ink: 15 23 42;
+    --c-mute: 100 116 139;
+    --c-accent: 99 102 241;
+    --c-accent-soft: 238 242 255;
+    --c-accent-2: 139 92 246;
+    --c-ok: 16 185 129;
+    --c-warn: 245 158 11;
+    --c-bad: 239 68 68;
+    --c-code: 15 23 42;
+    --c-code-ink: 241 245 249;
+    /* Linear/Raycast 电气蓝紫色微渐变，只用于最关键的高光点按与焦点引导 */
+    --brand: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+    /* 1px 发丝倒角边框 + 顶部物理高光 + 多层超软漫射投影，塑造精密五金/高光屏幕质感 */
+    --hairline: 0 0 0 1px rgb(var(--c-ink) / 0.06);
     --shadow-card:
-      var(--hairline), inset 0 1px 0 rgb(255 255 255 / 0.7), 0 1px 1px rgb(40 32 20 / 0.03),
-      0 3px 8px -3px rgb(40 32 20 / 0.06), 0 16px 30px -18px rgb(40 32 20 / 0.12);
+      var(--hairline), inset 0 1px 0 0 rgb(255 255 255 / 0.9), 0 1px 2px 0 rgb(15 23 42 / 0.03),
+      0 4px 12px -2px rgb(15 23 42 / 0.05), 0 16px 32px -8px rgb(15 23 42 / 0.06);
     --shadow-float:
-      var(--hairline), inset 0 1px 0 rgb(255 255 255 / 0.75), 0 2px 4px rgb(40 32 20 / 0.04),
-      0 12px 24px -8px rgb(40 32 20 / 0.1), 0 40px 70px -28px rgb(40 32 20 / 0.22);
-    --paper-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .18 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    --glow-a: 217 148 103;
-    --glow-b: 128 118 176;
-    --glow-strength: 0.05;
+      var(--hairline), inset 0 1px 0 0 rgb(255 255 255 / 0.95), 0 4px 6px -1px rgb(15 23 42 / 0.04),
+      0 12px 28px -4px rgb(15 23 42 / 0.08), 0 32px 64px -12px rgb(15 23 42 / 0.12);
+    --shadow-bento:
+      var(--hairline), inset 0 1px 0 0 rgb(255 255 255 / 0.8), 0 1px 3px 0 rgb(15 23 42 / 0.03),
+      0 8px 24px -4px rgb(15 23 42 / 0.05);
+    --shadow-glow:
+      0 0 0 1px rgb(var(--c-accent) / 0.25), 0 4px 24px -2px rgb(var(--c-accent) / 0.25);
+    --paper-noise: none;
+    --glow-a: 99 102 241;
+    --glow-b: 139 92 246;
+    --glow-strength: 0.08;
   }
   :root[data-theme='dark'] {
     color-scheme: dark;
-    /* 钛黑与深碳灰：没有纯黑，层次靠灰阶 */
-    --c-canvas: 24 23 22;
-    --c-side: 30 29 27;
-    --c-card: 37 35 33;
-    --c-raised: 45 43 40;
-    --c-line: 58 55 50;
-    --c-ink: 232 228 219;
-    --c-mute: 142 136 126;
-    --c-accent: 214 128 94;
-    --c-accent-soft: 58 40 32;
-    --c-accent-2: 160 150 210;
-    --c-ok: 122 178 144;
-    --c-warn: 214 168 86;
-    --c-bad: 214 112 96;
-    --c-code: 16 15 14;
-    --c-code-ink: 228 224 214;
-    --hairline: 0 0 0 1px rgb(255 255 255 / 0.07);
+    /* 黑曜石与深钛灰：Linear / Raycast 顶级黑夜美学，深邃通透，拒绝死黑 #000 */
+    --c-canvas: 11 13 18;
+    --c-side: 16 19 26;
+    --c-card: 21 25 35;
+    --c-raised: 28 34 46;
+    --c-line: 38 45 61;
+    --c-ink: 243 244 246;
+    --c-mute: 148 163 184;
+    --c-accent: 129 140 248;
+    --c-accent-soft: 30 27 75;
+    --c-accent-2: 167 139 250;
+    --c-ok: 52 211 153;
+    --c-warn: 251 191 36;
+    --c-bad: 248 113 113;
+    --c-code: 10 12 16;
+    --c-code-ink: 241 245 249;
+    --brand: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #f472b6 100%);
+    --hairline: 0 0 0 1px rgb(255 255 255 / 0.08);
     --shadow-card:
-      var(--hairline), inset 0 1px 0 rgb(255 255 255 / 0.05), 0 1px 1px rgb(0 0 0 / 0.2),
-      0 6px 14px -6px rgb(0 0 0 / 0.35), 0 20px 36px -22px rgb(0 0 0 / 0.5);
+      var(--hairline), inset 0 1px 0 0 rgb(255 255 255 / 0.08), 0 2px 4px 0 rgb(0 0 0 / 0.3),
+      0 8px 20px -4px rgb(0 0 0 / 0.45), 0 24px 48px -12px rgb(0 0 0 / 0.6);
     --shadow-float:
-      var(--hairline), inset 0 1px 0 rgb(255 255 255 / 0.06), 0 2px 4px rgb(0 0 0 / 0.25),
-      0 14px 28px -10px rgb(0 0 0 / 0.5), 0 44px 80px -30px rgb(0 0 0 / 0.65);
-    --paper-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 .95 0 0 0 0 .85 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    --glow-strength: 0.07;
+      var(--hairline), inset 0 1px 0 0 rgb(255 255 255 / 0.1), 0 4px 8px 0 rgb(0 0 0 / 0.35),
+      0 16px 36px -6px rgb(0 0 0 / 0.6), 0 48px 88px -16px rgb(0 0 0 / 0.75);
+    --shadow-bento:
+      var(--hairline), inset 0 1px 0 0 rgb(255 255 255 / 0.07), 0 2px 6px 0 rgb(0 0 0 / 0.35),
+      0 12px 28px -6px rgb(0 0 0 / 0.5);
+    --shadow-glow:
+      0 0 0 1px rgb(var(--c-accent) / 0.35), 0 4px 28px -2px rgb(var(--c-accent) / 0.45);
+    --paper-noise: none;
+    --glow-a: 129 140 248;
+    --glow-b: 167 139 250;
+    --glow-strength: 0.12;
   }
 
   html,
@@ -81,11 +94,11 @@
     font-feature-settings: 'ss01', 'cv11';
   }
   ::selection {
-    background: rgb(var(--c-accent) / 0.25);
+    background: rgb(var(--c-accent) / 0.22);
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgb(var(--c-mute) / 0.3) transparent;
+    scrollbar-color: rgb(var(--c-mute) / 0.25) transparent;
   }
   button,
   select,
@@ -99,23 +112,21 @@
     outline-offset: 2px;
     border-radius: 8px;
   }
-  /* 自研滚动条：细、圆、半透明；不使用系统默认的粗滚动条 */
+  /* 自研超细胶囊滚动条：细(6px)、圆、半透明；悬停时微深，杜绝浏览器默认原生粗条 */
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgb(var(--c-mute) / 0.28);
-    border: 3px solid transparent;
+    background: rgb(var(--c-mute) / 0.22);
     border-radius: 9999px;
-    background-clip: content-box;
+    transition: background-color 0.2s ease;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--c-mute) / 0.5);
-    background-clip: content-box;
+    background: rgb(var(--c-mute) / 0.45);
   }
   summary {
     list-style: none;
@@ -130,7 +141,7 @@
     @apply relative flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[13.5px] text-mute transition-colors duration-150 hover:bg-ink/[0.05] hover:text-ink;
   }
   .nav-item[aria-current='true'] {
-    @apply bg-ink/[0.07] font-semibold text-ink;
+    @apply font-semibold text-ink;
   }
   /* 纸面：发丝边、顶部高光、多层漫射影，加一层极淡的纸纹，见 03_visual_design.md §1 */
   .paper {
@@ -139,7 +150,25 @@
     box-shadow: var(--shadow-card);
   }
   .soft-card {
-    @apply paper rounded-[20px];
+    @apply paper rounded-[22px];
+  }
+  .bento-card {
+    background-color: rgb(var(--c-card));
+    background-image: var(--paper-noise);
+    box-shadow: var(--shadow-bento);
+    border-radius: 22px;
+    position: relative;
+    overflow: hidden;
+    transition:
+      transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .bento-card:hover {
+    box-shadow: var(--shadow-float);
+  }
+  .glass-island {
+    @apply bg-raised/85 backdrop-blur-2xl backdrop-saturate-150;
+    box-shadow: var(--shadow-float);
   }
   /* 信封内衬的防窥纹：极细的斜线，只铺在少数“衬里”区域 */
   .tint {
@@ -368,6 +397,8 @@
 @supports (corner-shape: squircle) {
   .paper,
   .soft-card,
+  .bento-card,
+  .glass-island,
   [role='dialog'] {
     corner-shape: squircle;
   }

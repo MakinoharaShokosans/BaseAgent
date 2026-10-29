@@ -6,17 +6,16 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
-import { Plus, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { api } from '../../api/endpoints';
 import { useContextSnapshot, useRefreshContext, useSessionSettings } from '../../api/useSettings';
 import { useAppStore } from '../../stores/useAppStore';
-import { useUiStore } from '../../stores/useUiStore';
 import type { ContextSegment, SessionMemory, WorkspaceMemory } from '../../types/api';
 import { cn, formatTokens } from '../../utils/text';
 import { MemoryGlyph } from '../icons/Glyphs';
 import { Select } from '../ui/Select';
-import { Card, EASE_OUT, IconButton, Reveal } from '../ui/primitives';
+import { Card, EASE_OUT, Reveal } from '../ui/primitives';
 
 type SegmentId = ContextSegment['id'];
 
@@ -230,7 +229,6 @@ export function ContextCard() {
   const sessionId = useAppStore((s) => s.sessionId);
   const client = useQueryClient();
   const refreshContext = useRefreshContext();
-  const openCard = useUiStore((s) => s.openCard);
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState('');
   const [layer, setLayer] = useState<keyof WorkspaceMemory>('guidelines');
@@ -267,19 +265,6 @@ export function ContextCard() {
     onSuccess: refresh,
   });
 
-  const addButton = workspaceId && sessionId && (
-    <IconButton
-      label="添加记忆"
-      className="h-7 w-7"
-      onClick={() => {
-        openCard('context'); // 卡片折叠时先展开，表单才看得见
-        setAdding((v) => !v);
-      }}
-    >
-      <Plus size={15} />
-    </IconButton>
-  );
-
   if (!workspaceId || !sessionId) {
     return (
       <Card id="context" title="上下文占比">
@@ -295,11 +280,11 @@ export function ContextCard() {
   const compactAt = settings.data
     ? (settings.data.context_token_limit ?? settings.data.defaults.context_token_limit)
     : 0;
-  const windowSize = data?.context_window ?? 0;
+  const maxContext = compactAt > 0 ? compactAt : (data?.context_window ?? 0);
   const used = data?.total_tokens ?? 0;
-  const denominator = windowSize || used;
+  const denominator = maxContext > 0 ? Math.max(maxContext, used) : used || 1;
   const rows = (data?.segments ?? []).filter((s) => s.tokens > 0 || META[s.id].always);
-  const free = Math.max(windowSize - used, 0);
+  const free = Math.max(maxContext - used, 0);
   const toggle = (id: SegmentId) => setExpanded((cur) => (cur === id ? null : id));
 
   const memory = session.data;
@@ -316,7 +301,7 @@ export function ContextCard() {
     : null;
 
   return (
-    <Card id="context" title="上下文占比" aside={addButton}>
+    <Card id="context" title="上下文占比">
       {snapshot.isError ? (
         <p role="alert" className="py-3 text-xs leading-relaxed text-mute">
           读取上下文占比失败：{(snapshot.error as Error).message}
@@ -330,11 +315,11 @@ export function ContextCard() {
         <>
           <div className="flex items-baseline justify-between">
             <span className="text-[19px] font-semibold tabular-nums tracking-tight">
-              {windowSize ? percent(used, windowSize) : formatTokens(used)}
+              {maxContext ? percent(used, maxContext) : formatTokens(used)}
               <span className="ml-1 text-xs font-normal text-mute">已用</span>
             </span>
             <span className="text-xs tabular-nums text-mute">
-              {formatTokens(used)} / {windowSize ? formatTokens(windowSize) : '窗口未知'}
+              {formatTokens(used)} / {maxContext ? formatTokens(maxContext) : '上限未知'}
             </span>
           </div>
 
@@ -464,22 +449,17 @@ export function ContextCard() {
               }
               return <Row key={seg.id} {...common} />;
             })}
-            {windowSize > 0 && (
+            {maxContext > 0 && (
               <li className="flex min-h-8 items-center gap-2.5 py-1 text-[13px]">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-micro bg-ink/[0.1]" />
                 <span className="flex-1 text-ink/80">剩余空间</span>
                 <span className="tabular-nums text-ink/75">{formatTokens(free)}</span>
                 <span className="w-12 text-right tabular-nums text-mute">
-                  {percent(free, windowSize)}
+                  {percent(free, maxContext)}
                 </span>
               </li>
             )}
           </ul>
-
-          <p className="mt-2.5 text-2xs leading-relaxed text-mute">
-            {compactAt > 0 && <>对话超过 {formatTokens(compactAt)} 时压缩 · </>}
-            Token 为估算，与下一次请求同源
-          </p>
         </>
       )}
     </Card>

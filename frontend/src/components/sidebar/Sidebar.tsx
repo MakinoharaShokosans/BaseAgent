@@ -8,12 +8,14 @@ import {
   Copy,
   CopyPlus,
   FolderPlus,
+  Loader2,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
   Plus,
   Settings,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -22,7 +24,7 @@ import { useAppStore } from '../../stores/useAppStore';
 import { useUiStore } from '../../stores/useUiStore';
 import { TERMINAL_STATUSES, type Session, type Workspace } from '../../types/api';
 import { cn } from '../../utils/text';
-import { FolderGlyph } from '../icons/Glyphs';
+import { FolderGlyph, OrbitGlyph } from '../icons/Glyphs';
 import { ThemeToggle } from '../layout/ThemeToggle';
 import { ConfirmDialog } from '../modals/ConfirmDialog';
 import { RenameWorkspaceModal } from '../modals/RenameWorkspaceModal';
@@ -103,38 +105,72 @@ export function Sidebar() {
       initial={false}
       animate={{ width: collapsed ? 64 : 260 }}
       transition={SPRING}
-      className="relative z-20 flex h-full shrink-0 flex-col overflow-hidden bg-side/75 backdrop-blur-2xl backdrop-saturate-150"
+      className="relative z-20 flex h-full shrink-0 flex-col overflow-hidden border-r border-ink/[0.06] bg-side/80 backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.06]"
     >
-      <h1 className="sr-only">BaseAgent</h1>
-
-      {/* 顶部：标题 + 新建工作区 */}
-      <div
-        className={cn(
-          'flex h-14 shrink-0 items-center',
-          collapsed ? 'justify-center' : 'gap-1 pl-5 pr-3',
+      {/* 顶部：品牌 Logo 与工作区控制 */}
+      <div className="flex h-14 shrink-0 items-center border-b border-ink/[0.05] dark:border-white/[0.06] px-3.5">
+        {collapsed ? (
+          <div className="flex h-9 w-9 mx-auto items-center justify-center rounded-xl bg-brand text-white shadow-glow">
+            <Sparkles size={17} className="text-white" />
+            <h1 className="sr-only">BaseAgent</h1>
+          </div>
+        ) : (
+          <div className="flex w-full items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand text-white shadow-glow">
+                <Sparkles size={16} className="text-white" />
+              </div>
+              <div className="flex flex-col">
+                <h1 className="text-[13.5px] font-bold tracking-tight text-ink leading-tight">
+                  BaseAgent
+                </h1>
+                <span className="text-[9.5px] font-semibold text-mute/80 tracking-wider uppercase">
+                  Sandbox Runtime
+                </span>
+              </div>
+            </div>
+            <IconButton label="添加工作区" onClick={() => setAdding(true)}>
+              <FolderPlus size={16} strokeWidth={1.8} />
+            </IconButton>
+          </div>
         )}
-      >
-        {!collapsed && <span className="flex-1 text-[13px] font-semibold text-mute">工作区</span>}
-        <IconButton label="添加工作区" onClick={() => setAdding(true)}>
-          <FolderPlus size={17} strokeWidth={1.7} />
-        </IconButton>
       </div>
+
+      {!collapsed && (
+        <div className="flex items-center justify-between px-3.5 pt-3 pb-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-mute/70">
+            工作区与项目
+          </span>
+          <span className="rounded-full bg-ink/[0.05] dark:bg-white/[0.06] px-1.5 py-0.2 text-[10px] font-mono text-mute">
+            {workspaces.data?.length ?? 0}
+          </span>
+        </div>
+      )}
 
       <nav
         aria-label="工作区与会话"
         className={cn(
           'min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-3 no-scrollbar',
-          collapsed ? 'flex flex-col items-center gap-1 px-2' : 'px-2.5',
+          collapsed ? 'flex flex-col items-center gap-1 px-2 pt-2' : 'px-2 pt-1',
         )}
       >
         {workspaces.data && !workspaces.data.length && !collapsed && (
-          <motion.p
+          <motion.div
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mx-1.5 mt-1 rounded-2xl bg-ink/[0.035] px-3 py-4 text-center text-xs leading-relaxed text-mute"
+            className="mx-1 mt-2 rounded-[16px] border border-dashed border-ink/[0.12] bg-ink/[0.02] p-4 text-center dark:border-white/[0.12] dark:bg-white/[0.02]"
           >
-            还没有工作区，点右上角的文件夹按钮添加
-          </motion.p>
+            <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-ink/[0.05] text-mute dark:bg-white/[0.06]">
+              <FolderPlus size={16} strokeWidth={1.6} />
+            </div>
+            <p className="text-xs leading-relaxed text-mute">还没有工作区</p>
+            <button
+              onClick={() => setAdding(true)}
+              className="mt-2 text-xs font-semibold text-accent hover:underline"
+            >
+              添加项目目录
+            </button>
+          </motion.div>
         )}
         {workspaces.isLoading &&
           !collapsed &&
@@ -170,7 +206,7 @@ export function Sidebar() {
             <div key={w.workspace_id} className="mb-0.5">
               <div className="group relative">
                 <button
-                  aria-current={open}
+                  aria-current={w.workspace_id === workspaceId}
                   title={w.root_path}
                   className="nav-item pr-[3.75rem]"
                   onClick={() => !open && selectWorkspace(w.workspace_id)}
@@ -178,6 +214,13 @@ export function Sidebar() {
                   <Chevron open={open} size={12} />
                   <FolderGlyph open={open} size={16} />
                   <span className="min-w-0 flex-1 truncate">{w.name}</span>
+                  {w.workspace_id === workspaceId && (
+                    <motion.span
+                      layoutId="active-workspace-underline"
+                      transition={SPRING}
+                      className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-brand"
+                    />
+                  )}
                 </button>
                 <IconButton
                   label={`在 ${w.name} 中新建会话`}
@@ -222,25 +265,26 @@ export function Sidebar() {
                 />
               </div>
               <Reveal open={open}>
-                <ul className="relative ml-[1.15rem] space-y-0.5 py-0.5 pl-2">
+                <ul className="relative ml-[1.15rem] space-y-0.5 border-l border-ink/[0.08] dark:border-white/[0.08] py-0.5 pl-2.5">
                   {list?.map((s, index) => {
                     const active = s.session_id === sessionId;
                     const label = `会话 ${list.length - index}`;
                     return (
                       <li key={s.session_id} className="group/session relative">
-                        {active && (
-                          <motion.span
-                            layoutId="session-indicator"
-                            transition={SPRING}
-                            className="absolute -left-2 bottom-2 top-2 w-[3px] rounded-full bg-brand"
-                          />
-                        )}
                         <button
                           aria-current={active}
                           className="nav-item py-1.5 pr-8"
                           onClick={() => selectSession(s.session_id)}
                         >
-                          <MessageSquare size={14} strokeWidth={1.6} className="shrink-0" />
+                          {active && live && !waiting ? (
+                            <Loader2 size={14} className="shrink-0 animate-spin text-accent" />
+                          ) : (
+                            <MessageSquare
+                              size={14}
+                              strokeWidth={1.6}
+                              className={cn('shrink-0', active ? 'text-accent' : 'text-mute')}
+                            />
+                          )}
                           <span className="min-w-0 flex-1 truncate">
                             {label}
                             <span className="ml-1.5 text-2xs font-normal tabular-nums text-mute/70">
@@ -250,10 +294,20 @@ export function Sidebar() {
                           {active && live && (
                             <span
                               aria-label={waiting ? '等待审批' : '运行中'}
-                              className={cn(
-                                'h-2 w-2 shrink-0 rounded-full',
-                                waiting ? 'animate-halo bg-warn' : 'animate-pulse bg-brand',
+                              className="flex shrink-0 items-center text-accent"
+                            >
+                              {waiting ? (
+                                <span className="h-2 w-2 rounded-full bg-warn animate-halo" />
+                              ) : (
+                                <OrbitGlyph size={14} className="animate-spin text-accent" />
                               )}
+                            </span>
+                          )}
+                          {active && (
+                            <motion.span
+                              layoutId="active-session-underline"
+                              transition={SPRING}
+                              className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-brand"
                             />
                           )}
                         </button>
@@ -301,7 +355,12 @@ export function Sidebar() {
       </nav>
 
       {/* 底部：主题与设置 */}
-      <div className={cn('flex shrink-0 items-center gap-1 pb-3', collapsed ? 'flex-col' : 'px-3')}>
+      <div
+        className={cn(
+          'flex shrink-0 items-center gap-1 border-t border-ink/[0.04] pt-2 pb-3',
+          collapsed ? 'flex-col' : 'px-3',
+        )}
+      >
         <ThemeToggle />
         <IconButton label="设置" onClick={() => setSettings(true)}>
           <Settings size={17} strokeWidth={1.7} />

@@ -57,7 +57,7 @@ export function WorkspaceModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setName(e.target.value)}
           />
         </label>
-        <p className="rounded-xl bg-accent-2/[0.07] px-3 py-2 text-xs text-mute">
+        <p className="rounded-xl bg-accent-2/[0.07] border border-accent-2/15 px-3 py-2 text-xs text-mute leading-relaxed">
           工作区目录是安全边界：文件接口与工具只能在其中读写。根目录、系统目录和你的主目录本身会被拒绝。
         </p>
         {create.isError && (

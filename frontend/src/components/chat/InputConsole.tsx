@@ -78,21 +78,21 @@ export function InputConsole({
         else void send(false);
       }}
     >
-      {/* 无边框浮层；运行中外圈一道缓慢旋转的渐变光 */}
+      {/* 无边框浮层；运行中外圈一道缓慢旋转的极简环境漫射光 */}
       <div
         className={cn(
           'relative rounded-[26px] p-[1.5px] transition-shadow duration-300',
           busy
-            ? 'animate-[spin-border_3s_linear_infinite] bg-[conic-gradient(from_var(--spin),#f58529,#dd2a7b,#8134af,transparent_55%,transparent_75%,#f58529)]'
+            ? 'animate-[spin-border_4s_linear_infinite] bg-[conic-gradient(from_var(--spin),rgb(var(--c-accent)/0.8),rgb(var(--c-accent-2)/0.8),transparent_50%,transparent_80%,rgb(var(--c-accent)/0.8))]'
             : danger
-              ? 'bg-bad/35'
+              ? 'bg-bad/30'
               : 'bg-transparent',
         )}
       >
-        <div className="rounded-[24.5px] bg-card p-3 shadow-float transition-shadow duration-300 focus-within:shadow-[0_28px_70px_-20px_rgb(40_32_20/0.32),0_0_0_4px_rgb(var(--c-accent)/0.06)]">
+        <div className="rounded-[24.5px] bg-card/95 backdrop-blur-2xl p-3.5 shadow-float border border-ink/[0.08] dark:border-white/[0.09] transition-[box-shadow,background-color] duration-300 focus-within:shadow-[0_20px_50px_-12px_rgb(var(--c-accent)/0.25),0_0_0_2px_rgb(var(--c-accent)/0.35)]">
           <textarea
             aria-label="任务目标"
-            className="max-h-48 min-h-[3.25rem] w-full resize-none bg-transparent px-2 pt-1 text-[15px] leading-relaxed outline-none placeholder:text-mute/60 disabled:cursor-not-allowed no-scrollbar"
+            className="max-h-48 min-h-[3.5rem] w-full resize-none bg-transparent px-2.5 pt-1 text-[15px] leading-relaxed outline-none placeholder:text-mute/50 disabled:cursor-not-allowed no-scrollbar"
             rows={2}
             maxLength={20000}
             disabled={disabled}
@@ -108,7 +108,7 @@ export function InputConsole({
                 e.currentTarget.form?.requestSubmit();
             }}
           />
-          <div className="mt-1 flex items-center gap-1.5">
+          <div className="mt-1.5 flex items-center gap-2">
             {leading}
             <Select
               label="权限基线"
@@ -117,8 +117,8 @@ export function InputConsole({
               placement="up"
               title={hint}
               className={cn(
-                danger && 'bg-bad/10 text-bad hover:bg-bad/15',
-                level === 'read_only' && 'bg-ok/10 text-ok hover:bg-ok/15',
+                danger && 'bg-bad/10 text-bad hover:bg-bad/15 border-bad/20',
+                level === 'read_only' && 'bg-ok/10 text-ok hover:bg-ok/15 border-ok/20',
               )}
               leading={<LevelIcon size={13} />}
               options={LEVELS.map((l) => ({
@@ -132,7 +132,7 @@ export function InputConsole({
               }))}
             />
             <span className="min-w-0 flex-1" />
-            <span className="hidden items-center gap-1 sm:flex">
+            <span className="hidden items-center gap-1 sm:flex text-mute/50 font-mono text-xs">
               <Kbd>Ctrl</Kbd>
               <Kbd>↵</Kbd>
             </span>
@@ -141,14 +141,14 @@ export function InputConsole({
               aria-label="发送"
               title="发送"
               disabled={!ready}
-              whileTap={ready ? { scale: 0.9 } : undefined}
+              whileTap={ready ? { scale: 0.92 } : undefined}
               animate={{ rotate: ready ? 0 : -90 }}
               transition={{ type: 'spring', stiffness: 420, damping: 26 }}
               className={cn(
-                'flex h-9 w-9 items-center justify-center rounded-full text-white transition-[filter,box-shadow]',
+                'flex h-9 w-9 items-center justify-center rounded-full text-white transition-[filter,box-shadow,opacity] duration-150',
                 ready
-                  ? 'bg-brand shadow-[0_6px_18px_-4px_rgb(221_42_123/0.5)] hover:brightness-110'
-                  : 'bg-ink/10 text-mute',
+                  ? 'bg-brand shadow-[0_4px_16px_-2px_rgb(var(--c-accent)/0.5)] hover:brightness-110 active:scale-95'
+                  : 'bg-ink/10 text-mute dark:bg-white/10',
               )}
             >
               <ArrowUp size={18} strokeWidth={2.5} />

@@ -257,7 +257,7 @@ function AppearanceSection() {
       <div
         role="radiogroup"
         aria-label="主题"
-        className="inline-flex rounded-full bg-ink/[0.05] p-1"
+        className="inline-flex rounded-full bg-ink/[0.045] p-1 border border-ink/[0.06]"
       >
         {options.map((o) => (
           <button
@@ -274,7 +274,7 @@ function AppearanceSection() {
               <motion.span
                 layoutId="theme-pill"
                 transition={SPRING}
-                className="absolute inset-0 rounded-full bg-card shadow-card"
+                className="absolute inset-0 rounded-full bg-card shadow-card border border-ink/[0.06] dark:border-white/[0.08]"
               />
             )}
             <span className="relative">{o.label}</span>
@@ -307,11 +307,11 @@ function WorkspaceSection({ onDone }: { onDone: () => void }) {
         <div className="text-sm">{current.name}</div>
       </Field>
       <Field label="目录">
-        <code className="block break-all rounded-xl bg-ink/[0.045] px-3 py-2 font-mono text-xs">
+        <code className="block break-all rounded-xl bg-ink/[0.045] px-3 py-2 font-mono text-xs border border-ink/[0.04]">
           {current.root_path}
         </code>
       </Field>
-      <div className="rounded-2xl bg-bad/[0.06] p-4">
+      <div className="rounded-[18px] border border-bad/30 bg-bad/[0.04] p-4.5">
         <div className="text-[13px] font-semibold text-bad">删除工作区</div>
         <p className="mt-1 text-xs leading-relaxed text-ink/80">
           这会<strong className="text-bad">级联删除</strong>

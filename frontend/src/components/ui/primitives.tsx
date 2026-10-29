@@ -13,10 +13,12 @@ type Variant = 'primary' | 'secondary' | 'danger' | 'ghost';
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    'bg-ink text-canvas shadow-card hover:bg-ink/85 disabled:bg-ink/15 disabled:text-mute disabled:shadow-none',
-  secondary: 'bg-ink/[0.06] text-ink hover:bg-ink/[0.1] disabled:text-mute',
-  danger: 'bg-bad text-white shadow-card hover:brightness-95 disabled:opacity-40',
-  ghost: 'text-mute hover:bg-ink/[0.06] hover:text-ink disabled:text-mute/40',
+    'bg-ink text-canvas shadow-card hover:bg-ink/90 active:bg-ink disabled:bg-ink/15 disabled:text-mute disabled:shadow-none',
+  secondary:
+    'bg-ink/[0.05] text-ink hover:bg-ink/[0.09] active:bg-ink/[0.12] disabled:text-mute border border-ink/[0.06]',
+  danger:
+    'bg-bad text-white shadow-card hover:brightness-105 active:brightness-95 disabled:opacity-40',
+  ghost: 'text-mute hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.1] disabled:text-mute/40',
 };
 
 export function Button({
@@ -27,7 +29,7 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex select-none items-center justify-center gap-1.5 rounded-xl px-3.5 py-1.5 text-[13px] font-semibold',
+        'inline-flex select-none items-center justify-center gap-1.5 rounded-base px-3.5 py-1.5 text-[13px] font-semibold',
         'transition-[background-color,color,border-color,box-shadow,transform] duration-150 ease-out active:scale-[0.97]',
         'disabled:cursor-not-allowed disabled:active:scale-100',
         VARIANTS[variant],
@@ -49,8 +51,8 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cn(
-        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-mute transition-colors duration-150',
-        'hover:bg-ink/[0.07] hover:text-ink active:scale-95',
+        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-mute transition-[background-color,color,transform] duration-150',
+        'hover:bg-ink/[0.07] hover:text-ink active:scale-[0.94]',
         active && 'bg-ink/[0.07] text-ink',
         className,
       )}
@@ -60,12 +62,12 @@ export function IconButton({
 }
 
 const TONES = {
-  slate: 'bg-ink/[0.06] text-mute',
-  green: 'bg-ok/12 text-ok',
-  amber: 'bg-warn/12 text-warn',
-  red: 'bg-bad/12 text-bad',
-  blue: 'bg-accent/12 text-accent',
-  violet: 'bg-accent-2/12 text-accent-2',
+  slate: 'bg-ink/[0.05] text-mute border border-ink/[0.06]',
+  green: 'bg-ok/12 text-ok border border-ok/20',
+  amber: 'bg-warn/12 text-warn border border-warn/25',
+  red: 'bg-bad/12 text-bad border border-bad/20',
+  blue: 'bg-accent/12 text-accent border border-accent/20',
+  violet: 'bg-accent-2/12 text-accent-2 border border-accent-2/20',
 } as const;
 
 export type Tone = keyof typeof TONES;
@@ -180,35 +182,49 @@ export function Card({
   title: string;
   icon?: ReactNode;
   aside?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
   className?: string;
 }) {
   const open = useUiStore((s) => !s.collapsedCards.includes(id));
   const toggle = useUiStore((s) => s.toggleCard);
+  const hasChildren = Boolean(children);
   return (
-    <section aria-label={title} className={cn('soft-card px-4 py-3.5', className)}>
+    <section
+      aria-label={title}
+      className={cn(
+        'soft-card px-4 py-3.5 transition-[box-shadow,transform] duration-200 hover:shadow-float',
+        className,
+      )}
+    >
       <header className="flex items-center gap-2">
         <button
-          className="flex min-w-0 flex-1 items-center gap-2 text-left text-[14px] font-semibold"
-          aria-expanded={open}
-          onClick={() => toggle(id)}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2 text-left text-[14px] font-semibold',
+            !hasChildren && 'cursor-default',
+          )}
+          aria-expanded={hasChildren ? open : undefined}
+          onClick={hasChildren ? () => toggle(id) : undefined}
         >
           {icon && <span className="text-mute">{icon}</span>}
           <span className="truncate">{title}</span>
-          <ChevronDown
-            size={14}
-            aria-hidden
-            className={cn(
-              'shrink-0 text-mute transition-transform duration-200',
-              !open && '-rotate-90',
-            )}
-          />
+          {hasChildren && (
+            <ChevronDown
+              size={14}
+              aria-hidden
+              className={cn(
+                'shrink-0 text-mute transition-transform duration-200',
+                !open && '-rotate-90',
+              )}
+            />
+          )}
         </button>
         {aside}
       </header>
-      <Reveal open={open}>
-        <div className="pt-3">{children}</div>
-      </Reveal>
+      {hasChildren && (
+        <Reveal open={open}>
+          <div className="pt-3">{children}</div>
+        </Reveal>
+      )}
     </section>
   );
 }
@@ -281,7 +297,7 @@ export function Overlay({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <motion.div
         aria-hidden
-        className="absolute inset-0 bg-ink/10 backdrop-blur-md dark:bg-black/40"
+        className="absolute inset-0 bg-ink/15 backdrop-blur-md dark:bg-black/50"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
@@ -297,7 +313,7 @@ export function Overlay({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 320, damping: 30 }}
         className={cn(
-          'paper relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-[24px] bg-raised shadow-float outline-none',
+          'paper relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-[24px] bg-raised shadow-float outline-none border border-ink/[0.06] dark:border-white/[0.08]',
           className,
         )}
       >

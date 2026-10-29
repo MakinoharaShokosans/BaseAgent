@@ -33,22 +33,6 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
-/**
- * Token 估算，与后端 backend/src/agent_runtime/llm/tokens.py 的 estimate_tokens 同一规则：
- * 中日韩字符一字一 token，其余每 3 字符一 token（宁高勿低）。两边改动要同步。
- */
-const WIDE = /[\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]/g;
-
-export function estimateTokens(text: string): number {
-  if (!text) return 0;
-  const wide = text.match(WIDE)?.length ?? 0;
-  return wide + Math.ceil((text.length - wide) / 3);
-}
-
-export function relativePath(path: string, root: string): string {
-  return path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
-}
-
 /** 越级命令里的高危模式：命中时审批卡片用强提示并延迟启用批准。 */
 export const DANGEROUS_PATTERNS: readonly { pattern: RegExp; label: string }[] = [
   { pattern: /\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r/i, label: '递归强制删除' },

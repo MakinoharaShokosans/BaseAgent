@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { ApprovalRequest, PermissionLevel } from '../../types/api';
-import { dangerLabels, stripControl } from '../../utils/text';
+import { cn, dangerLabels, stripControl } from '../../utils/text';
 import { HandGlyph } from '../icons/Glyphs';
 import { Badge, Button } from '../ui/primitives';
 
@@ -91,7 +91,10 @@ export function HitlApprovalCard({
   return (
     <section
       aria-label="需要审批的操作"
-      className={`relative overflow-hidden rounded-2xl border p-4 shadow-float ${dangerous ? 'border-bad/50 bg-bad/[0.06]' : 'border-warn/45 bg-warn/[0.06]'}`}
+      className={cn(
+        'relative overflow-hidden rounded-[22px] border p-4 shadow-float backdrop-blur-xl transition-[border-color,background-color] duration-200',
+        dangerous ? 'border-bad/40 bg-bad/[0.04]' : 'border-warn/40 bg-warn/[0.04]',
+      )}
     >
       <span
         aria-hidden
@@ -116,7 +119,7 @@ export function HitlApprovalCard({
       {dangerous && (
         <p
           role="alert"
-          className="mt-3 rounded-xl bg-bad/10 px-3 py-2 text-sm font-semibold text-bad"
+          className="mt-3 rounded-[12px] border border-bad/20 bg-bad/10 px-3 py-2 text-sm font-semibold text-bad"
         >
           高危操作：{labels.join('、')}。请逐字核对下面的命令。
         </p>
@@ -126,7 +129,7 @@ export function HitlApprovalCard({
 
       <pre
         aria-label="待执行的完整命令"
-        className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-code p-3.5 font-mono text-xs leading-relaxed text-code-ink ring-1 ring-inset ring-white/5"
+        className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-[14px] bg-code p-3.5 font-mono text-xs leading-relaxed text-code-ink border border-white/[0.06] shadow-sm"
       >
         {shown}
       </pre>
@@ -145,7 +148,7 @@ export function HitlApprovalCard({
       </div>
 
       {(request.related_actions.length > 0 || request.escalation_count > 1) && (
-        <div className="mt-3 rounded-xl bg-card/70 px-3 py-2 text-xs text-ink">
+        <div className="mt-3 rounded-[14px] border border-ink/[0.05] bg-card/75 px-3 py-2 text-xs text-ink shadow-sm">
           <p className="font-medium">本次批准将同时放行这 {request.escalation_count} 项：</p>
           <ul className="list-disc pl-5">
             <li>{lines[0]}</li>

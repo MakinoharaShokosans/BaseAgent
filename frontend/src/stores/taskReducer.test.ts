@@ -32,33 +32,11 @@ describe('reduceTaskEvent', () => {
     seq = 0;
     const state = replay([
       ev('task.started', { task_goal: '修复 bug' }),
-      ev('plan', {
-        directive: '先读代码',
-        thought: 't',
-        milestones: [{ id: 0, title: '读代码', status: 'in_progress' }],
-      }),
-      ev('node.finished', {
-        node: 'planner',
-        stage: 1,
-        decision: '先读代码',
-        step_count: 0,
-        total_tokens: 50,
-      }),
+      ev('plan.updated', { plan: [{ id: 1, title: '读代码', status: 'in_progress' }] }),
       ev('tool.call', { tool: 'bash', args: { command: 'ls' }, step: 1, call_id: 'c1' }),
       ev('tool.result', { tool: 'bash', result: 'a.py', ok: true, call_id: 'c1', artifact_id: '' }),
-      ev('node.finished', {
-        node: 'tool_runner',
-        stage: 2,
-        decision: 'executed',
-        step_count: 1,
-        total_tokens: 120,
-      }),
-      ev('node.finished', {
-        node: 'evaluator',
-        stage: 3,
-        decision: 'accepted',
-        milestones: [{ id: 0, title: '读代码', status: 'completed' }],
-      }),
+      ev('turn.finished', { turn: 1, tool_count: 1, failed_count: 0, tokens: 120 }),
+      ev('plan.updated', { plan: [{ id: 1, title: '读代码', status: 'completed' }] }),
       ev('task.finished', {
         status: 'succeeded',
         delivery: '改好了',
@@ -68,9 +46,8 @@ describe('reduceTaskEvent', () => {
     ]);
     expect(state.status).toBe('succeeded');
     expect(state.goal).toBe('修复 bug');
-    expect(state.milestones[0]?.status).toBe('completed');
+    expect(state.plan[0]?.status).toBe('completed');
     expect(state.delivery).toBe('改好了');
-    expect(state.stageOrdinal).toBe(3);
     expect(state.stepCount).toBe(1);
     expect(state.totalTokens).toBe(200);
     const tool = state.items.find((i) => i.kind === 'tool');
@@ -114,9 +91,9 @@ describe('reduceTaskEvent', () => {
 
   it('ignores duplicate, replayed and out-of-order events', () => {
     seq = 0;
-    const base = replay([ev('task.started', { task_goal: 'g' }), ev('plan', { directive: 'x' })]);
-    const again = reduceTaskEvent(base, ev('plan', { directive: 'dup' }, 2));
-    const older = reduceTaskEvent(base, ev('plan', { directive: 'old' }, 1));
+    const base = replay([ev('task.started', { task_goal: 'g' }), ev('plan.updated', { plan: [] })]);
+    const again = reduceTaskEvent(base, ev('plan.updated', { plan: [{ id: 1 }] }, 2));
+    const older = reduceTaskEvent(base, ev('plan.updated', { plan: [{ id: 2 }] }, 1));
     expect(again).toBe(base);
     expect(older).toBe(base);
     expect(base.lastSeq).toBe(2);
@@ -136,8 +113,8 @@ describe('reduceTaskEvent', () => {
   it('survives events with missing or mistyped fields', () => {
     seq = 0;
     const state = replay([
-      ev('plan', { milestones: 'nope', directive: 5 }),
-      ev('node.finished', { node: 7, stage: 'x', step_count: 'y' }),
+      ev('plan.updated', { plan: 'nope' }),
+      ev('turn.finished', { turn: 'x', tokens: 'y' }),
       ev('tool.call', {}),
       ev('tool.result', { ok: 'maybe' }),
       ev('task.waiting_for_approval', {}),
@@ -147,19 +124,27 @@ describe('reduceTaskEvent', () => {
     expect(typeof state.status).toBe('string');
   });
 
-  it('keeps the reply content of a direct answer by the planner', () => {
+  it('keeps the plan and the counters from turn and plan events', () => {
     seq = 0;
     const state = replay([
-      ev('node.finished', { node: 'planner', decision: 'reply', content: '答案是 4', stage: 1 }),
+      ev('plan.updated', {
+        plan: [
+          { id: 1, title: 'a', status: 'completed' },
+          { id: 2, title: 'b', status: 'weird' },
+        ],
+      }),
+      ev('turn.finished', { turn: 3, tool_count: 1, failed_count: 0, tokens: 900 }),
     ]);
-    expect(state.delivery).toBe('答案是 4');
+    expect(state.plan.map((p) => p.status)).toEqual(['completed', 'pending']);
+    expect([state.stepCount, state.totalTokens]).toEqual([3, 900]);
+    expect(state.items).toEqual([]); // 记账事件不进时间线
   });
 
   it('surfaces guard events and errors', () => {
     seq = 0;
     const state = replay([
       ev('guard.loop_blocked', { call_ids: ['c1'] }),
-      ev('guard.replan_notice', { consecutive_errors: 3 }),
+      ev('guard.error_notice', { consecutive_errors: 3 }),
       ev('task.error', { code: 'TASK_FAILED', message: 'RuntimeError: boom' }),
       ev('task.finished', { status: 'failed', termination_reason: 'RuntimeError: boom' }),
     ]);

@@ -133,16 +133,16 @@ export function MoreMenu({
               width: MENU_WIDTH,
               visibility: pos ? 'visible' : 'hidden',
             }}
-            className="z-[60] rounded-2xl bg-raised p-1.5 shadow-float"
+            className="z-[60] rounded-[18px] bg-raised/95 p-1.5 shadow-float backdrop-blur-2xl border border-ink/[0.07] dark:border-white/[0.08]"
           >
             {items.map((item) => (
               <div key={item.label}>
-                {item.separated && <div className="mx-2 my-1 h-px bg-ink/[0.07]" />}
+                {item.separated && <div className="mx-2 my-1 h-px bg-ink/[0.06]" />}
                 <button
                   role="menuitem"
                   disabled={item.disabled}
                   className={cn(
-                    'flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-[13px] outline-none transition-colors',
+                    'flex w-full items-center gap-2.5 rounded-[11px] px-2.5 py-1.5 text-left text-[13px] outline-none transition-[background-color,color] duration-150',
                     'hover:bg-ink/[0.06] focus-visible:bg-ink/[0.06] disabled:cursor-not-allowed disabled:opacity-40',
                     item.danger ? 'text-bad' : 'text-ink',
                   )}

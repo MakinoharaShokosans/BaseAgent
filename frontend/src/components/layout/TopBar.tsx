@@ -29,29 +29,35 @@ export function TopBar({ onOpenNav }: { onOpenNav?: () => void }) {
   const meta = run ? statusMeta(run.status) : null;
 
   return (
-    <header className="relative z-10 flex h-14 shrink-0 items-center gap-3 px-5">
+    <header className="relative z-10 flex h-14 shrink-0 items-center gap-3 border-b border-ink/[0.06] dark:border-white/[0.06] bg-canvas/80 px-5 backdrop-blur-2xl">
       {onOpenNav && (
         <IconButton label="打开导航" onClick={onOpenNav}>
-          <Menu size={17} />
+          <Menu size={17} strokeWidth={1.75} />
         </IconButton>
       )}
-      <nav aria-label="位置" className="flex min-w-0 items-center gap-1.5 text-[13px]">
+      <nav aria-label="位置" className="flex min-w-0 items-center gap-2 text-[13px]">
         {workspace ? (
-          <span className="truncate font-semibold" title={workspace.root_path}>
-            {workspace.name}
+          <span
+            className="flex items-center gap-2 truncate font-semibold text-ink"
+            title={workspace.root_path}
+          >
+            <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_6px_rgb(var(--c-accent)/0.5)]" />
+            <span className="truncate">{workspace.name}</span>
           </span>
         ) : (
           <span className="text-mute">未选择工作区</span>
         )}
         {sessionLabel && (
           <>
-            <span className="text-mute/50">/</span>
-            <span className="truncate text-mute">{sessionLabel}</span>
+            <span className="text-mute/30 font-light">/</span>
+            <span className="truncate rounded-md bg-ink/[0.05] dark:bg-white/[0.06] px-2 py-0.5 text-xs text-ink font-medium border border-ink/[0.04] dark:border-white/[0.06]">
+              {sessionLabel}
+            </span>
           </>
         )}
       </nav>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-2.5">
         <AnimatePresence mode="popLayout" initial={false}>
           {run && meta && (
             <motion.div
@@ -65,8 +71,8 @@ export function TopBar({ onOpenNav }: { onOpenNav?: () => void }) {
               <StatusPill tone={meta.tone} icon={meta.icon} live={meta.live}>
                 {meta.label}
               </StatusPill>
-              <span className="hidden text-xs tabular-nums text-mute md:inline">
-                {run.stepCount} 步 · {formatTokens(run.totalTokens)} Token
+              <span className="hidden text-xs font-mono tabular-nums text-mute bg-ink/[0.04] dark:bg-white/[0.06] px-2.5 py-1 rounded-lg border border-ink/[0.05] dark:border-white/[0.06] md:inline">
+                ⚡ {run.stepCount} 步 · {formatTokens(run.totalTokens)} Token
               </span>
             </motion.div>
           )}

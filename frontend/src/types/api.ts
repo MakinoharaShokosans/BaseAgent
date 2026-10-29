@@ -40,11 +40,10 @@ export interface Turn {
   created_at: number;
 }
 
-export interface Milestone {
+export interface PlanItem {
   id: number;
   title: string;
-  description: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  status: 'pending' | 'in_progress' | 'completed';
 }
 
 export interface ApprovalRequest {
@@ -67,12 +66,10 @@ export interface Task {
   status: TaskStatus;
   permission_level: PermissionLevel;
   approval_request: ApprovalRequest | null;
-  milestones: Milestone[];
-  current_milestone_idx: number;
+  plan: PlanItem[];
   step_count: number;
   total_tokens: number;
   consecutive_errors: number;
-  should_terminate: boolean;
   termination_reason: string;
   created_at: number;
   started_at: number | null;

@@ -41,16 +41,29 @@ export default {
       },
       fontSize: { '2xs': ['11px', '16px'] },
       opacity: { 12: '0.12' },
-      // 阶梯圆角：micro 角标与快捷键、base 输入框与按钮、large 卡片与弹窗；胶囊用 rounded-full
-      borderRadius: { micro: '6px', base: '12px', large: '24px', xl2: '1.125rem', xl3: '1.5rem' },
+      // 阶梯圆角与同心嵌套标尺：micro(6px), sm(8px), base(12px), md(14px), lg(18px), bento(22px), large(24px), full
+      borderRadius: {
+        micro: '6px',
+        sm: '8px',
+        base: '12px',
+        md: '14px',
+        lg: '18px',
+        bento: '22px',
+        large: '24px',
+        xl2: '1.125rem',
+        xl3: '1.5rem',
+        pill: '9999px',
+      },
       boxShadow: {
         card: 'var(--shadow-card)',
         float: 'var(--shadow-float)',
-        glow: '0 0 0 1px rgb(var(--c-accent) / 0.25), 0 8px 28px -6px rgb(var(--c-accent) / 0.35)',
+        bento: 'var(--shadow-bento)',
+        glow: 'var(--shadow-glow)',
       },
       transitionTimingFunction: {
         out: 'cubic-bezier(.22,1,.36,1)',
         'in-out': 'cubic-bezier(.65,0,.35,1)',
+        spring: 'cubic-bezier(.175,.885,.32,1.15)',
       },
       keyframes: {
         sheen: {
@@ -58,20 +71,25 @@ export default {
           '100%': { transform: 'translateX(220%)' },
         },
         breathe: {
-          '0%,100%': { opacity: '0.55', transform: 'scale(1)' },
-          '50%': { opacity: '1', transform: 'scale(1.08)' },
+          '0%,100%': { opacity: '0.5', transform: 'scale(1)' },
+          '50%': { opacity: '0.9', transform: 'scale(1.05)' },
         },
         halo: {
-          '0%': { boxShadow: '0 0 0 0 rgb(var(--c-warn) / 0.55)' },
-          '100%': { boxShadow: '0 0 0 7px rgb(var(--c-warn) / 0)' },
+          '0%': { boxShadow: '0 0 0 0 rgb(var(--c-accent) / 0.45)' },
+          '100%': { boxShadow: '0 0 0 6px rgb(var(--c-accent) / 0)' },
         },
         dots: { '0%,80%,100%': { opacity: '0.25' }, '40%': { opacity: '1' } },
+        shimmer: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
       },
       animation: {
-        sheen: 'sheen 1.6s cubic-bezier(.65,0,.35,1) infinite',
-        breathe: 'breathe 8s ease-in-out infinite',
-        halo: 'halo 2s ease-out infinite',
+        sheen: 'sheen 1.8s cubic-bezier(.65,0,.35,1) infinite',
+        breathe: 'breathe 7s ease-in-out infinite',
+        halo: 'halo 2.2s ease-out infinite',
         dots: 'dots 1.2s ease-in-out infinite',
+        shimmer: 'shimmer 2.5s ease-in-out infinite',
       },
     },
   },

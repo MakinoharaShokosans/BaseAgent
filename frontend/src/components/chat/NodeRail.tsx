@@ -54,12 +54,12 @@ export function NodeRail({
                     animate={{ scale: current ? 1 : hover?.id === node.id ? 0.85 : 0.6 }}
                     transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                     className={cn(
-                      'block h-2.5 w-2.5 rounded-full',
+                      'block h-2.5 w-2.5 rounded-full transition-colors',
                       current
-                        ? 'bg-brand shadow-[0_0_0_3px_rgb(221_42_123/0.15)]'
+                        ? 'bg-brand shadow-[0_0_0_3px_rgb(var(--c-accent)/0.25)]'
                         : node.live
-                          ? 'animate-pulse bg-accent'
-                          : 'bg-ink/25',
+                          ? 'animate-pulse bg-accent shadow-[0_0_8px_rgb(var(--c-accent)/0.5)]'
+                          : 'bg-ink/25 hover:bg-ink/40',
                     )}
                   />
                 </button>
@@ -81,7 +81,7 @@ export function NodeRail({
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 4 }}
               transition={{ duration: 0.14 }}
-              className="block w-max max-w-[16rem] truncate rounded-xl bg-raised/95 px-3 py-1.5 text-xs shadow-float backdrop-blur-xl"
+              className="block w-max max-w-[16rem] truncate rounded-xl bg-raised/95 px-3 py-1.5 text-xs shadow-float backdrop-blur-2xl border border-ink/[0.08] dark:border-white/[0.08]"
             >
               <span className="mr-1.5 tabular-nums text-mute">{hover.index + 1}</span>
               {label}

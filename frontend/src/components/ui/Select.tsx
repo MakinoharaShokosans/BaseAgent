@@ -117,8 +117,8 @@ export function Select<T extends string>({
         title={title ?? current?.hint}
         disabled={disabled}
         className={cn(
-          'inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-ink transition-colors',
-          'bg-ink/[0.045] hover:bg-ink/[0.08] disabled:cursor-not-allowed disabled:opacity-50',
+          'inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-ink transition-[background-color,transform] active:scale-[0.98]',
+          'bg-ink/[0.045] hover:bg-ink/[0.08] disabled:cursor-not-allowed disabled:opacity-50 border border-ink/[0.06]',
           open && 'bg-ink/[0.08]',
           className,
         )}
@@ -149,7 +149,7 @@ export function Select<T extends string>({
               transformOrigin: `${align === 'end' ? 'right' : 'left'} ${up ? 'bottom' : 'top'}`,
             }}
             className={cn(
-              'absolute z-50 max-h-72 min-w-[12rem] overflow-y-auto rounded-[14px] bg-raised/95 p-1 shadow-float backdrop-blur-xl no-scrollbar',
+              'absolute z-50 max-h-72 min-w-[12rem] overflow-y-auto rounded-[16px] bg-raised/95 p-1.5 shadow-float backdrop-blur-2xl border border-ink/[0.07] dark:border-white/[0.08] no-scrollbar',
               up ? 'bottom-full mb-2' : 'top-full mt-2',
               align === 'end' ? 'right-0' : 'left-0',
               menuClassName,
@@ -163,7 +163,7 @@ export function Select<T extends string>({
                   role="option"
                   aria-selected={selected}
                   className={cn(
-                    'flex cursor-pointer items-start gap-2 rounded-[10px] px-2.5 py-2 text-[13px] transition-colors',
+                    'flex cursor-pointer items-start gap-2 rounded-[11px] px-2.5 py-1.5 text-[13px] transition-colors',
                     index === active ? 'bg-ink/[0.06]' : 'hover:bg-ink/[0.04]',
                   )}
                   onMouseEnter={() => setActive(index)}
