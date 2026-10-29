@@ -46,7 +46,9 @@ def read_token(explicit: str | None, token_file: Path | None) -> str:
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="baseagent-bench", description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(
+        prog="baseagent-bench", description=(__doc__ or "").split("\n\n")[0]
+    )
     p.add_argument("--url", default=env_value("URL") or DEFAULT_URL, help="服务地址")
     p.add_argument("--token", default=None, help="访问令牌（缺省读环境变量或令牌文件）")
     p.add_argument("--token-file", type=Path, default=None)

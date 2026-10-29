@@ -36,4 +36,6 @@ check: lint typecheck test ## 提交前的完整检查
 
 clean: ## 清理构建与缓存产物（不碰数据目录）
 	rm -rf $(BACKEND)/.pytest_cache $(BACKEND)/.ruff_cache $(BACKEND)/.hypothesis $(BACKEND)/htmlcov
+	rm -rf $(BACKEND)/.import_linter_cache .import_linter_cache
+	find $(BACKEND)/src $(BACKEND)/tests -name __pycache__ -prune -exec rm -rf {} +
 	rm -rf $(FRONTEND)/dist $(FRONTEND)/coverage

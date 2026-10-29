@@ -7,7 +7,7 @@ docs/04_tools/04_mcp.md §5.1、决策 0007。
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -86,9 +86,9 @@ class Fake(AgentTool):
 
 def make_runner(
     tmp_path: Path,
-    tools: list[AgentTool],
+    tools: Sequence[AgentTool],
     *,
-    hidden: list[str] = (),
+    hidden: Sequence[str] = (),
     proxy: McpProxy | None = None,
     allowlist: set[str] | None = None,
 ):  # type: ignore[no-untyped-def]
