@@ -38,6 +38,20 @@ _DB_MODE: Final = 0o600
 _ROLES: Final = ("user", "assistant")
 _LAYERS: Final = ("profile", "guidelines", "architecture", "pitfalls")
 
+
+def _session_info(row: object) -> SessionInfo:
+    values = tuple(row)  # type: ignore[arg-type]
+    return SessionInfo(
+        session_id=str(values[0]),
+        workspace_id=str(values[1]),
+        created_at=float(values[2]),
+        title=str(values[3]) if values[3] is not None else None,
+        pinned=bool(values[4]),
+        archived=bool(values[5]),
+        updated_at=float(values[6] or values[2]),
+    )
+
+
 _MIGRATIONS: Final[tuple[str, ...]] = (
     """
     CREATE TABLE workspaces (
@@ -101,6 +115,13 @@ _MIGRATIONS: Final[tuple[str, ...]] = (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
+    """,
+    """
+    ALTER TABLE sessions ADD COLUMN title TEXT;
+    ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sessions ADD COLUMN updated_at REAL NOT NULL DEFAULT 0;
+    UPDATE sessions SET updated_at = created_at WHERE updated_at = 0;
     """,
 )
 
@@ -280,8 +301,11 @@ class MemoryStore:
 
     async def create_session(self, session_id: str, workspace_id: str) -> None:
         await self.get_workspace(workspace_id)
+        now = time.time()
         await self._write(
-            "INSERT INTO sessions VALUES (?, ?, ?)", (session_id, workspace_id, time.time())
+            "INSERT INTO sessions (session_id, workspace_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (session_id, workspace_id, now, now),
         )
 
     async def session_exists(self, session_id: str) -> bool:
@@ -306,27 +330,79 @@ class MemoryStore:
             raise SessionNotFound(f"会话 {session_id} 不存在")
         return str(row[0])
 
+    _SESSION_COLUMNS = "session_id, workspace_id, created_at, title, pinned, archived, updated_at"
+
     async def get_session(self, session_id: str) -> SessionInfo:
         row = await (
             await self._require().execute(
-                "SELECT session_id, workspace_id, created_at FROM sessions WHERE session_id = ?",
+                f"SELECT {self._SESSION_COLUMNS} FROM sessions WHERE session_id = ?",
                 (session_id,),
             )
         ).fetchone()
         if row is None:
             raise SessionNotFound(f"会话 {session_id} 不存在")
-        return SessionInfo(*row)
+        return _session_info(row)
 
     async def list_sessions(self, workspace_id: str) -> list[SessionInfo]:
         await self.get_workspace(workspace_id)
         rows = await (
             await self._require().execute(
-                "SELECT session_id, workspace_id, created_at FROM sessions "
-                "WHERE workspace_id = ? ORDER BY created_at DESC, session_id",
+                f"SELECT {self._SESSION_COLUMNS} FROM sessions "
+                "WHERE workspace_id = ? ORDER BY pinned DESC, updated_at DESC, created_at DESC, "
+                "session_id",
                 (workspace_id,),
             )
         ).fetchall()
-        return [SessionInfo(*row) for row in rows]
+        return [_session_info(row) for row in rows]
+
+    async def update_session(
+        self,
+        session_id: str,
+        *,
+        title: str | None = None,
+        pinned: bool | None = None,
+        archived: bool | None = None,
+        touch: bool = True,
+    ) -> SessionInfo:
+        """只改给出的字段；``title=None`` 表示不动，空串表示清空标题。"""
+        await self._need_session(session_id)
+        assignments: list[str] = []
+        params: list[object] = []
+        if title is not None:
+            assignments.append("title = ?")
+            params.append(title.strip() or None)
+        if pinned is not None:
+            assignments.append("pinned = ?")
+            params.append(1 if pinned else 0)
+        if archived is not None:
+            assignments.append("archived = ?")
+            params.append(1 if archived else 0)
+        if touch:
+            assignments.append("updated_at = ?")
+            params.append(time.time())
+        if assignments:
+            params.append(session_id)
+            await self._write(
+                f"UPDATE sessions SET {', '.join(assignments)} WHERE session_id = ?",
+                tuple(params),
+            )
+        return await self.get_session(session_id)
+
+    async def touch_session(self, session_id: str) -> None:
+        await self._write(
+            "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
+            (time.time(), session_id),
+        )
+
+    async def first_user_turn(self, session_id: str) -> Turn | None:
+        row = await (
+            await self._require().execute(
+                "SELECT id, session_id, task_id, role, content, token_count, created_at "
+                "FROM session_turns WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1",
+                (session_id,),
+            )
+        ).fetchone()
+        return Turn(*row) if row is not None else None
 
     async def turns_page(
         self, session_id: str, limit: int, before_id: int | None = None
@@ -363,6 +439,8 @@ class MemoryStore:
         source_memory = await self.load_memory(source_id)
         settings = await self.get_session_settings(source_id)
         await self.create_session(new_id, info.workspace_id)
+        if info.title:
+            await self.update_session(new_id, title=f"{info.title}（分支）", touch=False)
         try:
             mapped: dict[int, int] = {}
             for t in turns:
@@ -403,11 +481,15 @@ class MemoryStore:
         await self._need_session(session_id)
         conn = self._require()
         async with self._lock:
+            now = time.time()
             cursor = await conn.execute(
                 "INSERT INTO session_turns "
                 "(session_id, task_id, role, content, token_count, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (session_id, task_id, role, content, token_count, time.time()),
+                (session_id, task_id, role, content, token_count, now),
+            )
+            await conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE session_id = ?", (now, session_id)
             )
             await conn.commit()
         assert cursor.lastrowid is not None

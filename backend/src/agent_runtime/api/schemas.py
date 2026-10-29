@@ -67,6 +67,16 @@ class SessionOut(_Response):
     session_id: str
     workspace_id: str
     created_at: float
+    title: str | None = None
+    pinned: bool = False
+    archived: bool = False
+    updated_at: float = 0.0
+
+
+class SessionUpdate(_Request):
+    title: str | None = Field(default=None, max_length=120)
+    pinned: bool | None = None
+    archived: bool | None = None
 
 
 class TurnOut(_Response):
@@ -250,3 +260,82 @@ class AppSettingsOut(_Response):
     system_prompt: str | None
     system_prompt_default: str
     system_prompt_max_chars: int
+
+
+class PromptInfoOut(_Response):
+    name: str
+    kind: Literal["template"] = "template"
+    title: str
+    usage: str = ""
+    size: int = 0
+    customized: bool = False
+    max_chars: int = 0
+
+
+class PromptDetailOut(_Response):
+    name: str
+    content: str
+    default: str
+    customized: bool
+    max_chars: int
+
+
+class PromptIn(_Request):
+    content: str
+
+
+class WorkspaceSettingsIn(_Request):
+    permission_level: PermissionName | None = None
+    model: str | None = Field(default=None, max_length=128)
+    rules_enabled: bool | None = None
+
+
+class WorkspaceSettingsOut(_Response):
+    permission_level: PermissionName | None
+    model: str | None
+    rules_enabled: bool | None
+    defaults: dict[str, object]
+
+
+class SkillSourceOut(_Response):
+    source: Literal["builtin", "global", "workspace"]
+    enabled: bool
+    count: int
+    trusted: bool
+
+
+class SkillToggleIn(_Request):
+    enabled: bool
+
+
+class SkillSourceToggleIn(_Request):
+    enabled: bool
+
+
+class McpSettingsOut(_Response):
+    enabled: bool
+
+
+class McpSettingsIn(_Request):
+    enabled: bool
+
+
+class McpServerOut(_Response):
+    name: str
+    transport: str
+    status: str
+    enabled: bool
+    exposure: Literal["pinned", "deferred"]
+    disabled_tools: list[str]
+    command_preview: str
+    tool_count: int
+    tools: list[str]
+    rejected: list[dict[str, str]]
+    last_error: str
+    retry_in_sec: int
+
+
+class McpServerIn(_Request):
+    enabled: bool | None = None
+    exposure: Literal["pinned", "deferred"] | None = None
+    disabled_tools: list[str] | None = None

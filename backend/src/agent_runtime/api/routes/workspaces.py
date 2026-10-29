@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Path, Response
 from agent_runtime.api.deps import ApiServices, services_of
 from agent_runtime.api.errors import ApiError
 from agent_runtime.api.fsguard import WorkspacePathError, validate_workspace_root
+from agent_runtime.api.routes.sessions import session_out
 from agent_runtime.api.schemas import (
     MemoryItemCreate,
     MemoryLayer,
@@ -17,9 +18,16 @@ from agent_runtime.api.schemas import (
     WorkspaceCreate,
     WorkspaceMemoryOut,
     WorkspaceOut,
+    WorkspaceSettingsIn,
+    WorkspaceSettingsOut,
     WorkspaceUpdate,
 )
 from agent_runtime.memory import Workspace, WorkspaceMemory
+from agent_runtime.runtime.overrides import (
+    WorkspaceSettings,
+    load_workspace_settings,
+    save_workspace_settings,
+)
 from agent_runtime.runtime.service import TaskStateConflictError
 
 router = APIRouter(tags=["workspaces"])
@@ -96,6 +104,41 @@ async def update_workspace(
             workspace_id, name=body.name, description=body.description
         )
     )
+
+
+@router.get("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsOut)
+async def get_workspace_settings(workspace_id: WorkspaceId, svc: Services) -> WorkspaceSettingsOut:
+    await svc.memory.get_workspace(workspace_id)
+    current = await load_workspace_settings(svc.memory, workspace_id)
+    defaults = {
+        "permission_level": svc.settings.runtime.approval.default_level,
+        "model": None,
+        "rules_enabled": svc.settings.context.rules.allow_workspace,
+    }
+    return WorkspaceSettingsOut(
+        permission_level=current.permission_level,  # type: ignore[arg-type]
+        model=current.model,
+        rules_enabled=current.rules_enabled,
+        defaults=defaults,
+    )
+
+
+@router.put("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsOut)
+async def put_workspace_settings(
+    workspace_id: WorkspaceId, body: WorkspaceSettingsIn, svc: Services
+) -> WorkspaceSettingsOut:
+    await svc.memory.get_workspace(workspace_id)
+    if body.model is not None:
+        known = {str(item.get("name")) for item in svc.introspection.models()}
+        if body.model not in known:
+            raise ApiError(422, "VALIDATION_ERROR", f"未知的模型端点：{body.model}")
+    settings = WorkspaceSettings(
+        permission_level=body.permission_level,
+        model=body.model,
+        rules_enabled=body.rules_enabled,
+    )
+    await save_workspace_settings(svc.memory, workspace_id, settings)
+    return await get_workspace_settings(workspace_id, svc)
 
 
 @router.delete("/workspaces/{workspace_id}", status_code=204)
@@ -184,18 +227,12 @@ async def delete_memory_item(
 async def create_session(workspace_id: WorkspaceId, svc: Services) -> SessionOut:
     session_id = "sess_" + _short_id()
     await svc.memory.create_session(session_id, workspace_id)
-    info = await svc.memory.get_session(session_id)
-    return SessionOut(
-        session_id=info.session_id, workspace_id=info.workspace_id, created_at=info.created_at
-    )
+    return session_out(await svc.memory.get_session(session_id))
 
 
 @router.get("/workspaces/{workspace_id}/sessions", response_model=list[SessionOut])
 async def list_sessions(workspace_id: WorkspaceId, svc: Services) -> list[SessionOut]:
-    return [
-        SessionOut(session_id=s.session_id, workspace_id=s.workspace_id, created_at=s.created_at)
-        for s in await svc.memory.list_sessions(workspace_id)
-    ]
+    return [session_out(s) for s in await svc.memory.list_sessions(workspace_id)]
 
 
 def _short_id() -> str:

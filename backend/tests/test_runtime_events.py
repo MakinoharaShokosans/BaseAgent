@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -73,7 +75,7 @@ async def test_a_model_reply_with_tool_calls_emits_the_reply_and_one_tool_call_e
     reply = got[0].data
     assert reply["turn"] == 1 and reply["content"] == "先看看"
     assert reply["tool_calls"] == [{"id": "c1", "name": "bash"}, {"id": "c2", "name": "view_file"}]
-    assert len(str(reply["reasoning"])) <= 500  # 思考内容只发截断后的摘要
+    assert len(str(reply["reasoning"])) <= 4000  # 思考内容只发截断后的摘要
     first = got[1].data
     assert first["tool"] == "bash" and first["step"] == 1
     assert first["args"] == {"command": "ls", "api_key": "[REDACTED]"}
@@ -495,3 +497,71 @@ async def test_the_runner_sets_the_current_task_for_everything_it_runs(tmp_path)
         task_id = await runner.submit(TaskRequest("w", "/w", "s", "goal", "workspace_write"))
         await runner.wait(task_id)
     assert seen and set(seen) == {"task-9"}
+
+
+@pytest.mark.unit
+async def test_tool_result_carries_duration_exit_code_and_size(
+    make_state: MakeState,
+) -> None:
+    hub = EventHub()
+    ev = events_for(hub)
+    await ev.emit(
+        "tool.observed",
+        {
+            "call_id": "c1",
+            "ok": False,
+            "artifact_id": "obs_1",
+            "duration_ms": 321,
+            "exit_code": 2,
+            "truncated": True,
+            "bytes": 9001,
+            "changed_files": ["a.py"],
+        },
+    )
+    tool = Message(role="tool", content="boom", tool_call_id="c1", name="bash")
+    await ev.turn_finished({"messages": [tool]}, make_state())
+    result = (await history(hub))[0].data
+    assert result["duration_ms"] == 321 and result["exit_code"] == 2
+    assert result["truncated"] is True and result["bytes"] == 9001
+    assert result["changed_files"] == ["a.py"]
+
+
+@pytest.mark.unit
+async def test_model_delta_is_transient_and_not_persisted(make_state: MakeState) -> None:
+    hub = EventHub()
+    ev = events_for(hub)
+    stream = hub.stream("t1")
+    pending = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    await ev.model_delta("content", "hello, this is a long enough delta")
+    event = await asyncio.wait_for(pending, timeout=1)
+    assert event.name == "model.delta" and event.seq == 0
+    assert "hello" in str(event.data["text"]) and event.data["kind"] == "content"
+    await stream.aclose()
+    assert await history(hub) == []
+
+
+@pytest.mark.unit
+async def test_model_delta_holds_back_a_partial_canary(make_state: MakeState) -> None:
+    hub = EventHub()
+    ev = events_for(hub)
+    stream = hub.stream("t1")
+    pending = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    # 金丝雀跨块时，完整出现前扣住尾部，不把它的前半段发出去
+    await ev.model_delta("content", "这是一段足够长的普通文字，用来超过尾巴")
+    event = await asyncio.wait_for(pending, timeout=1)
+    assert "canary-abc" not in str(event.data["text"])
+    await ev.model_delta("content", "canary-")
+    await ev.model_delta("content", "abc 结束")
+    # 完整金丝雀出现后停止发送，且不把它写进事件库
+    while True:
+        try:
+            extra = await asyncio.wait_for(anext(stream), timeout=0.2)
+        except TimeoutError:
+            break
+        assert "canary-abc" not in str(extra.data["text"])
+    await stream.aclose()
+    assert "canary-abc" not in json.dumps(
+        [e.to_dict() for e in await history(hub)], ensure_ascii=False
+    )

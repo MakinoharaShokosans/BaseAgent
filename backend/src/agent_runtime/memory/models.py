@@ -138,6 +138,10 @@ class SessionInfo:
     session_id: str
     workspace_id: str
     created_at: float
+    title: str | None = None
+    pinned: bool = False
+    archived: bool = False
+    updated_at: float = 0.0
 
 
 TaskStatusName = str

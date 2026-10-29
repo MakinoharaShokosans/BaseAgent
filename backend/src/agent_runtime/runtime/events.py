@@ -26,7 +26,7 @@ from agent_runtime.observability import EventHub, Redactor, clip
 from agent_runtime.runtime.runner import TaskSnapshot
 
 _REPLY_CLIP: Final = 2000
-_REASONING_CLIP: Final = 500
+_REASONING_CLIP: Final = 4000
 
 
 class TaskEvents:
@@ -51,6 +51,9 @@ class TaskEvents:
         self._turn = turn_offset
         self._usage = usage
         self._observed: dict[str, Mapping[str, object]] = {}
+        self._canary = canary
+        self._delta_tail: dict[str, str] = {}
+        self._delta_blocked = False
 
     # ------------------------------------------------------------------ 工具包装层的 Emit
 
@@ -60,9 +63,48 @@ class TaskEvents:
             return
         await self._hub.emit(self._task_id, name, self._scrub(data))
 
+    def _delta_hold(self, buffered: str) -> int:
+        """扣住多长的尾部：整段金丝雀的长度，加上末尾可能只是它前缀的部分。"""
+        if not self._canary:
+            return 0
+        limit = min(len(buffered), len(self._canary) - 1)
+        for size in range(limit, 0, -1):
+            if buffered.endswith(self._canary[:size]):
+                return max(len(self._canary) - 1, size)
+        return len(self._canary) - 1
+
+    async def model_delta(self, kind: str, text: str) -> None:
+        """流式增量；不持久化。金丝雀可能跨块，先扣住尾部再发。"""
+        if not text or self._delta_blocked:
+            return
+        kind = "reasoning" if kind == "reasoning" else "content"
+        buffered = self._delta_tail.get(kind, "") + text
+        if self._canary and self._canary in buffered:
+            # 已出现完整金丝雀：不再发任何增量，模型回复随后会被 CanaryLeak 拦下
+            self._delta_blocked = True
+            self._delta_tail[kind] = ""
+            return
+        hold = self._delta_hold(buffered)
+        if hold and len(buffered) <= hold:
+            self._delta_tail[kind] = buffered
+            return
+        emit = buffered[:-hold] if hold else buffered
+        self._delta_tail[kind] = buffered[-hold:] if hold else ""
+        if emit:
+            await self._hub.transient(
+                self._task_id,
+                "model.delta",
+                {
+                    "turn": self._turn + 1,
+                    "kind": kind,
+                    "text": self._redactor.text(emit),
+                },
+            )
+
     # ------------------------------------------------------------------ EventSink
 
     async def model_replied(self, message: Message, state: AgentState) -> None:
+        self._delta_tail.clear()
         turn = self._turn + 1
         payload: dict[str, object] = {
             "turn": turn,
@@ -131,18 +173,25 @@ class TaskEvents:
     async def _tool_result(self, message: Message, turn: int) -> bool:
         observed = self._observed.pop(message.tool_call_id or "", {})
         ok = bool(observed.get("ok", True))
-        await self._hub.emit(
-            self._task_id,
-            "tool.result",
-            {
-                "tool": message.name or "",
-                "result": self._redactor.text(message.content)[: self._result_clip],
-                "step": turn,
-                "ok": ok,
-                "artifact_id": str(observed.get("artifact_id", "")),
-                "call_id": message.tool_call_id or "",
-            },
-        )
+        payload: dict[str, object] = {
+            "tool": message.name or "",
+            "result": self._redactor.text(message.content)[: self._result_clip],
+            "step": turn,
+            "ok": ok,
+            "artifact_id": str(observed.get("artifact_id", "")),
+            "call_id": message.tool_call_id or "",
+        }
+        for key in ("duration_ms", "exit_code", "bytes"):
+            value = observed.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                payload[key] = value
+        for key in ("truncated", "timed_out"):
+            if observed.get(key) is True:
+                payload[key] = True
+        changed = observed.get("changed_files")
+        if isinstance(changed, list) and changed:
+            payload["changed_files"] = changed
+        await self._hub.emit(self._task_id, "tool.result", payload)
         return ok
 
     def _scrub(self, data: Mapping[str, object]) -> dict[str, object]:

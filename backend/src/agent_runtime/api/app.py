@@ -10,7 +10,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent_runtime.api.deps import ApiServices
 from agent_runtime.api.errors import TRACE_HEADER, install_handlers
-from agent_runtime.api.routes import files, sessions, settings, system, tasks, workspaces
+from agent_runtime.api.routes import (
+    files,
+    mcp,
+    prompts,
+    sessions,
+    settings,
+    skills,
+    system,
+    tasks,
+    workspaces,
+)
 from agent_runtime.api.security import AccessGate
 from agent_runtime.api.token import FailureLimiter
 
@@ -28,7 +38,7 @@ def create_app(services: ApiServices, *, token: str | None) -> FastAPI:
     )
     app.state.services = services
     install_handlers(app)
-    for module in (workspaces, sessions, settings, tasks, files, system):
+    for module in (workspaces, sessions, settings, tasks, files, system, prompts, skills, mcp):
         app.include_router(module.router, prefix=API_PREFIX)
 
     @app.get("/", include_in_schema=False)

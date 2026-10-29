@@ -10,7 +10,7 @@ import json
 import platform
 import time
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
@@ -58,6 +58,7 @@ from agent_runtime.runtime.assembly import (
 )
 from agent_runtime.runtime.events import TaskEvents
 from agent_runtime.runtime.memory_flow import MemoryFlow
+from agent_runtime.runtime.overrides import load_skill_policy, load_workspace_settings
 from agent_runtime.skills import SkillRegistry
 from agent_runtime.subagents.delegate import (
     DelegateLimits,
@@ -153,12 +154,15 @@ class RuntimeFactory:
         settings = self.loaded.settings
         paths = self.loaded.paths
         workspace = await self.memory.get_workspace(state.workspace_id)
+        ws_settings = await load_workspace_settings(self.memory, workspace.workspace_id)
+        skill_policy = await load_skill_policy(self.memory)
         root = Path(state.workspace_path)
 
         artifacts = TaskArtifacts()
         skills = SkillRegistry.scan(
-            skill_roots_from_settings(settings, root), skill_limits_from_settings(settings)
-        )
+            skill_roots_from_settings(settings, root, sources=skill_policy.sources),
+            skill_limits_from_settings(settings),
+        ).filtered(skill_policy.disabled)
         events = TaskEvents(
             self.hub,
             state.task_id,
@@ -216,8 +220,11 @@ class RuntimeFactory:
         prefs = SessionPreferences.from_mapping(
             await self.memory.get_session_settings(state.session_id)
         )
+        preferred_model = prefs.model or ws_settings.model
         # 用户选的模型只作为主 Agent 的首选端点；研究与子智能体仍走各自配置的档位
-        gateway = PreferredEndpoint(self.gateway, prefs.model) if prefs.model else self.gateway
+        gateway = (
+            PreferredEndpoint(self.gateway, preferred_model) if preferred_model else self.gateway
+        )
         mcp_cfg = settings.mcp
         index = render_index(
             [(t.server, t.name, t.description) for t in mcp_tools if t.name in set(deferred)],
@@ -228,7 +235,9 @@ class RuntimeFactory:
             self.library,
             workspace_name=workspace.name,
             workspace_description=workspace.description,
-            rules=rules_from_settings(settings, root, self.rules_cache),
+            rules=rules_from_settings(
+                settings, root, self.rules_cache, allow_override=ws_settings.rules_enabled
+            ),
             skills=skills,
             mcp_index=index,
             tool_names=[s.name for s in registry.schemas()],
@@ -268,6 +277,7 @@ class RuntimeFactory:
                 tools=registry.schemas(),
                 tier=loop_cfg.model_tier,
                 call_timeout_sec=float(loop_cfg.call_timeout_sec),
+                on_delta=events.model_delta,
             )
         )
         tool_runner = make_tool_runner(
@@ -311,6 +321,50 @@ class RuntimeFactory:
             max_consecutive_blocks=limits.max_consecutive_blocks,
             compact=compactor,
         )
+
+    async def inspect_segment(self, session_id: str, segment: str) -> Mapping[str, Any] | None:
+        """某一段提示词在下一次请求里的渲染全文（不含金丝雀）。
+
+        与 ``inspect_context`` 共用装配；用于前端点开“系统提示词 / 工具定义 / …”看原文。
+        """
+        info = await self.memory.get_session(session_id)
+        workspace = await self.memory.get_workspace(info.workspace_id)
+        probe = new_state(
+            workspace_id=info.workspace_id,
+            workspace_path=workspace.root_path,
+            session_id=session_id,
+            task_id="inspect",
+            task_goal=_PROBE_GOAL,
+            permission_level="read_only",
+            canary_token=self.make_canary(session_id, "inspect"),
+        )
+        a = await self._assemble(probe)
+        state = replace(
+            probe, messages=[*a.context.history, Message(role="user", content=_PROBE_GOAL)]
+        )
+        layers = a.assembler.layers(state)
+        if segment == "system":
+            text = a.assets.system
+        elif segment == "tools":
+            text = json.dumps(
+                [
+                    {"name": t.name, "description": t.description, "parameters": dict(t.parameters)}
+                    for t in a.registry.schemas()
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+        elif segment == "history":
+            text = "\n\n".join(
+                f"[{m.role}]\n{m.content}" for m in a.context.history
+            )
+        elif segment == "workspace":
+            text = layers["workspace"]
+        elif segment in layers:
+            text = layers[segment]
+        else:
+            return None
+        return {"id": segment, "text": text, "tokens": self.count_tokens(text)}
 
     async def inspect_context(self, session_id: str) -> Mapping[str, Any]:
         """会话下一次请求里各段提示词占多少 Token。
@@ -467,31 +521,43 @@ class RuntimeFactory:
             max_report_chars=cfg.max_report_chars,
         )
 
-    def skill_listing(self) -> list[dict[str, object]]:
-        """自省用：内置与全局技能（工作区技能随工作区变化，不在这里）。"""
+    def skill_listing(
+        self,
+        *,
+        workspace_root: Path | None = None,
+        sources: Mapping[str, bool] | None = None,
+        disabled: Collection[str] = (),
+    ) -> list[dict[str, object]]:
+        """自省用：扫描给定目录的技能，按覆盖层过滤。
+
+        ``workspace_root`` 省略时只列内置与全局（工作区技能随工作区变化，由调用方逐个传入）。
+        """
         settings = self.loaded.settings
+        root = workspace_root or self.loaded.home
+        effective = dict(sources or {})
+        if workspace_root is None:
+            effective["workspace"] = False
         registry = SkillRegistry.scan(
             skill_roots_from_settings(
-                settings, self.loaded.home, global_dir=self.loaded.home / "skills"
+                settings,
+                root,
+                global_dir=self.loaded.home / "skills",
+                sources=effective,
             ),
             skill_limits_from_settings(settings),
-        )
-        out: list[dict[str, object]] = []
-        for name in registry.names():
-            record = registry.get(name)
-            if record is not None:
-                out.append(
-                    {
-                        "name": record.name,
-                        "source": record.source,
-                        "description": record.description,
-                        "triggers": list(record.triggers),
-                        "required_tools": list(record.required_tools),
-                        "high_privilege": list(record.high_privilege),
-                        "warnings": list(record.warnings),
-                    }
-                )
-        return out
+        ).filtered(disabled)
+        return [
+            {
+                "name": record.name,
+                "source": record.source,
+                "description": record.description,
+                "triggers": list(record.triggers),
+                "required_tools": list(record.required_tools),
+                "high_privilege": list(record.high_privilege),
+                "warnings": list(record.warnings),
+            }
+            for record in registry.records()
+        ]
 
     def tool_listing(self) -> list[dict[str, object]]:
         """自省用：内置工具的名称与 Schema（不含任务相关的绑定）。"""

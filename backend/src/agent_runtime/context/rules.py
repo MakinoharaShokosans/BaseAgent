@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
@@ -70,13 +70,25 @@ class RulesCache:
 
 
 class PromptLibrary:
-    """按名读取 ``prompts/*.md`` 并缓存；改文件需要显式 ``reload``。"""
+    """按名读取 ``prompts/*.md`` 并缓存；用户覆盖优先，改文件需要显式 ``reload``。"""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(
+        self, root: Path | None = None, overrides: Mapping[str, str] | None = None
+    ) -> None:
         self._root = root or Path(__file__).resolve().parents[1] / "prompts"
         self._cache: dict[str, str] = {}
+        self._overrides: dict[str, str] = dict(overrides or {})
 
-    def get(self, name: str) -> str:
+    def names(self) -> tuple[str, ...]:
+        """随发行版的模板名（不含动态分区与固定指令）。"""
+        try:
+            names = [path.stem for path in self._root.glob("*.md") if _NAME.fullmatch(path.stem)]
+        except OSError:
+            return ()
+        return tuple(sorted(names))
+
+    def default(self, name: str) -> str:
+        """随发行版的初始版本，忽略覆盖。"""
         if not _NAME.fullmatch(name):
             raise KeyError(name)
         if name not in self._cache:
@@ -85,6 +97,25 @@ class PromptLibrary:
             except OSError as exc:
                 raise KeyError(name) from exc
         return self._cache[name]
+
+    def get(self, name: str) -> str:
+        override = self._overrides.get(name)
+        if override is not None:
+            return override
+        return self.default(name)
+
+    def customized(self, name: str) -> bool:
+        return name in self._overrides
+
+    def set_override(self, name: str, content: str | None) -> None:
+        """``None`` 或空白删除覆盖，回到文件里的初始版本。"""
+        if content is None or not content.strip():
+            self._overrides.pop(name, None)
+        else:
+            self._overrides[name] = content
+
+    def overrides(self) -> dict[str, str]:
+        return dict(self._overrides)
 
     def reload(self) -> None:
         self._cache.clear()

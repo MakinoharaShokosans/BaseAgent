@@ -47,10 +47,20 @@ class ApiServices:
     dependency_checks: Callable[[], Awaitable[Mapping[str, str]]] = _no_checks
     #: 会话的上下文检视；装配层提供，缺省不可用
     context_inspector: Callable[[str], Awaitable[Mapping[str, Any]]] | None = None
+    #: 单段提示词的渲染全文；缺省不可用
+    context_segment: Callable[[str, str], Awaitable[Mapping[str, Any] | None]] | None = None
     #: 手动压缩会话记忆；装配层提供，缺省不可用
     compact_session: Callable[[str], Awaitable[CompactionResult]] | None = None
     #: 唤起宿主机原生目录选择窗口；缺省不可用
     native_picker: Callable[[float], Awaitable[str | None]] | None = None
+    #: 按首轮对话生成会话标题；缺省不生成
+    title_generator: Callable[[str], Awaitable[str | None]] | None = None
+    #: 技能目录（含各工作区来源）；缺省只用自省里的内置/全局
+    skill_catalog: Callable[[], Awaitable[list[dict[str, Any]]]] | None = None
+    #: 读取某个技能的正文（工作区来源需给出 workspace_id）
+    skill_body: Callable[[str, str | None], Awaitable[dict[str, Any] | None]] | None = None
+    #: MCP 运行时覆盖控制，缺省不可用
+    mcp_control: Any | None = None
 
 
 def services_of(request: Request) -> ApiServices:

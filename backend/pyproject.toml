@@ -34,10 +34,6 @@ dependencies = [
 baseagent = "agent_runtime.cli:main"
 baseagent-server = "agent_runtime.server:main"
 baseagent-bench = "evaluation.agent_bench.cli:main"
-# 改名前的命令名，保留为别名
-aegis = "agent_runtime.cli:main"
-aegis-server = "agent_runtime.server:main"
-aegis-bench = "evaluation.agent_bench.cli:main"
 
 [project.optional-dependencies]
 # web_search sidecar 的可选增强：装了就用 trafilatura 提取正文，没有就用标准库回退。

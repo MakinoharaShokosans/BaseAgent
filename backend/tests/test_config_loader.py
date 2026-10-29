@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from baseagent_config import ConfigError, LoadedSettings, load_settings
+from baseagent_config import ConfigError, LoadedSettings, env_value, load_settings, pick_home
 
 #: 最小可用配置：只有两档模型（云端端点，需要密钥）
 MINIMAL = """
@@ -42,7 +42,7 @@ max_output_tokens = 2048
 def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """清掉会影响加载的变量，并让工作目录落在空的临时目录，避免读到仓库里的配置。"""
     for name in list(os.environ):
-        if name.startswith(("BASEAGENT_", "AEGIS_")) or name == "TEST_API_KEY":
+        if name.startswith("BASEAGENT_") or name == "TEST_API_KEY":
             monkeypatch.delenv(name)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TEST_API_KEY", "sk-test")
@@ -455,3 +455,19 @@ def test_workspace_trust_switches_warn(
     assert quiet.warnings == ()
     loud = _load(tmp_path, MINIMAL + f"\n[{section}]\nallow_workspace = true\n")
     assert any(needle in w and "allow_workspace" in w for w in loud.warnings)
+
+
+@pytest.mark.unit
+def test_env_value_reads_only_the_baseagent_prefix() -> None:
+    assert env_value("HOME", {}) is None
+    assert env_value("HOME", {"BASEAGENT_HOME": "/x"}) == "/x"
+    assert env_value("HOME", {"BASEAGENT_HOME": ""}) == ""  # 空字符串也算设置过
+
+
+@pytest.mark.unit
+def test_pick_home_defaults_to_the_baseagent_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert pick_home({}) == tmp_path / ".local/share/baseagent"
+    assert pick_home({"BASEAGENT_HOME": "/y"}) == Path("/y")

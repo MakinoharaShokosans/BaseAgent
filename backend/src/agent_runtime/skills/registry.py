@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import html
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -74,9 +74,7 @@ def skill_roots(
     """按优先级从高到低；未授权的来源在这里就被排除，根本不会被扫描。"""
     roots: list[SkillRoot] = []
     if allow_workspace:
-        # 新目录名优先；旧的 .aegis 目录仍然识别（同名技能以靠前的为准）
-        for name in (".baseagent", ".aegis"):
-            roots.append(SkillRoot(workspace_root / name / "skills", "workspace"))
+        roots.append(SkillRoot(workspace_root / ".baseagent" / "skills", "workspace"))
     if allow_builtin:
         roots.append(SkillRoot(builtin_dir, "builtin"))
     if allow_global:
@@ -116,6 +114,18 @@ class SkillRegistry:
 
     def get(self, name: str) -> SkillRecord | None:
         return self._records.get(name)
+
+    def filtered(self, disabled: Collection[str]) -> SkillRegistry:
+        """按界面覆盖层过滤；被禁用的技能不进清单，也不能被 ``load_skill`` 载入。"""
+        if not disabled:
+            return self
+        return SkillRegistry(
+            {name: record for name, record in self._records.items() if name not in disabled},
+            self.rejected,
+        )
+
+    def records(self) -> tuple[SkillRecord, ...]:
+        return tuple(self._records[name] for name in self.names())
 
     def manifest(self) -> str:
         """常驻清单：只含元数据与标记，不含正文。"""

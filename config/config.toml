@@ -21,8 +21,6 @@
 # 数据目录。环境变量 BASEAGENT_HOME 优先。所有相对路径都相对它解析。
 # 这里必须是绝对路径或以 ~ 开头（相对路径会让不同目录启动得到不同数据集）。
 # 开发时想用仓库内的目录，设环境变量 BASEAGENT_HOME=./storage。
-# 改名前的数据目录 ~/.local/share/aegis 还在、新目录还没建时，会自动沿用旧目录（启动时有提示）。
-# 旧的环境变量 AEGIS_* 仍然有效，同名的 BASEAGENT_* 优先。
 home = "~/.local/share/baseagent"
 
 
@@ -129,6 +127,7 @@ thinking_control = "deepseek"       # none | deepseek：显式发送 thinking �
 thinking_with_tools = false         # 带 tools 的请求关闭思考（DeepSeek 带工具必须回传全部历史思考）
 reasoning_field = "reasoning_content"
 reasoning_passback = "never"        # never | tool_turns | opaque | all_when_tools
+streaming = true                    # 支持 OpenAI 兼容的流式增量
 
 [models.fast]                       # 工具调度、记忆压缩、研究提炼、子智能体：要便宜、要快
 temperature = 0.2
@@ -152,6 +151,7 @@ thinking_control = "deepseek"
 thinking_with_tools = false
 reasoning_field = "reasoning_content"
 reasoning_passback = "never"
+streaming = true
 
 # 备用端点示例：同档内先 pro 后 flash 降级，取消注释即可
 # [[models.reasoning.endpoints]]
@@ -248,7 +248,7 @@ require_provenance = true           # 没有出处的事实丢弃
 [context.rules]
 allow_workspace = false             # 工作区规则文件（CLAUDE.md / AGENTS.md 等）。默认关闭，开启即视为用户授权
 max_chars = 8000
-candidates = ["CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".baseagent/rules.md", ".aegis/rules.md"]
+candidates = ["CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".baseagent/rules.md"]
 
 [context.prompt]
 goal_echo_chars = 300               # 草稿回显第一行重复任务目标的最大字符数（长任务里抵消目标漂移）
@@ -280,7 +280,7 @@ auto_start_sidecars = true          # 启动 Agent 时拉起并托管 sidecar；
 startup_timeout_sec = 10
 stop_grace_sec = 3
 # 传给 sidecar 子进程的环境变量白名单。其余（尤其是各类 *_KEY / *_TOKEN）一律不传。
-sidecar_env_allowlist = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "PYTHONPATH", "PYTHONUNBUFFERED", "BASEAGENT_CONFIG", "BASEAGENT_HOME", "AEGIS_CONFIG", "AEGIS_HOME"]
+sidecar_env_allowlist = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "PYTHONPATH", "PYTHONUNBUFFERED", "BASEAGENT_CONFIG", "BASEAGENT_HOME"]
 
 
 # ------------------------------------------------------------------------------

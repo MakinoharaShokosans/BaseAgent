@@ -1,7 +1,7 @@
 """配置加载：发现文件、合并来源、做依赖运行环境的校验，失败即拒绝启动。
 
 优先级（高覆盖低）：显式传入（命令行） > 环境变量 BASEAGENT_<节>__<键>
-（旧名 AEGIS_ 仍有效）> config.toml > 代码默认值。
+> config.toml > 代码默认值。
 规则出处：docs/01_architecture/04_configuration.md §2、§6。
 """
 
@@ -18,15 +18,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ValidationError
 
-from baseagent_config.envcompat import (
-    DEFAULT_HOME,
-    LEGACY_PREFIX,
-    PREFIX,
-    env_value,
-    legacy_env_notes,
-    legacy_home_note,
-    pick_home,
-)
+from baseagent_config.env import DEFAULT_HOME, PREFIX, env_value, pick_home
 from baseagent_config.models import LOOPBACK_HOSTS, Endpoint, Settings
 from baseagent_config.sources import FILE_DATA
 
@@ -123,14 +115,12 @@ def load_settings(
     settings = _build(file_data, overrides or {}, path)
 
     problems: list[str] = []
-    home_notes: list[str] = []
-    home = _resolve_home(settings, problems, home_notes)
+    home = _resolve_home(settings, problems)
     paths = _resolve_paths(settings, home, problems) if home else None
     if home and create_home:
         _ensure_home(home, problems)
     endpoints, warnings = _usable_endpoints(settings, problems if require_models else [])
     warnings += _trust_warnings(settings)
-    warnings += home_notes + legacy_env_notes()
 
     if problems or home is None or paths is None:
         raise ConfigError(problems, path)
@@ -210,17 +200,16 @@ def _format_validation(exc: ValidationError) -> list[str]:
 
 
 def _check_env_overrides(environ: Mapping[str, str]) -> list[str]:
-    """检查 BASEAGENT_（及旧名 AEGIS_）前缀的变量是否指向存在的标量配置项。
+    """检查 BASEAGENT_ 前缀的变量是否指向存在的标量配置项。
 
     pydantic-settings 会把指向数组或表的变量按 JSON 解析，文档约定这类只能改文件，
     所以在这里提前拒绝；拼写错误同样在这里报，错误信息里带上变量名。
     """
     problems = []
     for name in sorted(environ):
-        prefix = next((p for p in (ENV_PREFIX, LEGACY_PREFIX) if name.startswith(p)), None)
-        if prefix is None:
+        if not name.startswith(ENV_PREFIX):
             continue
-        parts = name[len(prefix) :].lower().split(ENV_DELIMITER)
+        parts = name[len(ENV_PREFIX) :].lower().split(ENV_DELIMITER)
         if len(parts) == 1 and parts[0] not in Settings.model_fields:
             continue  # BASEAGENT_HOME、BASEAGENT_CONFIG、BASEAGENT_API_TOKEN 等不是配置项覆盖
         problem = _check_env_path(parts)
@@ -269,17 +258,14 @@ def _classify(annotation: Any) -> tuple[str, type[BaseModel] | None]:
 # ==============================================================================
 
 
-def _resolve_home(settings: Settings, problems: list[str], notes: list[str]) -> Path | None:
+def _resolve_home(settings: Settings, problems: list[str]) -> Path | None:
     env_home = env_value("HOME")
     if env_home:
         # 环境变量由使用者在当前目录显式给出，相对路径按当前目录取绝对
         return Path(os.path.abspath(Path(env_home).expanduser()))
     configured = Path(settings.app.home).expanduser()
     if settings.app.home == DEFAULT_HOME:
-        chosen = pick_home({})  # 默认值：旧目录还在、新目录还没建时沿用旧目录
-        if note := legacy_home_note(chosen):
-            notes.append(note)
-        return chosen
+        return pick_home({})
     if not configured.is_absolute():
         problems.append(
             f"app.home：{settings.app.home!r} 必须是绝对路径（或以 ~ 开头）；"
@@ -329,7 +315,7 @@ def _resolve_paths(settings: Settings, home: Path, problems: list[str]) -> Resol
         return None
     return ResolvedPaths(
         logging_file=resolved["logging.file"],
-        metadata_db=_legacy_db_if_present(resolved["storage.metadata_db"], home),
+        metadata_db=resolved["storage.metadata_db"],
         checkpoint_db=resolved["storage.checkpoint_db"],
         events_db=resolved["storage.events_db"],
         traces_dir=resolved["storage.traces_dir"],
@@ -339,14 +325,6 @@ def _resolve_paths(settings: Settings, home: Path, problems: list[str]) -> Resol
         web_artifacts_dir=resolved["web_search.artifacts_dir"],
         canary_salt=resolved["security.canary_salt_file"],
     )
-
-
-def _legacy_db_if_present(path: Path, home: Path) -> Path:
-    """沿用旧名的元数据库：只在默认文件名、新库还没有、旧库在的时候，才指向旧文件。"""
-    legacy = home / "aegis_meta.db"
-    if path == home / "baseagent_meta.db" and not path.exists() and legacy.exists():
-        return legacy
-    return path
 
 
 # ==============================================================================

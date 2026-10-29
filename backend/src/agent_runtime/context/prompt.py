@@ -268,6 +268,10 @@ class PromptAssembler:
 
     # ------------------------------------------------------------------ 检视
 
+    def layers(self, state: AgentState) -> dict[str, str]:
+        """各段渲染后的原文（不含金丝雀）；供上下文的逐段查看用。"""
+        return self._build(state).layers
+
     def describe(self, state: AgentState) -> dict[str, Any]:
         """各段的结构化快照；与实际发给模型的请求同源，不含金丝雀。"""
         built = self._build(state)

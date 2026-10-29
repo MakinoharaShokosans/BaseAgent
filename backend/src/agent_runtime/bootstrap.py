@@ -18,9 +18,10 @@ from loguru import logger
 from agent_runtime.api import ApiServices, Introspection
 from agent_runtime.checkpoint import CheckpointStore, scan_for_recovery
 from agent_runtime.context import PromptLibrary
-from agent_runtime.llm import LLMGateway
+from agent_runtime.core import Message
+from agent_runtime.llm import LLMGateway, LLMRequest
 from agent_runtime.llm.tokens import estimate_tokens
-from agent_runtime.memory import MemoryStore
+from agent_runtime.memory import MemoryStore, SessionPreferences
 from agent_runtime.observability import (
     EventHub,
     EventStore,
@@ -32,13 +33,21 @@ from agent_runtime.runtime.assembly import (
     max_concurrent_tasks,
     memory_flow_from_settings,
     resolve_permission_level,
+    skill_limits_from_settings,
+    skill_roots_from_settings,
 )
 from agent_runtime.runtime.events import LlmCallEvents
 from agent_runtime.runtime.extractor import GatewayExtractor
 from agent_runtime.runtime.factory import RuntimeFactory
+from agent_runtime.runtime.overrides import (
+    load_mcp_policy,
+    load_skill_policy,
+    prompt_key,
+)
 from agent_runtime.runtime.run import RunnerDeps
 from agent_runtime.runtime.runner import TaskRunner
 from agent_runtime.runtime.service import TaskService
+from agent_runtime.skills import SkillRegistry
 from baseagent_config import LoadedSettings
 from mcps import McpManager
 from tools.core import SidecarClient
@@ -100,6 +109,10 @@ class Application:
         llm_events = LlmCallEvents(hub)
         llm = gateway or LLMGateway.from_loaded(loaded, env=env, observer=llm_events)
         library = PromptLibrary()
+        for name in library.names():
+            override = await memory.get_app_setting(prompt_key(name))
+            if override:
+                library.set_override(name, override)
         flow = memory_flow_from_settings(
             settings, memory, GatewayExtractor(llm, library), estimate_tokens
         )
@@ -110,6 +123,12 @@ class Application:
             settings.services.web_url, timeout_sec=float(settings.services.timeout_sec)
         )
         mcp = McpManager(settings.mcp, environ=env) if settings.mcp.enabled else None
+        if mcp is not None:
+            mcp_policy = await load_mcp_policy(memory)
+            mcp.apply_policy(
+                enabled=mcp_policy.enabled,
+                servers={name: server.to_dict() for name, server in mcp_policy.servers.items()},
+            )
         factory = RuntimeFactory(
             loaded=loaded,
             gateway=llm,
@@ -193,6 +212,128 @@ class Application:
 
     # ------------------------------------------------------------------ 对 API 的依赖
 
+    # ------------------------------------------------------------------ 界面覆盖层
+
+    def _skill_records(
+        self, workspace_root: Path, sources: Mapping[str, bool]
+    ) -> list[dict[str, object]]:
+        registry = SkillRegistry.scan(
+            skill_roots_from_settings(
+                self.loaded.settings,
+                workspace_root,
+                global_dir=self.loaded.home / "skills",
+                sources=sources,
+            ),
+            skill_limits_from_settings(self.loaded.settings),
+        )
+        return [
+            {
+                "name": record.name,
+                "source": record.source,
+                "description": record.description,
+                "triggers": list(record.triggers),
+                "required_tools": list(record.required_tools),
+                "high_privilege": list(record.high_privilege),
+                "warnings": list(record.warnings),
+                "body": record.body,
+                "helper_files": {k: list(v) for k, v in record.helper_files.items()},
+            }
+            for record in registry.records()
+        ]
+
+    async def skill_catalog(self) -> list[dict[str, Any]]:
+        policy = await load_skill_policy(self.memory)
+        cfg = self.loaded.settings.skills
+        effective = {
+            "builtin": policy.source_enabled("builtin", cfg.allow_builtin),
+            "global": policy.source_enabled("global", cfg.allow_global),
+            "workspace": policy.source_enabled("workspace", cfg.allow_workspace),
+        }
+        out: list[dict[str, Any]] = []
+        base = self._skill_records(
+            self.loaded.home,
+            {"builtin": effective["builtin"], "global": effective["global"], "workspace": False},
+        )
+        for record in base:
+            record["enabled"] = (
+                effective[str(record["source"])] and record["name"] not in policy.disabled
+            )
+            record["trusted"] = record["source"] != "workspace"
+            record.pop("body", None)
+            record.pop("helper_files", None)
+            out.append(record)
+        for workspace in await self.memory.list_workspaces():
+            records = self._skill_records(
+                Path(workspace.root_path),
+                {"builtin": False, "global": False, "workspace": True},
+            )
+            for record in records:
+                record["enabled"] = effective["workspace"] and record["name"] not in policy.disabled
+                record["trusted"] = False
+                record["workspace_id"] = workspace.workspace_id
+                record["workspace_name"] = workspace.name
+                record.pop("body", None)
+                record.pop("helper_files", None)
+                out.append(record)
+        return out
+
+    async def skill_body(self, name: str, workspace_id: str | None = None) -> dict[str, Any] | None:
+        if workspace_id is None:
+            records = self._skill_records(
+                self.loaded.home,
+                {"builtin": True, "global": True, "workspace": False},
+            )
+            return next((r for r in records if r["name"] == name), None)
+        workspace = await self.memory.get_workspace(workspace_id)
+        records = self._skill_records(
+            Path(workspace.root_path),
+            {"builtin": False, "global": False, "workspace": True},
+        )
+        return next((r for r in records if r["name"] == name), None)
+
+    async def generate_title(self, session_id: str) -> str | None:
+        """首轮后生成标题：优先用会话选择的端点，失败时退回首条消息。"""
+        turn = await self.memory.first_user_turn(session_id)
+        if turn is None:
+            return None
+        compact = " ".join(turn.content.split())
+        for stop in ("。", "！", "？", ".", "!", "?"):
+            compact = compact.split(stop, 1)[0]
+        fallback = compact[:24].rstrip("，,；;：: ") or None
+        prefs = SessionPreferences.from_mapping(await self.memory.get_session_settings(session_id))
+        preferred = prefs.model
+        tier = "fast"
+        if preferred:
+            for name, endpoints in self.loaded.endpoints.items():
+                if any(endpoint.name == preferred for endpoint in endpoints):
+                    tier = name
+                    break
+        request = LLMRequest(
+            tier=tier,  # type: ignore[arg-type]
+            messages=(
+                Message(
+                    role="system",
+                    content=(
+                        "你为一段对话生成标题。只输出标题本身：不超过 16 个汉字，"
+                        "不要引号、不要句号、不要解释。"
+                    ),
+                ),
+                Message(role="user", content=turn.content[:2000]),
+            ),
+            purpose="title",
+            max_output_tokens=512,
+            reasoning_effort="low",
+            prefer_endpoint=preferred,
+        )
+        try:
+            response = await self.factory.gateway.invoke(request)
+        except Exception as exc:  # 标题是增强项，失败不阻断任何流程
+            logger.warning("生成会话标题失败，使用首条消息兜底：{!r}", exc)
+            return fallback
+        title = " ".join(response.message.content.split())
+        title = title.strip("`'\"“”‘’#*- ").strip()
+        return (title[:60] or fallback) if title else fallback
+
     def api_services(self) -> ApiServices:
         return ApiServices(
             settings=self.loaded.settings,
@@ -211,6 +352,11 @@ class Application:
             prompts=self.factory.library,
             compact_session=self.factory.flow.compact,
             context_inspector=self.factory.inspect_context,
+            context_segment=self.factory.inspect_segment,
+            title_generator=self.generate_title,
+            skill_catalog=self.skill_catalog,
+            skill_body=self.skill_body,
+            mcp_control=self.mcp,
         )
 
     def _model_listing(self) -> list[dict[str, Any]]:

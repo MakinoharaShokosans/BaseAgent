@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Self
 
@@ -44,6 +44,10 @@ class LLMRequest:
     structured: StructuredSpec | None = None
     #: 优先尝试的端点（修复重试要回到产生坏输出的那个端点）；它失败时仍会按顺序降级
     prefer_endpoint: str | None = None
+    #: 流式输出：为真时网关走 ``stream=True``，通过 ``on_delta`` 交付增量
+    stream: bool = False
+    #: ``(kind, text)``；kind 为 ``content`` 或 ``reasoning``。不持久化
+    on_delta: Callable[[str, str], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

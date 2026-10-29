@@ -24,7 +24,7 @@ import httpx
 
 from agent_runtime.api import provision_token
 from baseagent_config import ConfigError, LoadedSettings, load_settings
-from baseagent_config.envcompat import LEGACY_PREFIX, PREFIX
+from baseagent_config.env import PREFIX
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -67,11 +67,7 @@ def config_overrides(source: Mapping[str, str]) -> dict[str, str]:
     """``BASEAGENT_<节>__<键>`` 形式的配置覆盖。它们不是密钥，sidecar 读配置时需要看到同样的值，
     否则 .env 里的覆盖只对后端生效、sidecar 仍用文件里的值。
     ``BASEAGENT_API_TOKEN`` 等不带 ``__``，不会传。"""
-    return {
-        k: v
-        for k, v in source.items()
-        if k.startswith((PREFIX, LEGACY_PREFIX)) and "__" in k.split("_", 1)[1]
-    }
+    return {k: v for k, v in source.items() if k.startswith(PREFIX) and "__" in k.split("_", 1)[1]}
 
 
 def build_services(

@@ -87,7 +87,7 @@ async def put_session_settings(
 def _app_out(svc: ApiServices, override: str | None) -> AppSettingsOut:
     return AppSettingsOut(
         system_prompt=override,
-        system_prompt_default=svc.prompts.get("system"),
+        system_prompt_default=svc.prompts.default("system"),
         system_prompt_max_chars=SYSTEM_PROMPT_MAX_CHARS,
     )
 
@@ -106,4 +106,5 @@ async def put_app_settings(body: AppSettingsIn, svc: Services) -> AppSettingsOut
         )
     override = text or None  # 空白视同恢复默认
     await svc.memory.set_app_setting(SYSTEM_PROMPT_KEY, override)
+    svc.prompts.set_override("system", override)
     return _app_out(svc, override)

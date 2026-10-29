@@ -119,6 +119,9 @@ class McpManager:
         }
         self._locks = {name: asyncio.Lock() for name in self._servers}
         self._idempotent: set[str] = set()
+        #: 界面覆盖层：None 表示沿用配置
+        self._global_enabled: bool | None = None
+        self._overrides: dict[str, dict[str, Any]] = {}
         self._queue: asyncio.Queue[_Cmd] | None = None
         self._owner: asyncio.Task[None] | None = None
         self._closed = False
@@ -133,15 +136,70 @@ class McpManager:
 
     @property
     def active(self) -> bool:
-        return self._cfg.enabled and any(s.config.enabled for s in self._servers.values())
+        return self._global_on() and any(self._enabled(s) for s in self._servers.values())
+
+    @property
+    def global_enabled(self) -> bool:
+        return self._global_on()
+
+    def _global_on(self) -> bool:
+        return self._cfg.enabled if self._global_enabled is None else self._global_enabled
+
+    def _enabled(self, state: ServerState) -> bool:
+        override = self._overrides.get(state.name, {}).get("enabled")
+        local = state.config.enabled if override is None else bool(override)
+        return self._global_on() and local
+
+    def _exposure(self, state: ServerState) -> str:
+        override = self._overrides.get(state.name, {}).get("exposure")
+        if override in ("pinned", "deferred"):
+            return str(override)
+        return state.config.exposure or self._cfg.exposure
+
+    def _disabled_tools(self, state: ServerState) -> list[str]:
+        raw = self._overrides.get(state.name, {}).get("disabled_tools")
+        return [str(t) for t in raw] if isinstance(raw, list) else []
+
+    def apply_policy(
+        self,
+        *,
+        enabled: bool | None,
+        servers: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        """应用界面覆盖层；运行中的连接保留，但不再暴露为工具，下次任务才按新状态装配。"""
+        self._global_enabled = enabled
+        self._overrides = {name: dict(values) for name, values in servers.items()}
+        for state in self._servers.values():
+            if not self._enabled(state):
+                state.status = "disabled"
+                state.last_error = ""
+            elif state.status == "disabled":
+                state.status = "idle"
+
+    def server_status(self, name: str) -> dict[str, Any] | None:
+        state = self._servers.get(name)
+        if state is None:
+            return None
+        return self._status_of(state)
+
+    async def reconnect(self, name: str) -> dict[str, Any] | None:
+        state = self._servers.get(name)
+        if state is None:
+            return None
+        if state.session is not None:
+            await self._drop(state, state.session, "手动重连")
+        state.failures, state.retry_after, state.last_error = 0, 0.0, ""
+        if self._enabled(state):
+            await self._ensure(name)
+        return self._status_of(state)
 
     def is_idempotent(self, exposed_name: str) -> bool:
         return exposed_name in self._idempotent
 
     def exposure_of(self, server: str) -> str:
-        """服务器的暴露方式：自己的配置优先，否则用全局默认。"""
+        """服务器的暴露方式：界面覆盖 > 自己的配置 > 全局默认。"""
         state = self._servers.get(server)
-        return (state.config.exposure if state else "") or self._cfg.exposure
+        return self._exposure(state) if state else self._cfg.exposure
 
     async def tools(self) -> list[Any]:
         """工具适配器。任务准备阶段调用：连接缺失的服务器、重新列出并重新消毒；
@@ -150,15 +208,26 @@ class McpManager:
 
         if not self.active or self._closed:
             return []
-        await asyncio.gather(*(self._ensure(name) for name in self._servers))
+        await asyncio.gather(
+            *(self._ensure(name) for name, state in self._servers.items() if self._enabled(state))
+        )
         pairs = [
-            (state.name, tool.name) for state in self._servers.values() for tool in state.known
+            (state.name, tool.name)
+            for state in self._servers.values()
+            if self._enabled(state)
+            for tool in state.known
+            if tool.name not in self._disabled_tools(state)
         ]
         names = assign_names(pairs, self._cfg.exposed_name_max_len)
         out: list[McpTool] = []
         self._idempotent = set()
         for state in self._servers.values():
+            if not self._enabled(state):
+                continue
+            disabled = self._disabled_tools(state)
             for tool in state.known:  # 暂时断开的服务器仍在：调用时返回失败，索引保持稳定
+                if tool.name in disabled:
+                    continue
                 exposed = names[(state.name, tool.name)]
                 idem = any(fnmatch.fnmatchcase(tool.name, p) for p in state.config.idempotent_tools)
                 if idem:
@@ -209,25 +278,37 @@ class McpManager:
         return ToolResult(ok=True, content=text, duration_ms=elapsed)
 
     def status(self) -> list[dict[str, Any]]:
-        """自省：每个服务器的状态、工具数、被拒工具与原因、最近错误。不含命令行参数与环境变量。"""
+        """自省：每个服务器的状态、工具数、被拒工具与原因、最近错误。不含环境变量值。"""
+        return [self._status_of(state) for state in self._servers.values()]
+
+    def _status_of(self, state: ServerState) -> dict[str, Any]:
         now = self._clock()
-        out: list[dict[str, Any]] = []
-        for state in self._servers.values():
-            out.append(
-                {
-                    "name": state.name,
-                    "transport": state.config.transport,
-                    "status": state.status,
-                    "tool_count": len(state.tools),
-                    "tools": [t.name for t in state.tools],
-                    "rejected": [{"tool": r.tool, "reason": r.reason} for r in state.rejected],
-                    "last_error": state.last_error,
-                    "retry_in_sec": max(0, round(state.retry_after - now))
-                    if state.status == "failed"
-                    else 0,
-                }
-            )
-        return out
+        disabled_tools = self._disabled_tools(state)
+        preview = self._command_preview(state)
+        visible = [t.name for t in state.tools if t.name not in disabled_tools]
+        return {
+            "name": state.name,
+            "transport": state.config.transport,
+            "status": state.status,
+            "enabled": self._enabled(state),
+            "exposure": self._exposure(state),
+            "disabled_tools": disabled_tools,
+            "command_preview": preview,
+            "tool_count": len(visible),
+            "tools": visible,
+            "rejected": [{"tool": r.tool, "reason": r.reason} for r in state.rejected],
+            "last_error": state.last_error,
+            "retry_in_sec": max(0, round(state.retry_after - now))
+            if state.status == "failed"
+            else 0,
+        }
+
+    def _command_preview(self, state: ServerState) -> str:
+        cfg = state.config
+        if cfg.transport == "sse":
+            return cfg.url
+        parts = [cfg.command, *cfg.args]
+        return " ".join(part for part in parts if part)
 
     async def aclose(self) -> None:
         self._closed = True
@@ -250,7 +331,7 @@ class McpManager:
 
     async def _ensure(self, name: str) -> None:
         state = self._servers[name]
-        if state.status == "disabled":
+        if not self._enabled(state):
             return
         async with self._locks[name]:
             # 刷新失败：连接已被丢弃，就在本任务里重新握手一次，不让它白白错过一个任务

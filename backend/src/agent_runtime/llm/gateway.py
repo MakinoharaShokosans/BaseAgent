@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import random
 import re
@@ -13,14 +14,14 @@ import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Final, NoReturn
+from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 import openai
 from loguru import logger
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from agent_runtime.core import Message
+from agent_runtime.core import Message, ToolCall
 from agent_runtime.llm.errors import (
     EndpointFailure,
     FailureKind,
@@ -274,6 +275,101 @@ class LLMGateway:
                 return response
         self._raise_exhausted(call)
 
+    async def _stream_once(
+        self,
+        rt: _Runtime,
+        kwargs: dict[str, Any],
+        request: LLMRequest,
+        *,
+        call_timeout: float,
+    ) -> ParsedCompletion:
+        """流式调用并交付增量；返回值与整条响应同构，重试/降级沿用外层逻辑。"""
+        from agent_runtime.llm.tokens import estimate_completion_tokens, estimate_prompt_tokens
+
+        stream = await rt.client.chat.completions.create(
+            **kwargs, stream=True, timeout=call_timeout
+        )
+        content: list[str] = []
+        reasoning: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        finish = ""
+        field = rt.endpoint.capabilities.reasoning_field
+
+        async def delta(kind: str, text: str) -> None:
+            if request.on_delta is not None:
+                await request.on_delta(kind, text)
+
+        async for chunk in stream:
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            if getattr(choice, "finish_reason", None):
+                finish = str(choice.finish_reason)
+            part = getattr(choice, "delta", None)
+            if part is None:
+                continue
+            text = getattr(part, "content", None)
+            if isinstance(text, str) and text:
+                content.append(text)
+                await delta("content", text)
+            thought = getattr(part, field, None) if field else None
+            if isinstance(thought, str) and thought:
+                reasoning.append(thought)
+                await delta("reasoning", thought)
+            for item in getattr(part, "tool_calls", None) or ():
+                index = int(getattr(item, "index", 0) or 0)
+                slot = calls.setdefault(index, {"id": "", "name": "", "args": ""})
+                call_id = getattr(item, "id", None)
+                if call_id:
+                    slot["id"] = str(call_id)
+                function = getattr(item, "function", None)
+                if function is not None:
+                    name = getattr(function, "name", None)
+                    if name:
+                        slot["name"] = str(name)
+                    arguments = getattr(function, "arguments", None)
+                    if isinstance(arguments, str):
+                        slot["args"] += arguments
+
+        parsed_calls: list[ToolCall] = []
+        for index in sorted(calls):
+            slot = calls[index]
+            raw = slot["args"] or "{}"
+            try:
+                args = json.loads(raw)
+            except ValueError as exc:
+                raise LLMInvalidResponse(f"流式工具参数不是合法 JSON：{raw[:80]}") from exc
+            if not isinstance(args, dict):
+                raise LLMInvalidResponse("流式工具参数必须是 JSON 对象")
+            parsed_calls.append(
+                ToolCall(
+                    id=slot["id"] or f"call_{index + 1}",
+                    name=slot["name"],
+                    args=args,
+                )
+            )
+        text_body = "".join(content)
+        reason = "".join(reasoning) or None
+        if not text_body and not parsed_calls:
+            raise LLMInvalidResponse("流式响应既没有内容也没有工具调用")
+        message = Message(
+            role="assistant",
+            content=text_body,
+            tool_calls=tuple(parsed_calls),
+            reasoning=reason,
+            produced_by=rt.endpoint.name,
+        )
+        prompt_tokens = estimate_prompt_tokens(request.messages, request.tools)
+        completion_tokens = estimate_completion_tokens(message)
+        usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            estimated=True,
+        )
+        return ParsedCompletion(message, usage, finish or "stop", {})
+
     def _raise_exhausted(self, call: _Call) -> NoReturn:
         failures = tuple(call.failures)
         real = [f for f in failures if f.kind != "blocked"]
@@ -341,14 +437,25 @@ class LLMGateway:
             began = self._clock()
             try:
                 async with rt.limiter.slot():
-                    completion = await rt.client.chat.completions.create(**kwargs, timeout=timeout)
-                parsed = parse_completion(
-                    rt.endpoint,
-                    completion,
-                    call.request,
-                    safety_factor=self._cfg.usage.estimate_safety_factor,
-                    estimate_when_missing=self._cfg.usage.estimate_when_missing,
-                )
+                    if (
+                        call.request.stream
+                        and call.request.on_delta is not None
+                        and rt.endpoint.capabilities.streaming
+                    ):
+                        parsed = await self._stream_once(
+                            rt, kwargs, call.request, call_timeout=timeout
+                        )
+                    else:
+                        completion = await rt.client.chat.completions.create(
+                            **kwargs, timeout=timeout
+                        )
+                        parsed = parse_completion(
+                            rt.endpoint,
+                            completion,
+                            call.request,
+                            safety_factor=self._cfg.usage.estimate_safety_factor,
+                            estimate_when_missing=self._cfg.usage.estimate_when_missing,
+                        )
             except LLMInvalidResponse as exc:
                 kind, error_class, message, retry_after, rate_limited = (
                     "transient",

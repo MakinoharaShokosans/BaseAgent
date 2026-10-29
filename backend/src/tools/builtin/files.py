@@ -463,6 +463,7 @@ class WriteFileTool(AgentTool):
             ok=True,
             content=f"已写入 {rel}（{len(content)} 字符，{len(data)} 字节{note}）"
             + _syntax_note(rel, content),
+            meta={"changed_files": [rel]},
         )
 
     def _backup(self, path: Path, rel: str) -> bool:
@@ -625,6 +626,7 @@ class EditFileTool(WriteFileTool):
         return ToolResult(
             ok=True,
             content=f"{head}\n{_diff_preview(before, work)}" + _syntax_note(rel, out_text),
+            meta={"changed_files": [rel]},
         )
 
 

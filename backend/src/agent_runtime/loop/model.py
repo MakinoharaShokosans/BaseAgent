@@ -39,6 +39,8 @@ class ModelDeps:
     #: 单次模型调用的超时秒数；None 表示不限
     call_timeout_sec: float | None = None
     reasoning_effort: Effort | None = None
+    #: 流式增量；None 表示等整条响应
+    on_delta: Callable[[str, str], Awaitable[None]] | None = None
 
 
 def make_model_step(deps: ModelDeps) -> ModelStep:
@@ -49,6 +51,8 @@ def make_model_step(deps: ModelDeps) -> ModelStep:
             tools=tuple(deps.tools) or None,
             purpose="agent",
             reasoning_effort=deps.reasoning_effort,
+            stream=deps.on_delta is not None,
+            on_delta=deps.on_delta,
         )
         try:
             async with asyncio.timeout(deps.call_timeout_sec):

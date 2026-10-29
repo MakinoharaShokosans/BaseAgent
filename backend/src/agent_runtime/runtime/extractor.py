@@ -108,13 +108,13 @@ class StructuredInvoker(Protocol):
 class GatewayExtractor:
     def __init__(self, gateway: StructuredInvoker, library: PromptLibrary) -> None:
         self._gateway = gateway
-        self._system = library.get("compactor")
+        self._library = library
 
     async def __call__(self, request: ExtractionRequest) -> Extraction | None:
         llm_request = LLMRequest(
             tier="fast",
             messages=(
-                Message(role="system", content=self._system),
+                Message(role="system", content=self._library.get("compactor")),
                 Message(role="user", content=render_input(request)),
             ),
             purpose="compactor",

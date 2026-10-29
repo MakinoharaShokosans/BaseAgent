@@ -161,6 +161,7 @@ def make_tool_runner(
         for r in resolved:
             call = r.call
             pre = synthetic.get(r.id)
+            detail: dict[str, object] = {"call_id": r.id}
             if pre is not None:
                 content, failed = pre.text, pre.counts_as_failure
             elif call.name in SCRATCH_TOOLS:
@@ -177,22 +178,35 @@ def make_tool_runner(
                     tool_name=r.target.name,
                     taken=artifacts.keys(),
                 )
+                artifact_id = result.artifact_id
                 if governed.artifact_id and governed.artifact_path:
                     artifacts[governed.artifact_id] = governed.artifact_path
+                    artifact_id = artifact_id or governed.artifact_id
                 content, failed = governed.summary, result.failed
                 if result.artifact_id and result.artifact_path:
                     own = _unique_id(result.artifact_id, artifacts)
                     artifacts[own] = result.artifact_path
+                    artifact_id = own
                     if result.is_truncated:
                         content += f"\n[完整输出: artifact://{own}]"
                 if item.trust == "untrusted" and deps.envelope is not None:
                     content = deps.envelope(r.target.name, item.trust, content)  # 裁剪之后再包
+                detail.update(
+                    artifact_id=artifact_id or _artifact_of(content) or "",
+                    duration_ms=result.duration_ms,
+                    exit_code=result.exit_code,
+                    truncated=bool(result.is_truncated or governed.truncated),
+                    bytes=len(result.content.encode("utf-8")),
+                )
+                changed = result.meta.get("changed_files")
+                if isinstance(changed, list):
+                    detail["changed_files"] = changed
+                if result.meta.get("timed_out") is True:
+                    detail["timed_out"] = True
             failures += failed
-            await _emit(
-                deps,
-                "tool.observed",
-                {"call_id": r.id, "ok": not failed, "artifact_id": _artifact_of(content)},
-            )
+            detail["ok"] = not failed
+            detail.setdefault("artifact_id", _artifact_of(content) or "")
+            await _emit(deps, "tool.observed", detail)
             messages.append(
                 Message(role="tool", content=content, tool_call_id=r.id, name=call.name)
             )

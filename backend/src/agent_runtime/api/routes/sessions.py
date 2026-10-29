@@ -17,16 +17,29 @@ from agent_runtime.api.schemas import (
     ForkRequest,
     SessionMemoryOut,
     SessionOut,
+    SessionUpdate,
     TaskOut,
     TurnOut,
 )
-from agent_runtime.memory import Fact, Failure
+from agent_runtime.memory import Fact, Failure, SessionInfo
 from agent_runtime.memory.errors import MemoryError_, SessionNotFound
 from agent_runtime.runtime.service import TaskStateConflictError
 
 router = APIRouter(tags=["sessions"])
 Services = Annotated[ApiServices, Depends(services_of)]
 SessionId = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+
+
+def session_out(info: SessionInfo) -> SessionOut:
+    return SessionOut(
+        session_id=info.session_id,
+        workspace_id=info.workspace_id,
+        created_at=info.created_at,
+        title=info.title,
+        pinned=info.pinned,
+        archived=info.archived,
+        updated_at=info.updated_at,
+    )
 
 
 def _fact(f: Fact) -> FactOut:
@@ -47,10 +60,35 @@ def _failure(f: Failure) -> FailureOut:
 
 @router.get("/sessions/{session_id}", response_model=SessionOut)
 async def get_session(session_id: SessionId, svc: Services) -> SessionOut:
-    info = await svc.memory.get_session(session_id)
-    return SessionOut(
-        session_id=info.session_id, workspace_id=info.workspace_id, created_at=info.created_at
+    return session_out(await svc.memory.get_session(session_id))
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionOut)
+async def update_session(session_id: SessionId, body: SessionUpdate, svc: Services) -> SessionOut:
+    fields = body.model_fields_set
+    if "title" in fields and body.title is not None and len(body.title) > 120:
+        raise ApiError(422, "VALIDATION_ERROR", "标题不能超过 120 个字符")
+    info = await svc.memory.update_session(
+        session_id,
+        title=body.title if "title" in fields else None,
+        pinned=body.pinned if "pinned" in fields else None,
+        archived=body.archived if "archived" in fields else None,
     )
+    return session_out(info)
+
+
+@router.post("/sessions/{session_id}/title", response_model=SessionOut)
+async def generate_title(session_id: SessionId, svc: Services) -> SessionOut:
+    """按首轮对话生成标题；已有标题时直接返回，生成失败保留空标题由前端兜底。"""
+    info = await svc.memory.get_session(session_id)
+    if info.title:
+        return session_out(info)
+    if svc.title_generator is None:
+        return session_out(info)
+    title = await svc.title_generator(session_id)
+    if title:
+        info = await svc.memory.update_session(session_id, title=title)
+    return session_out(info)
 
 
 @router.post("/sessions/{session_id}/fork", response_model=SessionOut, status_code=201)
@@ -66,10 +104,7 @@ async def fork_session(
         if isinstance(exc, SessionNotFound):
             raise
         raise ApiError(404, "TURN_NOT_FOUND", "该轮次不属于这个会话") from exc
-    info = await svc.memory.get_session(new_id)
-    return SessionOut(
-        session_id=info.session_id, workspace_id=info.workspace_id, created_at=info.created_at
-    )
+    return session_out(await svc.memory.get_session(new_id))
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
@@ -148,6 +183,21 @@ async def session_context(session_id: SessionId, svc: Services) -> dict[str, Any
     if svc.context_inspector is None:
         raise ApiError(503, "DEPENDENCY_UNAVAILABLE", "上下文检视未装配")
     return dict(await svc.context_inspector(session_id))
+
+
+@router.get("/sessions/{session_id}/context/segments/{segment}")
+async def context_segment(
+    session_id: SessionId,
+    segment: Annotated[str, Path(pattern=r"^[a-z_]{1,32}$")],
+    svc: Services,
+) -> dict[str, Any]:
+    await svc.memory.get_session(session_id)
+    if svc.context_segment is None:
+        raise ApiError(503, "DEPENDENCY_UNAVAILABLE", "上下文检视未装配")
+    data = await svc.context_segment(session_id, segment)
+    if data is None:
+        raise ApiError(404, "RESOURCE_NOT_FOUND", f"没有上下文分段 {segment}")
+    return dict(data)
 
 
 @router.get("/sessions/{session_id}/tasks", response_model=list[TaskOut])

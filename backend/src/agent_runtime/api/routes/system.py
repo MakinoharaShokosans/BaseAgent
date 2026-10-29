@@ -77,19 +77,9 @@ async def pick_directory(svc: Services) -> dict[str, str | None]:
 # ------------------------------------------------------------------ 自省
 
 
-@router.get("/skills")
-async def skills(svc: Services) -> list[dict[str, Any]]:
-    return svc.introspection.skills()
-
-
 @router.get("/tools")
 async def tools(svc: Services) -> list[dict[str, Any]]:
     return svc.introspection.tools()
-
-
-@router.get("/mcp/servers")
-async def mcp_servers(svc: Services) -> list[dict[str, Any]]:
-    return svc.introspection.mcp_servers()
 
 
 @router.get("/models")

@@ -22,6 +22,7 @@ from agent_runtime.api.schemas import (
     TaskOut,
 )
 from agent_runtime.observability import HEARTBEAT, Event
+from agent_runtime.runtime.overrides import load_workspace_settings
 from agent_runtime.runtime.service import TaskView
 
 router = APIRouter(tags=["tasks"])
@@ -59,11 +60,16 @@ async def submit_task(session_id: SessionId, body: TaskCreate, svc: Services) ->
             "VALIDATION_ERROR",
             f"task_goal 超过上限 {svc.settings.server.task_goal_max_chars} 字符",
         )
+    level = body.permission_level
+    if level is None:
+        info = await svc.memory.get_session(session_id)
+        ws = await load_workspace_settings(svc.memory, info.workspace_id)
+        level = ws.permission_level  # type: ignore[assignment]
     view = await svc.tasks.submit(
         session_id,
         body.task_goal,
         parent_task_id=body.parent_task_id,
-        permission_level=body.permission_level,
+        permission_level=level,
         confirm_full_permissions=body.confirm_full_permissions,
     )
     return task_out(view)
@@ -112,6 +118,9 @@ def frame(event: Event) -> str:
     body = event.to_json()
     if event.name == HEARTBEAT:
         return f"event: {HEARTBEAT}\ndata: {json.dumps({'task_id': event.task_id})}\n\n"
+    if event.seq == 0:
+        # 瞬态增量不占游标：不发 id，免得客户端把它当成可重放的事件
+        return f"event: {event.name}\ndata: {body}\n\n"
     return f"id: {event.seq}\nevent: {event.name}\ndata: {body}\n\n"
 
 

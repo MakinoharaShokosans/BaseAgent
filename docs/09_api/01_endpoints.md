@@ -16,6 +16,8 @@
 | `POST /workspaces/{id}/memory/facts` | 上浮事实到工作区记忆（用户手动沉淀） | 已有 |
 | `POST /workspaces/{id}/memory/failures` | 记录全局避坑 | 已有 |
 | `DELETE /workspaces/{id}/memory/{kind}/{index}` | 删除一条记忆 | **新增**，见 [记忆 §5.2](../03_context/04_memory.md) |
+| `GET /workspaces/{id}/settings` | 工作区级默认设置 | **新增** |
+| `PUT /workspaces/{id}/settings` | 更新默认权限基线 / 默认模型 / 项目规则开关 | **新增** |
 
 ### 创建工作区
 
@@ -37,20 +39,25 @@ POST /workspaces
 |---|---|---|
 | `POST /workspaces/{id}/sessions` | 创建会话 | 已有 |
 | `GET /workspaces/{id}/sessions` | 列出会话 | 已有 |
-| `GET /sessions/{id}` | 查询会话 | 已有 |
+| `GET /sessions/{id}` | 查询会话（含 `title`、`pinned`、`archived`、`updated_at`） | 已有 |
+| `PATCH /sessions/{id}` | 更新标题 / 置顶 / 归档 | **新增** |
+| `POST /sessions/{id}/title` | 按首轮对话生成标题 | **新增** |
 | `DELETE /sessions/{id}` | 删除会话及其流水与记忆 | 已有 |
 | `POST /sessions/{id}/fork` | 复制会话为新会话（同工作区）；请求体可选 `{from_turn_id}`，只复制到该轮（含）为止；返回 201 与新会话 | **新增**，见下 |
 | `GET /sessions/{id}/turns?limit&before_id` | 分页查询对话流水 | 已有 |
 | `GET /sessions/{id}/memory` | 读取会话已压缩记忆 | 已有 |
 | `POST /sessions/{id}/memory/compact` | 手动压缩会话记忆（输入台的“压缩记忆”按钮） | 已有，见下 |
 | `GET /sessions/{id}/context` | 上下文检视：下一次请求里各段提示词的 Token 估算 | 已有，见 [提示词装配 §6](../03_context/03_prompt_assembly.md) |
+| `GET /sessions/{id}/context/segments/{segment}` | 某一段提示词的渲染全文（不含金丝雀） | **新增** |
 | `GET /sessions/{id}/tasks` | 列出会话下的任务 | **新增**，见下 |
 
 **分支。** `POST /sessions/{id}/fork` 复制对话流水（轮次 id 重新分配）与会话设置，不复制任务、检查点与产物。记忆只带分支点之前确实成立的部分：摘要水位线不超过分支点时带摘要与水位线，事实和失败记录只保留分支点之前出现过的任务产生的；水位线超过分支点则摘要已混入之后的内容，不带摘要与事实，分支里的对话保持逐字。`from_turn_id` 不属于该会话 → `404 TURN_NOT_FOUND`；源会话不存在 → `404 SESSION_NOT_FOUND`。源会话在运行任务时也可以分支（只读源）。
 
 **手动压缩。** `POST /sessions/{id}/memory/compact`（无请求体）：忽略水位线与失败退避，除最近 `active_window_turns` 条外，把较早的对话并入摘要；原始流水不删除。与收尾自动压缩共用同一把会话锁，不会并发提炼。返回 `{status, turns, memory}`，`status` 为 `compacted` 或 `nothing_to_compact`（没有可并入的轮次也没有待合并的近期新增时直接返回，不调用模型）。有任务在运行 → `409 TASK_STATE_CONFLICT`；提炼失败 → `502 COMPACTION_FAILED`，记忆与水位线保持不变；装配层没有提供压缩器 → `503 DEPENDENCY_UNAVAILABLE`。
 
-**缺口：没有任务列表接口。** 注册表有按会话列任务的方法，但没有对外路由。页面刷新或服务重启后，前端无法找回此前的任务，只能靠本地记住 `task_id`。新增 `GET /sessions/{id}/tasks?limit&before`，数据来自持久化的任务表（检查点表加任务元数据），而不是进程内存。
+**会话元数据。** `SessionOut` 增加 `title`（可空）、`pinned`、`archived`、`updated_at`。`PATCH` 只改请求里出现的字段；`title` 为空串表示清空，置顶 / 归档按布尔值写入。`POST /sessions/{id}/title` 读取首条 user 流水，用会话选择的端点生成不超过 16 个汉字的标题；模型不可用时退回首条消息的前 24 个字符，接口仍返回 200。已有标题时直接返回，不重复调用模型。标题生成失败不阻断任务。
+
+**工作区设置。** `GET/PUT /workspaces/{id}/settings` 读写 `{permission_level, model, rules_enabled}`，`null` 表示沿用配置基线；`defaults` 给出当前全局缺省。提交任务时若 `permission_level` 省略，取工作区值，再缺省取全局；工厂装配时取工作区 `model` 作为主 Agent 首选端点，并用 `rules_enabled` 覆盖 `[context.rules].allow_workspace`。改动在下一个任务生效。
 
 ### 2.1 会话设置与全局设置
 
@@ -91,6 +98,17 @@ PUT /settings
 ```
 
 `system_prompt` 替换内置的 `prompts/system.md` 作为每个任务的系统提示词段；空白字符串视同 `null`。只影响主 Agent 的系统提示词，安全相关的指令、工具说明、记忆渲染不受影响。
+
+## 2.2 提示词
+
+| 方法与路径 | 作用 | 状态 |
+|---|---|---|
+| `GET /prompts` | 列出 `prompts/*.md` 模板（名称、标题、用途、字符数、是否已覆盖） | **新增** |
+| `GET /prompts/{name}` | 当前内容、初始版本、是否覆盖、长度上限 | **新增** |
+| `PUT /prompts/{name}` | 保存覆盖；空白与超长返回 422 | **新增** |
+| `DELETE /prompts/{name}` | 删除覆盖，恢复随发行版的初始版本 | **新增** |
+
+覆盖写 `app_settings`（`system` 沿用 `system_prompt` 键，其余为 `prompt.<name>`），不修改 `prompts/*.md`。启动时加载进 `PromptLibrary`；装配层每个任务读取一次，所以改动对下一个任务生效。`GET /settings` 与 `/prompts/system` 共用同一份覆盖，二者保持一致。
 
 ## 3. 任务
 
@@ -187,12 +205,19 @@ POST /tasks/{id}/reject    { "approval_id": "appr_…", "reason": "…" }
 
 | 方法与路径 | 作用 |
 |---|---|
-| `GET /skills` | 技能列表，含来源、信任、告警、是否高权限 |
+| `GET /skills` | 技能列表（内置 / 全局 / 各工作区），含来源、信任、告警、是否高权限、是否启用 |
+| `GET /skills/sources` | 三个来源的开关与数量 |
+| `GET /skills/{name}?workspace_id` | `SKILL.md` 正文与辅助文件清单 |
+| `PUT /skills/{name}/enabled` | 逐技能启用 / 禁用 |
+| `PUT /skills/sources/{source}` | 来源级启用 / 禁用；启用工作区来源由界面二次确认 |
 | `GET /tools` | 已注册工具及其 Schema |
-| `GET /mcp/servers` | MCP 服务器状态、工具数、被拒工具与原因 |
+| `GET /mcp/servers` | MCP 服务器状态、启用状态、暴露方式、工具级禁用、命令行预览、被拒工具与原因 |
+| `GET/PUT /mcp/settings` | MCP 总开关 |
+| `PUT /mcp/servers/{name}` | 逐服务器启用、暴露方式、工具级禁用 |
+| `POST /mcp/servers/{name}/reconnect` | 断开并重新握手 |
 | `GET /models` | 各档端点（**不含密钥**），新增能力声明与熔断状态 |
 
-自省接口是只读的，用于让用户看见"系统此刻装配了什么"。注意它们暴露了配置结构，同样需要令牌保护。
+技能与 MCP 的写接口只改数据库覆盖层，不修改 `config.toml` 或技能文件；改动在下一个任务装配时生效。MCP 的命令行预览不含环境变量值。
 
 ## 8. 约定
 

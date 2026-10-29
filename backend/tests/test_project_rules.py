@@ -9,7 +9,7 @@ import pytest
 
 from agent_runtime.context import PromptLibrary, RulesCache
 
-CANDIDATES = ("CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".aegis/rules.md")
+CANDIDATES = ("CLAUDE.MD", "CLAUDE.md", "AGENTS.md", ".baseagent/rules.md")
 
 
 @pytest.fixture
@@ -41,8 +41,8 @@ def test_a_detected_file_is_not_loaded_unless_the_user_opted_in(ws: Path) -> Non
 
 @pytest.mark.unit
 def test_the_first_candidate_wins(ws: Path) -> None:
-    (ws / ".aegis").mkdir()
-    (ws / ".aegis" / "rules.md").write_text("last")
+    (ws / ".baseagent").mkdir()
+    (ws / ".baseagent" / "rules.md").write_text("last")
     (ws / "AGENTS.md").write_text("middle")
     assert load(RulesCache(), ws).rules.text == "middle"  # type: ignore[union-attr]
 

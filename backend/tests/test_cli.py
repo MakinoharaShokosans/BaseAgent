@@ -52,14 +52,14 @@ def test_sidecars_never_inherit_secrets(loaded) -> None:  # type: ignore[no-unty
 def test_sidecars_get_config_overrides_but_not_the_api_token(loaded) -> None:  # type: ignore[no-untyped-def]
     env = {
         "BASEAGENT_WEB_SEARCH__ALLOW_FAKE_IP": "true",
-        "AEGIS_BASH_SHELL__PORT": "9002",
+        "BASEAGENT_BASH_SHELL__PORT": "9002",
         "BASEAGENT_API_TOKEN": "tok",
         "BASEAGENT_PROXY_TARGET": "http://x",
         "DEEPSEEK_API_KEY": "sk-secret",
     }
     assert config_overrides(env) == {
         "BASEAGENT_WEB_SEARCH__ALLOW_FAKE_IP": "true",
-        "AEGIS_BASH_SHELL__PORT": "9002",
+        "BASEAGENT_BASH_SHELL__PORT": "9002",
     }
     services = {
         s.name: s for s in build_services(loaded, config=None, with_frontend=False, environ=env)

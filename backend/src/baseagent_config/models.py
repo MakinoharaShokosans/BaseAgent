@@ -12,12 +12,10 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
-    EnvSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
 
-from baseagent_config.envcompat import LEGACY_PREFIX
 from baseagent_config.sources import FileDataSource
 
 PosInt = Annotated[int, Field(gt=0)]
@@ -203,6 +201,8 @@ class Capabilities(_Section):
     thinking_with_tools: bool = False
     reasoning_field: str | None = None
     reasoning_passback: Literal["never", "tool_turns", "opaque", "all_when_tools"] = "never"
+    #: 端点支持流式 chat.completions；不声明时按整条响应处理
+    streaming: bool = False
 
 
 class Endpoint(_Section):
@@ -379,7 +379,6 @@ class RulesConfig(_Section):
         "CLAUDE.md",
         "AGENTS.md",
         ".baseagent/rules.md",
-        ".aegis/rules.md",
     ]
 
 
@@ -456,8 +455,6 @@ class ServicesConfig(_Section):
         "PYTHONUNBUFFERED",
         "BASEAGENT_CONFIG",
         "BASEAGENT_HOME",
-        "AEGIS_CONFIG",
-        "AEGIS_HOME",
     ]
 
 
@@ -735,7 +732,7 @@ class Settings(BaseSettings):
     """整份配置。
 
     来源优先级（高覆盖低）：显式传入 > 环境变量 ``BASEAGENT_<节>__<键>``
-    （旧名 ``AEGIS_`` 前缀仍然有效）> config.toml > 默认值。
+    > config.toml > 默认值。
     实际装配在 :func:`baseagent_config.load_settings`，直接实例化只会读环境变量和默认值。
     """
 
@@ -756,10 +753,9 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # 显式传入 > 环境变量（新前缀 > 旧前缀）> config.toml；
+        # 显式传入 > 环境变量 > config.toml；
         # 不读 .env 文件（.env 由启动脚本加载进环境）
-        legacy = EnvSettingsSource(settings_cls, env_prefix=LEGACY_PREFIX)
-        return (init_settings, env_settings, legacy, FileDataSource(settings_cls))
+        return (init_settings, env_settings, FileDataSource(settings_cls))
 
     app: AppConfig = AppConfig()
     logging: LoggingConfig = LoggingConfig()

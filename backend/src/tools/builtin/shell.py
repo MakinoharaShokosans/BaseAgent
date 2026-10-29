@@ -118,7 +118,11 @@ class BashTool(AgentTool):
 
 
 def _translate(r: ShellResponse, timeout: float) -> ToolResult:
-    meta: dict[str, Any] = {"status": r.status, "execution_time_ms": r.execution_time_ms}
+    meta: dict[str, Any] = {
+        "status": r.status,
+        "execution_time_ms": r.execution_time_ms,
+        "timed_out": r.timed_out,
+    }
     if r.status == "QUEUED":
         text = _QUEUED_TEXT
         if r.estimated_wait_sec is not None:

@@ -90,6 +90,17 @@ class EventHub:
             logger.exception("发出事件 {} 失败；任务继续", name)
             return None
 
+    async def transient(self, task_id: str, name: str, data: Mapping[str, object]) -> None:
+        """瞬态事件：不分配序号、不持久化、不进缓冲，只发给当前订阅者。
+
+        流式增量与命令实时输出用；刷新后由 ``model.reply`` / ``tool.result`` 的权威内容恢复。
+        """
+        try:
+            event = Event(task_id, 0, self._clock(), name, dict(data))
+            self._publish(event, buffer=False)
+        except Exception:
+            logger.exception("发出瞬态事件 {} 失败；任务继续", name)
+
     async def _next_seq(self, task_id: str) -> int:
         current = self._seq.get(task_id)
         if current is None:
@@ -102,22 +113,26 @@ class EventHub:
         self._seq[task_id] = current + 1
         return current + 1
 
-    def _publish(self, event: Event) -> None:
-        for sink in self._sinks:
-            try:
-                sink(event)
-            except Exception:
-                logger.warning("事件旁路 {} 失败（已忽略）", getattr(sink, "__name__", "sink"))
-        buffer = self._buffers.get(event.task_id)
-        if buffer is None:
-            buffer = self._buffers[event.task_id] = deque(maxlen=self._buffer_events)
-        buffer.append(event)
-        self._buffers.move_to_end(event.task_id)
-        self._evict_cold_tasks()
+    def _publish(self, event: Event, *, buffer: bool = True) -> None:
+        if buffer:
+            for sink in self._sinks:
+                try:
+                    sink(event)
+                except Exception:
+                    logger.warning("事件旁路 {} 失败（已忽略）", getattr(sink, "__name__", "sink"))
+        if buffer:
+            buffered = self._buffers.get(event.task_id)
+            if buffered is None:
+                buffered = self._buffers[event.task_id] = deque(maxlen=self._buffer_events)
+            buffered.append(event)
+            self._buffers.move_to_end(event.task_id)
+            self._evict_cold_tasks()
         for sub in self._subs.get(event.task_id, ()):
             try:
                 sub.queue.put_nowait(event)
             except asyncio.QueueFull:
+                if event.seq == 0:
+                    continue  # 瞬态增量丢了就丢了，不触发重连
                 if not sub.lost_from:
                     sub.lost_from = event.seq
                 sub.lost_to = event.seq
@@ -207,6 +222,9 @@ class EventHub:
                     event = await asyncio.wait_for(sub.queue.get(), timeout=heartbeat_sec)
                 except TimeoutError:
                     yield self._transport(task_id, HEARTBEAT, {})
+                    continue
+                if event.seq == 0:
+                    yield event  # 瞬态增量不推进游标
                     continue
                 if event.seq <= cursor:
                     continue

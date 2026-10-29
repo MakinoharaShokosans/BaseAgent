@@ -452,3 +452,21 @@ async def test_closing_from_another_task_recycles_every_child() -> None:
     await asyncio.create_task(m.aclose())  # 再在又一个任务里关闭
     assert all([await gone(p) for p in pids])
     assert await m.tools() == []  # 关闭后不再连接
+
+
+@pytest.mark.unit
+async def test_policy_overrides_global_and_server_state() -> None:
+    m = McpManager(config({"fx": server()}))
+    try:
+        assert m.active is True
+        m.apply_policy(enabled=False, servers={})
+        assert m.active is False
+        assert m.status()[0]["status"] == "disabled"
+        m.apply_policy(enabled=True, servers={"fx": {"enabled": False, "exposure": "pinned"}})
+        assert m.active is False
+        row = m.status()[0]
+        assert row["enabled"] is False and row["exposure"] == "pinned"
+        m.apply_policy(enabled=True, servers={"fx": {"enabled": True}})
+        assert m.status()[0]["enabled"] is True
+    finally:
+        await m.aclose()

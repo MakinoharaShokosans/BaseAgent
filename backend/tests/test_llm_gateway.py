@@ -760,7 +760,7 @@ def loaded(tmp_path: Any, config_path: Any, monkeypatch: pytest.MonkeyPatch) -> 
     from baseagent_config import load_settings
 
     for name in list(__import__("os").environ):
-        if name.startswith(("BASEAGENT_", "AEGIS_")):
+        if name.startswith("BASEAGENT_"):
             monkeypatch.delenv(name)
     monkeypatch.setenv("BASEAGENT_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("DEEPSEEK_API_KEY", SECRET)
@@ -801,3 +801,80 @@ def test_api_key_resolution() -> None:
     assert api_key_for(local, {}) == "EMPTY"
     with pytest.raises(ValueError, match="UNUSED"):
         api_key_for(cloud, {})
+
+
+@pytest.mark.unit
+async def test_streaming_accumulates_content_and_emits_deltas() -> None:
+    from types import SimpleNamespace
+
+    from agent_runtime.core import Message
+    from agent_runtime.llm import LLMRequest
+
+    chunks = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(content="he", reasoning_content="think", tool_calls=[]),
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="stop",
+                    delta=SimpleNamespace(content="llo", reasoning_content="ing", tool_calls=[]),
+                )
+            ]
+        ),
+    ]
+
+    class Stream:
+        def __aiter__(self):
+            async def walk():
+                for chunk in chunks:
+                    yield chunk
+
+            return walk()
+
+    class Completions:
+        async def create(self, **kwargs: Any):
+            assert kwargs["stream"] is True
+            return Stream()
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    ep = endpoint()
+    ep = ep.model_copy(
+        update={"capabilities": ep.capabilities.model_copy(update={"streaming": True})}
+    )
+    gw = LLMGateway(
+        {"fast": GatewayTier(0.0, (ep,))},
+        LlmConfig(),
+        client_factory=lambda _: client,  # type: ignore[arg-type]
+    )
+    rt = SimpleNamespace(endpoint=ep, client=client)
+    seen: list[tuple[str, str]] = []
+
+    async def on_delta(kind: str, text: str) -> None:
+        seen.append((kind, text))
+
+    parsed = await gw._stream_once(
+        rt,  # type: ignore[arg-type]
+        {},
+        LLMRequest(
+            tier="fast",
+            messages=(Message(role="user", content="hi"),),
+            stream=True,
+            on_delta=on_delta,
+        ),
+        call_timeout=1,
+    )
+    assert parsed.message.content == "hello"
+    assert parsed.message.reasoning == "thinking"
+    assert seen == [
+        ("content", "he"),
+        ("reasoning", "think"),
+        ("content", "llo"),
+        ("reasoning", "ing"),
+    ]
+    assert parsed.usage.total_tokens > 0

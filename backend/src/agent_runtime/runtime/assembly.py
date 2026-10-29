@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 from agent_runtime.approval import check_binding, compute_approval_id
@@ -101,30 +101,39 @@ _BUILTIN_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 
 
 def _default_global_skills_dir() -> Path:
-    """全局技能目录是 ``~/.baseagent/skills``；旧的 ``~/.aegis/skills`` 在而新的不在时沿用旧的。"""
-    new, old = Path.home() / ".baseagent" / "skills", Path.home() / ".aegis" / "skills"
-    return old if old.is_dir() and not new.exists() else new
+    """全局技能目录是 ``~/.baseagent/skills``。"""
+    return Path.home() / ".baseagent" / "skills"
 
 
 def skill_roots_from_settings(
-    settings: Settings, workspace_root: Path, *, global_dir: Path | None = None
+    settings: Settings,
+    workspace_root: Path,
+    *,
+    global_dir: Path | None = None,
+    sources: Mapping[str, bool] | None = None,
 ) -> tuple[SkillRoot, ...]:
     k = settings.skills
+    override = sources or {}
     return skill_roots(
         builtin_dir=_BUILTIN_SKILLS_DIR,
         global_dir=global_dir or _default_global_skills_dir(),
         workspace_root=workspace_root,
-        allow_builtin=k.allow_builtin,
-        allow_global=k.allow_global,
-        allow_workspace=k.allow_workspace,
+        allow_builtin=override.get("builtin", k.allow_builtin),
+        allow_global=override.get("global", k.allow_global),
+        allow_workspace=override.get("workspace", k.allow_workspace),
     )
 
 
-def rules_from_settings(settings: Settings, workspace_root: Path, cache: RulesCache) -> RulesResult:
+def rules_from_settings(
+    settings: Settings,
+    workspace_root: Path,
+    cache: RulesCache,
+    *,
+    allow_override: bool | None = None,
+) -> RulesResult:
     r = settings.context.rules
-    return cache.load(
-        workspace_root, allow=r.allow_workspace, candidates=r.candidates, max_chars=r.max_chars
-    )
+    allow = r.allow_workspace if allow_override is None else allow_override
+    return cache.load(workspace_root, allow=allow, candidates=r.candidates, max_chars=r.max_chars)
 
 
 def build_prompt_assets(
