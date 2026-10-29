@@ -58,10 +58,6 @@ def split_lines(text: str) -> list[str]:
     return parts
 
 
-def ends_with_newline(text: str) -> bool:
-    return text.endswith(("\n", "\r"))
-
-
 @dataclass(frozen=True, slots=True)
 class Decoded:
     text: str

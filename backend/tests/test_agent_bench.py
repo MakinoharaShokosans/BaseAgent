@@ -240,8 +240,8 @@ async def test_command_checks_run_in_the_workspace_with_exit_code_and_output(
 SSE = (
     'id: 1\nevent: task.started\ndata: {"event":"task.started","task_id":"t"}\n\n'
     'event: heartbeat\ndata: {"task_id":"t"}\n\n'
-    'id: 2\nevent: node.finished\ndata: {"node":"planner","stage":1}\n\n'
-    'id: 3\nevent: llm.call\ndata: {"node":"planner","tokens":100,"prompt_tokens":90,'
+    'id: 2\nevent: model.reply\ndata: {"turn":1,"content":"","tool_calls":[]}\n\n'
+    'id: 3\nevent: llm.call\ndata: {"node":"main","tokens":100,"prompt_tokens":90,'
     '"completion_tokens":10,"cache_hit_tokens":60,"cache_miss_tokens":30,"duration_ms":50,'
     '"attempts":2,"outcome":"ok"}\n\n'
     'id: 4\nevent: tool.call\ndata: {"tool":"bash"}\n\n'
@@ -257,7 +257,7 @@ def test_sse_parsing_skips_heartbeats_and_garbage() -> None:
     events = parse_sse(SSE)
     assert [e["event"] for e in events] == [
         "task.started",
-        "node.finished",
+        "model.reply",
         "llm.call",
         "tool.call",
         "tool.observed",
@@ -269,9 +269,9 @@ def test_sse_parsing_skips_heartbeats_and_garbage() -> None:
 @pytest.mark.unit
 def test_metrics_are_computed_from_events() -> None:
     m = summarize_events(parse_sse(SSE))
-    assert m.stages == {"planner": 1} and m.planner_calls == 1
+    assert m.turns == 1
     assert (m.llm_calls, m.llm_retries, m.llm_ms) == (1, 1, 50)
-    assert m.tokens_by_node == {"planner": 100} and m.prompt_tokens == 90
+    assert m.tokens_by_node == {"main": 100} and m.prompt_tokens == 90
     assert m.cache_hit_rate == pytest.approx(60 / 90)
     assert (m.tool_calls, m.tool_failures, m.loop_blocked) == (1, 1, 1)
     assert CaseMetrics().cache_hit_rate is None  # 没有数据就是没有，不是 0
@@ -308,7 +308,7 @@ def test_the_report_groups_by_category_and_ignores_skipped_cases() -> None:
     assert report["overall"]["ran"] == 3 and report["overall"]["success"] == 2
     assert report["by_category"]["bugfix"]["success_rate"] == 0.5
     assert report["by_category"]["write"]["steps_median"] == 4
-    assert report["overall"]["token_share_by_node"] == {"planner": 1.0}
+    assert report["overall"]["token_share_by_node"] == {"main": 1.0}
     assert report["overall"]["cache_hit_rate"] == pytest.approx(60 / 90)
     text = to_markdown(report)
     assert "成功率 67%" in text and "| bugfix |" in text and "用例明细" in text
@@ -360,7 +360,7 @@ async def test_a_case_runs_end_to_end_and_its_checks_are_applied(bench: Any) -> 
     [r] = await runner.run([case])
     assert r.success and r.status == "succeeded" and r.steps >= 1 and r.task_id
     assert [c.passed for c in r.checks] == [True, True]
-    assert r.metrics.stages.get("agent", 0) >= 1  # 指标来自服务端事件
+    assert r.metrics.turns >= 1  # 指标来自服务端事件
     assert runner.spent_tokens == r.total_tokens
 
 

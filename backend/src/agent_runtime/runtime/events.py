@@ -4,8 +4,7 @@
 工具是否成功这类“提交前才知道”的信息，由包装层经 ``tool.observed`` 递过来，这里只记下，
 等到该回合提交后再随 ``tool.result`` 一起发出，所以事件永远不会比可恢复的进度更远。
 
-回合事件（``model.reply``、``plan.updated``、``turn.finished``）是目标契约；迁移期间同时发出旧的
-``plan`` 与 ``node.finished``，前端改完后再去掉（见 docs/09_api/02_events_contract.md §4.1）。
+回合事件是 ``model.reply``、``plan.updated``、``turn.finished``，没有阶段事件。
 """
 
 from __future__ import annotations
@@ -82,9 +81,6 @@ class TaskEvents:
             )
         if not message.tool_calls:
             self._turn = turn
-            await self._legacy_node(
-                turn, "agent", "reply", message.content, content=message.content
-            )
 
     async def turn_finished(self, update: Mapping[str, object], state: AgentState) -> None:
         turn = self._turn + 1
@@ -105,7 +101,6 @@ class TaskEvents:
                 "tokens": self._usage(),
             },
         )
-        await self._legacy_node(turn, "tool_runner", "executed", new[-1].content if new else "")
 
     async def approval_requested(self, request: PendingApproval, state: AgentState) -> None:
         await self._hub.emit(
@@ -132,34 +127,6 @@ class TaskEvents:
     async def _plan_updated(self, state: AgentState) -> None:
         plan = [{"id": i.id, "title": i.title, "status": i.status} for i in state.plan]
         await self._hub.emit(self._task_id, "plan.updated", self._scrub({"plan": plan}))
-        await self._hub.emit(
-            self._task_id,
-            "plan",
-            self._scrub(
-                {
-                    "thought": "",
-                    "directive": "",
-                    "milestones": plan_as_milestones(state),
-                    "step": self._turn,
-                }
-            ),
-        )
-
-    async def _legacy_node(
-        self, turn: int, node: str, decision: str, text: str, **extra: object
-    ) -> None:
-        payload: dict[str, object] = {
-            "node": node,
-            "stage": turn,
-            "input_summary": "任务目标与当前进展" if node == "agent" else "待执行的工具调用",
-            "output_summary": self._redactor.text(clip(text, 300)),
-            "decision": decision,
-            "step_count": turn,
-            "total_tokens": self._usage(),
-            "should_terminate": False,
-            **extra,
-        }
-        await self._hub.emit(self._task_id, "node.finished", self._scrub(payload))
 
     async def _tool_result(self, message: Message, turn: int) -> bool:
         observed = self._observed.pop(message.tool_call_id or "", {})
@@ -331,13 +298,6 @@ _NOT_RUN_PREFIXES = (REJECTED_TEMPLATE.split("{")[0], "该调用与最近的调�
 def turns_of(state: AgentState | None) -> int:
     """回合数：模型回复的条数（统计值）。"""
     return sum(1 for m in state.messages if m.role == "assistant") if state else 0
-
-
-def plan_as_milestones(state: AgentState) -> list[dict[str, object]]:
-    """旧事件契约里的里程碑形状。"""
-    return [
-        {"id": i.id, "title": i.title, "description": "", "status": i.status} for i in state.plan
-    ]
 
 
 def delivery_of(state: AgentState | None, status: str = "succeeded", reason: str = "") -> str:

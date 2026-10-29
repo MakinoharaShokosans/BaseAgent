@@ -80,21 +80,19 @@ async def test_a_model_reply_with_tool_calls_emits_the_reply_and_one_tool_call_e
 
 
 @pytest.mark.unit
-async def test_a_final_reply_also_emits_the_legacy_node_finished_with_content(
+async def test_a_final_reply_is_a_single_model_reply_event(
     make_state: MakeState,
 ) -> None:
     hub = EventHub()
     msg = Message(role="assistant", content="答案是 4")
     await events_for(hub).model_replied(msg, make_state(messages=(msg,)))
     got = await history(hub)
-    assert names(got) == ["model.reply", "node.finished"]
-    node = got[1].data
-    assert node["decision"] == "reply" and node["content"] == "答案是 4"
-    assert node["should_terminate"] is False
+    assert names(got) == ["model.reply"]
+    assert got[0].data["content"] == "答案是 4" and got[0].data["tool_calls"] == []
 
 
 @pytest.mark.unit
-async def test_turn_finished_emits_results_then_turn_and_legacy_node(make_state: MakeState) -> None:
+async def test_turn_finished_emits_the_results_and_then_the_turn(make_state: MakeState) -> None:
     hub = EventHub()
     ev = events_for(hub)
     await ev.emit("tool.observed", {"call_id": "c1", "ok": False, "artifact_id": "obs_1"})
@@ -103,7 +101,7 @@ async def test_turn_finished_emits_results_then_turn_and_legacy_node(make_state:
     ok_tool = Message(role="tool", content="fine", tool_call_id="c2", name="view_file")
     await ev.turn_finished({"messages": [tool, ok_tool]}, make_state())
     got = await history(hub)
-    assert names(got) == ["tool.result", "tool.result", "turn.finished", "node.finished"]
+    assert names(got) == ["tool.result", "tool.result", "turn.finished"]
     bad, good = got[0].data, got[1].data
     assert bad["ok"] is False and bad["artifact_id"] == "obs_1" and bad["call_id"] == "c1"
     assert len(bad["result"]) <= 500 and "canary-abc" not in bad["result"]  # type: ignore[operator]
@@ -111,7 +109,6 @@ async def test_turn_finished_emits_results_then_turn_and_legacy_node(make_state:
     assert good["ok"] is True and good["artifact_id"] == ""
     turn = got[2].data
     assert (turn["turn"], turn["tool_count"], turn["failed_count"]) == (1, 2, 1)
-    assert got[3].data["node"] == "tool_runner" and got[3].data["decision"] == "executed"
 
 
 @pytest.mark.unit
@@ -126,7 +123,7 @@ async def test_turn_ordinals_are_monotonic_and_continue_after_a_resume(
 
 
 @pytest.mark.unit
-async def test_a_plan_update_emits_plan_updated_and_the_legacy_plan(make_state: MakeState) -> None:
+async def test_a_plan_update_emits_plan_updated(make_state: MakeState) -> None:
     hub = EventHub()
     plan = (PlanItem(id=1, title="读代码", status="in_progress"),)
     await events_for(hub).turn_finished({"messages": [], "plan": plan}, make_state(plan=plan))
@@ -134,8 +131,7 @@ async def test_a_plan_update_emits_plan_updated_and_the_legacy_plan(make_state: 
     assert got["plan.updated"].data["plan"] == [
         {"id": 1, "title": "读代码", "status": "in_progress"}
     ]
-    legacy = got["plan"].data["milestones"][0]  # type: ignore[index]
-    assert legacy["title"] == "读代码" and legacy["status"] == "in_progress"
+    assert set(got) == {"plan.updated", "turn.finished"}
 
 
 @pytest.mark.unit

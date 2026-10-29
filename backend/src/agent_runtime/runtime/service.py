@@ -29,7 +29,6 @@ from agent_runtime.runtime.events import (
     LifecycleEvents,
     approval_payload,
     delivery_of,
-    plan_as_milestones,
     turns_of,
 )
 from agent_runtime.runtime.memory_flow import MemoryFlow
@@ -63,12 +62,10 @@ class TaskView:
     status: str
     permission_level: str
     approval_request: dict[str, object] | None
-    milestones: list[dict[str, object]]
-    current_milestone_idx: int
+    plan: list[dict[str, object]]
     step_count: int
     total_tokens: int
     consecutive_errors: int
-    should_terminate: bool
     termination_reason: str
     created_at: float
     started_at: float | None
@@ -199,12 +196,10 @@ class TaskService:
             status=status,
             permission_level=record.permission_level,
             approval_request=approval_payload(pending, self._redactor) if pending else None,
-            milestones=_milestones(state),
-            current_milestone_idx=_current_index(state),
+            plan=_plan(state),
             step_count=turns_of(state) if state else record.step_count,
             total_tokens=self._usage(record.task_id) or record.total_tokens,
             consecutive_errors=state.consecutive_errors if state else 0,
-            should_terminate=status in ("terminated", "cancelled"),
             termination_reason=self._redactor.text(
                 snapshot.reason if snapshot and snapshot.reason else record.termination_reason
             ),
@@ -469,18 +464,8 @@ async def _each(*steps: Awaitable[None]) -> None:
             logger.exception("任务生命周期的一步失败；其余步骤继续")
 
 
-def _milestones(state: AgentState | None) -> list[dict[str, object]]:
-    return plan_as_milestones(state) if state is not None else []
-
-
-def _current_index(state: AgentState | None) -> int:
-    """第一条未完成的计划条目的下标；计划为空或全部完成时为 0 / 条数。"""
-    if state is None:
-        return 0
-    for index, item in enumerate(state.plan):
-        if item.status != "completed":
-            return index
-    return len(state.plan)
+def _plan(state: AgentState | None) -> list[dict[str, object]]:
+    return [{"id": i.id, "title": i.title, "status": i.status} for i in state.plan] if state else []
 
 
 def _safe_name(name: str) -> str:

@@ -32,8 +32,8 @@ def parse_sse(text: str) -> list[Event]:
 
 @dataclass(slots=True)
 class CaseMetrics:
-    #: 各阶段被执行的次数（node.finished）
-    stages: dict[str, int] = field(default_factory=dict[str, int])
+    #: 模型回复的条数（回合数）
+    turns: int = 0
     llm_calls: int = 0
     llm_calls_by_node: dict[str, int] = field(default_factory=dict[str, int])
     tokens_by_node: dict[str, int] = field(default_factory=dict[str, int])
@@ -50,8 +50,7 @@ class CaseMetrics:
     approvals: int = 0
     degraded_outputs: int = 0
     loop_blocked: int = 0
-    replan_notices: int = 0
-    planner_calls: int = 0
+    error_notices: int = 0
 
     @property
     def cache_hit_rate(self) -> float | None:
@@ -68,9 +67,8 @@ def summarize_events(events: list[Event]) -> CaseMetrics:
     m = CaseMetrics()
     for event in events:
         name = event.get("event")
-        if name == "node.finished":
-            node = str(event.get("node", "?"))
-            m.stages[node] = m.stages.get(node, 0) + 1
+        if name == "model.reply":
+            m.turns += 1
         elif name == "llm.call":
             node = str(event.get("node", "?"))
             m.llm_calls += 1
@@ -94,9 +92,8 @@ def summarize_events(events: list[Event]) -> CaseMetrics:
             m.degraded_outputs += 1
         elif name == "guard.loop_blocked":
             m.loop_blocked += 1
-        elif name in ("guard.error_notice", "guard.replan_notice"):  # 旧基线用后者
-            m.replan_notices += 1
-    m.planner_calls = m.stages.get("planner", 0)  # 没有规划阶段后恒为 0，保留字段以便对照旧基线
+        elif name == "guard.error_notice":
+            m.error_notices += 1
     return m
 
 

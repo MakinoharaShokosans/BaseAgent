@@ -141,10 +141,9 @@ class ApprovalRequestOut(_Response):
     related_actions: list[str]
 
 
-class MilestoneOut(_Response):
+class PlanItemOut(_Response):
     id: int
     title: str
-    description: str = ""
     status: str
 
 
@@ -156,12 +155,10 @@ class TaskOut(_Response):
     status: str
     permission_level: str
     approval_request: ApprovalRequestOut | None
-    milestones: list[MilestoneOut]
-    current_milestone_idx: int
+    plan: list[PlanItemOut]
     step_count: int
     total_tokens: int
     consecutive_errors: int
-    should_terminate: bool
     termination_reason: str
     created_at: float
     started_at: float | None

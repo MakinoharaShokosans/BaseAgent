@@ -93,24 +93,14 @@ def to_record(event: Event) -> dict[str, Any] | None:
         "ts": event.ts,
     }
     name = event.name
-    if name == "plan":
+    if name == "turn.finished":
         return {
             **base,
-            "type": "node",
-            "node": "planner",
-            "thought": clip(str(d.get("thought", "")), _SUMMARY),
-        }
-    if name == "node.finished":
-        return {
-            **base,
-            "type": "node",
-            "node": d.get("node", ""),
-            "phase": d.get("node", ""),
-            "stage": d.get("stage", 0),
-            "decision": d.get("decision", ""),
-            "observation_summary": d.get("output_summary", ""),
-            "step_count": d.get("step_count", 0),
-            "total_tokens": d.get("total_tokens", 0),
+            "type": "turn",
+            "turn": d.get("turn", 0),
+            "tool_count": d.get("tool_count", 0),
+            "failed_count": d.get("failed_count", 0),
+            "total_tokens": d.get("tokens", 0),
         }
     if name == "tool.call":
         args = d.get("args", {})

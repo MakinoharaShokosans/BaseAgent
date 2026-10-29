@@ -73,22 +73,12 @@ class LoggingConfig(_Section):
     retention_files: PosInt = 10
 
 
-class RetentionConfig(_Section):
-    events_days: NonNegInt = 30
-    events_max_tasks: NonNegInt = 200
-    llm_blob_days: NonNegInt = 7
-    llm_blob_max_mb: NonNegInt = 1024
-    artifacts_days: NonNegInt = 30
-    artifacts_max_mb: NonNegInt = 4096
-
-
 class StorageConfig(_Section):
     metadata_db: str = "baseagent_meta.db"
     checkpoint_db: str = "checkpoints/state.db"
     events_db: str = "events/events.db"
     traces_dir: str = "traces"
     artifacts_dir: str = "artifacts"
-    retention: RetentionConfig = RetentionConfig()
 
 
 # ==============================================================================
@@ -185,20 +175,14 @@ class LoopConfig(_Section):
     alternation_cycles: NonNegInt = 3
 
 
-class CheckpointConfig(_Section):
-    recover_on_start: bool = True
-
-
 class ApprovalConfig(_Section):
     default_level: PermissionLevel = "workspace_write"
-    expire_sec: NonNegInt = 0
     require_full_permissions_confirm: bool = True
 
 
 class RuntimeConfig(_Section):
     guardrails: GuardrailsConfig = GuardrailsConfig()
     loop: LoopConfig = LoopConfig()
-    checkpoint: CheckpointConfig = CheckpointConfig()
     approval: ApprovalConfig = ApprovalConfig()
 
 
@@ -211,7 +195,6 @@ class Capabilities(_Section):
     """端点能力声明。保守默认：什么都不假设，由配置显式打开。"""
 
     tools: bool = False
-    parallel_tools: bool = False
     json_object: bool = False
     json_schema: bool = False
     usage_in_response: bool = False
@@ -317,7 +300,6 @@ class SessionContextConfig(_Section):
     high_watermark: Ratio = 0.80
     compaction_ratio: Ratio = 0.40
     active_window_turns: PosInt = 3
-    compaction_async: bool = True
     compaction_backoff_sec: list[PosInt] = [30, 120, 600]
 
     @model_validator(mode="after")
@@ -424,8 +406,6 @@ class FilesToolsConfig(_Section):
     view_max_lines: PosInt = 400
     view_max_file_mb: PosInt = 10
     write_max_bytes: PosInt = 1_000_000
-    write_atomic: bool = True
-    backup_overwritten: bool = True
     grep_max_results: PosInt = 200
     list_dir_max_entries: PosInt = 200
     ignored_dirs: list[str] = [
@@ -539,8 +519,6 @@ class WebSearchConfig(_Section):
     max_redirects: NonNegInt = 5
     max_download_bytes: PosInt = 2_000_000
     allowed_content_types: list[str] = ["text/html", "text/plain", "application/xhtml+xml"]
-    domain_denylist: list[str] = []
-    domain_allowlist: list[str] = []
 
     _loopback = field_validator("host")(_require_loopback)
 
@@ -724,31 +702,8 @@ class McpConfig(_Section):
 
 class EventsConfig(_Section):
     persist: bool = True
-    llm_call_inline: bool = False
     summary_clip_chars: PosInt = 300
     tool_result_clip_chars: PosInt = 500
-
-
-class OtlpConfig(_Section):
-    enabled: bool = False
-    endpoint: str = "http://127.0.0.1:4318"
-    headers_env: str = "OTLP_HEADERS"
-
-
-class LangfuseConfig(_Section):
-    enabled: bool = False
-    host: str = "http://localhost:3000"
-    public_key_env: str = "LANGFUSE_PUBLIC_KEY"
-    secret_key_env: str = "LANGFUSE_SECRET_KEY"
-
-
-class TracingConfig(_Section):
-    enabled: bool = True
-    local_spans: bool = True
-    export_content: bool = False
-    queue_size: PosInt = 1000
-    otlp: OtlpConfig = OtlpConfig()
-    langfuse: LangfuseConfig = LangfuseConfig()
 
 
 class RedactionConfig(_Section):
@@ -769,16 +724,6 @@ class RedactionConfig(_Section):
 
 class SecurityConfig(_Section):
     canary_salt_file: str = "canary_salt"
-    scan_untrusted_tool_output: bool = True
-    canary_check_reasoning: bool = True
-
-
-class EvaluationConfig(_Section):
-    enabled: bool = False
-    max_steps_per_case: PosInt = 10
-    max_tokens_per_case: PosInt = 50000
-    max_total_tokens: PosInt = 1_000_000
-    report_dir: str = "eval_reports"
 
 
 # ==============================================================================
@@ -834,10 +779,8 @@ class Settings(BaseSettings):
     permissions: PermissionsConfig = PermissionsConfig()
     mcp: McpConfig = McpConfig()
     events: EventsConfig = EventsConfig()
-    tracing: TracingConfig = TracingConfig()
     redaction: RedactionConfig = RedactionConfig()
     security: SecurityConfig = SecurityConfig()
-    evaluation: EvaluationConfig = EvaluationConfig()
 
     @model_validator(mode="after")
     def _cross_section(self) -> Self:

@@ -28,6 +28,7 @@ from tools.builtin.textio import (
     eol_stats,
     show_whitespace,
     sniff_encoding,
+    split_lines,
 )
 
 _SNIFF_BYTES: Final = 8192
@@ -763,18 +764,10 @@ def _syntax_note(rel: str, content: str) -> str:
     return f"\n[语法检查] {rel} 现在有语法错误（{problem}），请立即修复。" if problem else ""
 
 
-def _match_lines(text: str, needle: str) -> list[int]:
-    lines, start = [], 0
-    while (index := text.find(needle, start)) != -1 and len(lines) < 10:
-        lines.append(text.count("\n", 0, index) + 1)
-        start = index + len(needle)
-    return lines
-
-
 def _no_match(rel: str, text: str, old: str, where: str, stats: EolStats) -> str:
     """零匹配：给出最接近的一行，帮助模型改正缩进、空白或拼写；换行混合时直接点明。"""
     first = old.strip().splitlines()[0].strip() if old.strip() else ""
-    candidates = [line for line in text.splitlines() if line.strip()]
+    candidates = [line for line in split_lines(text) if line.strip()]
     close = difflib.get_close_matches(first, [c.strip() for c in candidates], n=1, cutoff=0.6)
     hint = ""
     if close:

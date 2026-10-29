@@ -325,7 +325,7 @@ async def test_submit_returns_202_and_a_full_task_snapshot(rig: ApiRig) -> None:
     rig.world.gate = asyncio.Event()
     task = await rig.submit("修复 bug")
     assert task["status"] == "running" and task["task_goal"] == "修复 bug"
-    assert task["approval_request"] is None and task["milestones"] == []
+    assert task["approval_request"] is None and task["plan"] == []
     for key in (
         "task_id",
         "session_id",
@@ -334,20 +334,18 @@ async def test_submit_returns_202_and_a_full_task_snapshot(rig: ApiRig) -> None:
         "step_count",
         "total_tokens",
         "consecutive_errors",
-        "should_terminate",
         "termination_reason",
         "created_at",
         "started_at",
         "finished_at",
         "artifact_count",
-        "current_milestone_idx",
     ):
         assert key in task
     rig.world.gate.set()
     await settle(rig, task["task_id"])
     done = (await rig.client.get(f"{V1}/tasks/{task['task_id']}", headers=HEADERS)).json()
     assert done["status"] == "succeeded" and done["step_count"] == 2  # 回合数
-    assert done["milestones"] == []  # 没有写过计划（update_plan）
+    assert done["plan"] == []  # 没有写过计划（update_plan）
 
 
 @pytest.mark.unit
@@ -477,7 +475,7 @@ async def test_a_security_terminated_task_cannot_be_resumed(rig: ApiRig) -> None
     tid = (await rig.submit())["task_id"]
     await settle(rig, tid)
     view = (await rig.client.get(f"{V1}/tasks/{tid}", headers=HEADERS)).json()
-    assert view["status"] == "terminated" and view["should_terminate"] is True
+    assert view["status"] == "terminated" and "should_terminate" not in view
     rig.world.leak = False
     again = await rig.client.post(f"{V1}/tasks/{tid}/resume", headers=HEADERS)
     assert again.status_code == 409 and err(again)["code"] == "TASK_STATE_CONFLICT"
@@ -590,16 +588,16 @@ async def test_stream_replays_a_finished_task_in_order_and_closes(rig: ApiRig) -
 
 
 @pytest.mark.unit
-async def test_node_finished_carries_a_stage_ordinal_that_is_not_the_envelope_seq(
+async def test_turn_finished_carries_a_turn_ordinal_that_is_not_the_envelope_seq(
     rig: ApiRig,
 ) -> None:
-    """阶段序号和事件序号是两回事；同名会被信封覆盖，客户端就拿不到阶段序号。"""
+    """回合序号和事件序号是两回事；同名会被信封覆盖，客户端就拿不到回合序号。"""
     task = await rig.submit()
     await settle(rig, task["task_id"])
     text = (await rig.client.get(f"{V1}/tasks/{task['task_id']}/stream", headers=HEADERS)).text
-    nodes = [json.loads(f["data"]) for f in parse_sse(text) if f["event"] == "node.finished"]
-    assert [n["stage"] for n in nodes] == list(range(1, len(nodes) + 1))
-    assert all(n["seq"] > n["stage"] for n in nodes)
+    turns = [json.loads(f["data"]) for f in parse_sse(text) if f["event"] == "turn.finished"]
+    assert [t["turn"] for t in turns] == list(range(1, len(turns) + 1)) and turns
+    assert all(t["seq"] > t["turn"] for t in turns)
 
 
 @pytest.mark.unit

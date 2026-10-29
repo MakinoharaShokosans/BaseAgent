@@ -188,7 +188,7 @@ async def test_a_task_runs_from_submission_to_delivery_with_a_real_tool(stack: A
     task = (await client.get(f"{V1}/tasks/{tid}", headers=HEADERS)).json()
     assert task["status"] == "succeeded", task
     assert (workspace / "hello.txt").read_text() == "hi"
-    assert task["milestones"][0]["title"] == "写入文件" and task["step_count"] == 2  # 回合数
+    assert task["plan"][0]["title"] == "写入文件" and task["step_count"] == 2  # 回合数
 
     stream = (await client.get(f"{V1}/tasks/{tid}/stream", headers=HEADERS)).text
     names = event_names(stream)
@@ -199,10 +199,9 @@ async def test_a_task_runs_from_submission_to_delivery_with_a_real_tool(stack: A
         "turn.finished",
         "tool.call",
         "tool.result",
-        "node.finished",
-        "plan",
     ):
         assert expected in names
+    assert "node.finished" not in names and "plan" not in names  # 旧的阶段事件已经取消
     assert last_data(stream)["delivery"] == "已写入 hello.txt"
 
     # 第二次模型调用看得到草稿回显，且没有任何预算、阶段指令
@@ -672,7 +671,7 @@ async def test_the_trajectory_records_what_was_done_and_is_removed_with_the_task
     records = [json.loads(line) for line in trace.text.splitlines()]
     assert all(r["v"] == 2 for r in records)
     kinds = {r["type"] for r in records}
-    assert {"node", "tool", "final"} <= kinds
+    assert {"turn", "tool", "final"} <= kinds
     call = next(r for r in records if r["type"] == "tool" and "tool_args" in r)
     assert (
         call["tool_name"] == "write_file" and call["tool_args"]["path"] == "hello.txt"

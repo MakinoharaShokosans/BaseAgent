@@ -47,15 +47,6 @@ events_db = "events/events.db"      # 任务事件持久化
 traces_dir = "traces"               # 轨迹、span、llm.call 外置内容
 artifacts_dir = "artifacts"         # 被裁剪的观察值、命令全量日志、网页正文
 
-[storage.retention]
-# 到期或超量时在启动与每日清理。0 表示不按该维度清理。
-events_days = 30
-events_max_tasks = 200
-llm_blob_days = 7
-llm_blob_max_mb = 1024
-artifacts_days = 30
-artifacts_max_mb = 4096
-
 
 # ------------------------------------------------------------------------------
 # 4. HTTP API 接入层
@@ -106,12 +97,8 @@ model_tier = "reasoning"            # 主循环使用的模型档
 call_timeout_sec = 300              # 单次模型调用超时；超时按模型错误处理
 alternation_cycles = 3              # 摆动（A、B、A、B…）检测的周期数；0 关闭
 
-[runtime.checkpoint]
-recover_on_start = true             # 启动时扫描未完成任务（标记失败待续跑 / 恢复为待审批）
-
 [runtime.approval]
 default_level = "workspace_write"   # 新任务默认权限基线: read_only | workspace_write | full_permissions
-expire_sec = 0                      # 待审批请求自动过期秒数；0 = 不过期
 require_full_permissions_confirm = true   # 以 full_permissions 提交任务需显式确认字段
 
 
@@ -134,7 +121,6 @@ reasoning_effort = "high"           # low | medium | high | max；不写则不�
 
 [models.reasoning.endpoints.capabilities]
 tools = true
-parallel_tools = true               # 待验证
 json_object = true
 json_schema = false                 # 文档未提及，按不支持
 usage_in_response = true
@@ -158,7 +144,6 @@ max_output_tokens = 8192
 
 [models.fast.endpoints.capabilities]
 tools = true
-parallel_tools = true               # 待验证
 json_object = true
 json_schema = false
 usage_in_response = true
@@ -224,7 +209,6 @@ token_limit = 32000                 # 活跃（未压缩）对话的 Token 预�
 high_watermark = 0.80               # 达到比例触发压缩
 compaction_ratio = 0.40             # 一次压到该比例（滞回，少次大批量）
 active_window_turns = 3             # 保底保留的最少原文轮数
-compaction_async = true             # 先提交任务终态，再异步压缩
 compaction_backoff_sec = [30, 120, 600]   # 压缩失败后的退避序列
 
 [context.task]
@@ -277,8 +261,6 @@ goal_echo_chars = 300               # 草稿回显第一行重复任务目标的
 view_max_lines = 400                # 单次 view_file / read_artifact 返回行数上限
 view_max_file_mb = 10               # 全量读取的文件大小上限；超过只允许指定行范围
 write_max_bytes = 1_000_000
-write_atomic = true
-backup_overwritten = true           # 覆盖前在任务产物目录留副本
 grep_max_results = 200
 list_dir_max_entries = 200
 ignored_dirs = [".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache", "coverage", "htmlcov", ".cache"]
@@ -353,8 +335,6 @@ allowed_ports = [80, 443]
 max_redirects = 5
 max_download_bytes = 2_000_000
 allowed_content_types = ["text/html", "text/plain", "application/xhtml+xml"]
-domain_denylist = []                # 可选：域名黑名单
-domain_allowlist = []               # 可选：非空时只允许这些域名
 
 
 # ------------------------------------------------------------------------------
@@ -510,26 +490,8 @@ env = {}
 # ------------------------------------------------------------------------------
 [events]
 persist = true
-llm_call_inline = false             # llm.call 事件不内联完整消息体，只带摘要和 blob 引用
 summary_clip_chars = 300            # 摘要类字段强制限长
 tool_result_clip_chars = 500
-
-[tracing]
-enabled = true
-local_spans = true                  # 写本地 .spans.jsonl
-export_content = false              # 提示词与载荷是否导出到外部（远程导出时务必谨慎）
-queue_size = 1000                   # 导出队列；满了丢弃最旧的并计数
-
-[tracing.otlp]
-enabled = false
-endpoint = "http://127.0.0.1:4318"
-headers_env = "OTLP_HEADERS"        # 引用环境变量，不存明文
-
-[tracing.langfuse]
-enabled = false                     # 需要安装可选依赖
-host = "http://localhost:3000"
-public_key_env = "LANGFUSE_PUBLIC_KEY"
-secret_key_env = "LANGFUSE_SECRET_KEY"
 
 [redaction]
 enabled = true
@@ -542,16 +504,3 @@ value_patterns = ['sk-[A-Za-z0-9]{16,}', 'ghp_[A-Za-z0-9]{20,}', 'AKIA[0-9A-Z]{1
 # ------------------------------------------------------------------------------
 [security]
 canary_salt_file = "canary_salt"    # 首次启动生成并保存（权限 0600），不再使用源码里的固定盐
-scan_untrusted_tool_output = true   # 对不可信工具的输出做注入样态扫描并标注（不拦截）
-canary_check_reasoning = true       # 金丝雀泄露检测覆盖思考内容
-
-
-# ------------------------------------------------------------------------------
-# 20. 评测（默认不运行，需显式触发）
-# ------------------------------------------------------------------------------
-[evaluation]
-enabled = false
-max_steps_per_case = 10
-max_tokens_per_case = 50000
-max_total_tokens = 1000000
-report_dir = "eval_reports"

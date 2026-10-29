@@ -47,7 +47,6 @@ _PATH_FIELDS = (
     "bash_shell.artifacts_dir",
     "web_search.artifacts_dir",
     "security.canary_salt_file",
-    "evaluation.report_dir",
 )
 
 
@@ -75,7 +74,6 @@ class ResolvedPaths:
     bash_artifacts_dir: Path
     web_artifacts_dir: Path
     canary_salt: Path
-    eval_report_dir: Path
 
 
 @dataclass(frozen=True)
@@ -340,7 +338,6 @@ def _resolve_paths(settings: Settings, home: Path, problems: list[str]) -> Resol
         bash_artifacts_dir=resolved["bash_shell.artifacts_dir"],
         web_artifacts_dir=resolved["web_search.artifacts_dir"],
         canary_salt=resolved["security.canary_salt_file"],
-        eval_report_dir=resolved["evaluation.report_dir"],
     )
 
 

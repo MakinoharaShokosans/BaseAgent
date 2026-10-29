@@ -85,7 +85,7 @@ def test_settings_are_immutable(reference: dict[str, Any]) -> None:
         "runtime.guardrails.max_step",
         "models.reasoning.endpoints.0.context_windw",
         "mcp.servers.github.comand",
-        "tracing.otlp.endpont",
+        "storage.artifacts_dri",
     ],
 )
 def test_unknown_key_is_rejected(reference: dict[str, Any], dotted: str) -> None:

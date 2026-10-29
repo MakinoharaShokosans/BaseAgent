@@ -14,7 +14,6 @@ from agent_runtime.core import AgentState, ToolCall
 
 MCP_CALL: Final = "mcp_call"
 MCP_DESCRIBE: Final = "mcp_describe"
-PROXY_TOOLS: Final = frozenset({MCP_CALL, MCP_DESCRIBE})
 
 
 @dataclass(frozen=True, slots=True)

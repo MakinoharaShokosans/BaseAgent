@@ -140,7 +140,7 @@ async def test_finished_task_updates_metadata_and_events(rig: Rig) -> None:
     await rig.service.runner.wait(view.task_id)
     done = await rig.service.get(view.task_id)
     assert done.status == "succeeded" and done.finished_at is not None
-    assert done.step_count == 2 and done.milestones == []  # 回合数；没有写过计划
+    assert done.step_count == 2 and done.plan == []  # 回合数；没有写过计划
     row = await rig.memory.get_task(view.task_id)
     assert row is not None and row.status == "succeeded" and row.step_count == 2
     events = await rig.hub.history(view.task_id)
@@ -183,7 +183,7 @@ async def test_a_security_termination_is_final_and_cannot_be_resumed(rig: Rig) -
     view = await rig.service.submit("s1", "g")
     await rig.service.runner.wait(view.task_id)
     done = await rig.service.get(view.task_id)
-    assert done.status == "terminated" and done.should_terminate is True
+    assert done.status == "terminated"
     rig.world.leak = False
     with pytest.raises(TaskNotResumableError):
         await rig.service.resume(view.task_id)

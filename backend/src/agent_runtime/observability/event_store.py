@@ -113,14 +113,6 @@ class EventStore:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
-    async def min_seq(self, task_id: str) -> int:
-        """最早保留的序号；没有事件返回 0。"""
-        cursor = await self._require().execute(
-            "SELECT COALESCE(MIN(seq), 0) FROM task_events WHERE task_id = ?", (task_id,)
-        )
-        row = await cursor.fetchone()
-        return int(row[0]) if row else 0
-
     async def read(self, task_id: str, after_seq: int = 0, limit: int = 1000) -> list[Event]:
         cursor = await self._require().execute(
             "SELECT seq, ts, event, payload, v FROM task_events"

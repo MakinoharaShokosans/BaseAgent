@@ -16,7 +16,7 @@ from agent_runtime.api.schemas import (
     ApproveBody,
     ArtifactOut,
     DecisionOut,
-    MilestoneOut,
+    PlanItemOut,
     RejectBody,
     TaskCreate,
     TaskOut,
@@ -39,12 +39,10 @@ def task_out(v: TaskView) -> TaskOut:
         status=v.status,
         permission_level=v.permission_level,
         approval_request=ApprovalRequestOut(**v.approval_request) if v.approval_request else None,  # type: ignore[arg-type]
-        milestones=[MilestoneOut(**m) for m in v.milestones],  # type: ignore[arg-type]
-        current_milestone_idx=v.current_milestone_idx,
+        plan=[PlanItemOut(**item) for item in v.plan],  # type: ignore[arg-type]
         step_count=v.step_count,
         total_tokens=v.total_tokens,
         consecutive_errors=v.consecutive_errors,
-        should_terminate=v.should_terminate,
         termination_reason=v.termination_reason,
         created_at=v.created_at,
         started_at=v.started_at,
@@ -182,14 +180,14 @@ async def llm_calls(task_id: TaskId, svc: Services) -> list[dict[str, Any]]:
 
 @router.get("/tasks/{task_id}/spans")
 async def spans(task_id: TaskId, svc: Services) -> list[dict[str, Any]]:
-    """由事件推出的 span：每个阶段一个，工具调用按 ``call_id`` 与结果配对。"""
+    """由事件推出的 span：每个回合一个，工具调用按 ``call_id`` 与结果配对。"""
     await svc.tasks.get(task_id)
     events = await svc.hub.history(task_id, 0, 100_000)
     results = {e.data.get("call_id"): e for e in events if e.name == "tool.result"}
     out: list[dict[str, Any]] = []
     for e in events:
-        if e.name == "node.finished":
-            out.append({"kind": "stage", "name": e.data.get("node"), "seq": e.seq, "ts": e.ts})
+        if e.name == "turn.finished":
+            out.append({"kind": "turn", "turn": e.data.get("turn"), "seq": e.seq, "ts": e.ts})
         elif e.name == "tool.call":
             done = results.get(e.data.get("call_id"))
             out.append(

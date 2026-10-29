@@ -64,6 +64,3 @@ class ToolRegistry:
     def hidden_schema(self, name: str) -> ToolSchema | None:
         tool = self._tools.get(name) if name in self._hidden else None
         return tool.schema() if tool else None
-
-    def hidden_names(self) -> frozenset[str]:
-        return self._hidden

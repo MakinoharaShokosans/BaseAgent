@@ -65,7 +65,6 @@ def _block(items: Sequence[CaseResult]) -> dict[str, Any]:
         "wall_median_sec": round(median(wall), 2),
         "wall_p90_sec": round(percentile(wall, 0.9), 2),
         "llm_calls": calls,
-        "planner_calls": sum(r.metrics.planner_calls for r in ran),
         "token_share_by_node": {
             n: round(_rate(t, llm_total), 3) for n, t in sorted(by_node.items())
         },
@@ -76,7 +75,7 @@ def _block(items: Sequence[CaseResult]) -> dict[str, Any]:
         ),
         "degraded_outputs": sum(r.metrics.degraded_outputs for r in ran),
         "loop_blocked": sum(r.metrics.loop_blocked for r in ran),
-        "replan_notices": sum(r.metrics.replan_notices for r in ran),
+        "error_notices": sum(r.metrics.error_notices for r in ran),
         "approvals": sum(r.metrics.approvals for r in ran),
         "llm_retries": sum(r.metrics.llm_retries for r in ran),
         "llm_errors": sum(r.metrics.llm_errors for r in ran),
@@ -110,11 +109,12 @@ def to_markdown(report: Mapping[str, Any]) -> str:
         "",
         f"**成功率 {_pct(overall['success_rate'])}**（{overall['success']}/{overall['ran']}），"
         f"Token 合计 {overall['tokens_total']}，缓存命中率 {_pct(overall['cache_hit_rate'])}，"
-        f"规划调用 {overall['planner_calls']} / 模型调用 {overall['llm_calls']}",
+        f"模型调用 {overall['llm_calls']}",
         "",
         "## 按类别",
         "",
-        "| 类别 | 成功 | 步数 中位/P90 | Token 中位/P90 | 耗时 中位/P90 | 工具失败率 | 熔断/循环 |",
+        "| 类别 | 成功 | 步数 中位/P90 | Token 中位/P90 | 耗时 中位/P90 "
+        "| 工具失败率 | 拦截/出错提醒 |",
         "|---|---|---|---|---|---|---|",
     ]
     for cat, b in report["by_category"].items():
@@ -123,11 +123,11 @@ def to_markdown(report: Mapping[str, Any]) -> str:
             f"| {b['steps_median']:g}/{b['steps_p90']:g} "
             f"| {b['tokens_median']:g}/{b['tokens_p90']:g} "
             f"| {b['wall_median_sec']:g}s/{b['wall_p90_sec']:g}s "
-            f"| {_pct(b['tool_failure_rate'])} | {b['loop_blocked']}/{b['replan_notices']} |"
+            f"| {_pct(b['tool_failure_rate'])} | {b['loop_blocked']}/{b['error_notices']} |"
         )
     shares = overall["token_share_by_node"]
     if shares:
-        lines += ["", "## 各阶段 Token 占比", ""]
+        lines += ["", "## 各调用用途 Token 占比", ""]
         lines += [f"- {node}：{_pct(share)}" for node, share in shares.items()]
     lines += [
         "",
@@ -173,7 +173,6 @@ _COMPARED = (
     ("tokens_median", "Token 中位", False),
     ("tokens_total", "Token 合计", False),
     ("wall_median_sec", "耗时中位(s)", False),
-    ("planner_calls", "规划调用", False),
     ("llm_calls", "模型调用", False),
     ("cache_hit_rate", "缓存命中率", True),
     ("tool_failure_rate", "工具失败率", False),

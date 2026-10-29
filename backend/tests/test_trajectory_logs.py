@@ -51,14 +51,13 @@ def test_every_record_is_versioned_and_tool_args_are_present_with_the_redaction_
 @pytest.mark.unit
 def test_record_types_cover_the_contract() -> None:
     cases = {
-        "node.finished": ("node", {"node": "planner", "stage": 1, "decision": "x"}),
-        "plan": ("node", {"thought": "t"}),
+        "turn.finished": ("turn", {"turn": 1, "tool_count": 2, "failed_count": 0, "tokens": 9}),
         "tool.result": ("tool", {"tool": "bash", "ok": False, "result": "boom", "call_id": "c1"}),
         "guard.loop_blocked": ("guard", {"call_ids": ["c1"]}),
         "task.waiting_for_approval": ("guard", {"approval_id": "a", "command": "curl x"}),
         "llm.call": (
             "llm",
-            {"node": "planner", "tier": "fast", "tokens": 90, "outcome": "ok", "duration_ms": 5},
+            {"node": "main", "tier": "fast", "tokens": 90, "outcome": "ok", "duration_ms": 5},
         ),
         "websearch.round": ("subagent", {"round": 1}),
         "task.finished": ("final", {"status": "succeeded", "delivery": "done"}),
