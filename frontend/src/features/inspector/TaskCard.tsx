@@ -10,7 +10,6 @@ import {
   RotateCw,
   Square,
   Wrench,
-  X,
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../api/endpoints';
@@ -18,7 +17,7 @@ import { CopyButton } from '../../components/ui/CopyButton';
 import { Card, IconButton, Modal } from '../../components/ui/primitives';
 import { useAppStore } from '../../stores/useAppStore';
 import { TERMINAL_STATUSES, type Artifact, type PlanItem } from '../../types/api';
-import { statusMeta } from '../../utils/status';
+import { MinimalStatusMark, statusMeta } from '../../utils/status';
 import { cn, formatTokens } from '../../utils/text';
 import { formatBytes, formatDuration } from '../../utils/time';
 import { useNow } from '../../utils/useNow';
@@ -62,67 +61,6 @@ function Plan({ plan }: { plan: PlanItem[] }) {
   );
 }
 
-function MinimalStatusMark({
-  status,
-  meta,
-}: {
-  status: string;
-  meta: ReturnType<typeof statusMeta>;
-}) {
-  if (status === 'succeeded') {
-    return (
-      <span
-        className="inline-flex shrink-0 items-center justify-center text-ok"
-        title="已完成"
-        aria-label="已完成"
-      >
-        <Check size={16} strokeWidth={2.5} />
-      </span>
-    );
-  }
-  if (status === 'failed') {
-    return (
-      <span
-        className="inline-flex shrink-0 items-center justify-center text-bad"
-        title="失败"
-        aria-label="失败"
-      >
-        <X size={16} strokeWidth={2.5} />
-      </span>
-    );
-  }
-  if (status === 'cancelled') {
-    return (
-      <span
-        className="inline-flex shrink-0 items-center justify-center text-mute"
-        title="已取消"
-        aria-label="已取消"
-      >
-        <Square size={12} fill="currentColor" />
-      </span>
-    );
-  }
-  if (meta.live) {
-    return (
-      <span
-        className="inline-flex shrink-0 items-center justify-center text-accent"
-        title={meta.label}
-        aria-label={meta.label}
-      >
-        <Loader2 size={15} className="animate-spin" />
-      </span>
-    );
-  }
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center text-warn"
-      title={meta.label}
-      aria-label={meta.label}
-    >
-      <Clock size={15} />
-    </span>
-  );
-}
 
 function ArtifactViewer({
   taskId,

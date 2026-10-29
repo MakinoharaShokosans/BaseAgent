@@ -15,14 +15,19 @@ import {
 import { useContextSnapshot, useSessionSettings } from '../../api/useSettings';
 import { McpStatus } from '../../components/domain/McpStatus';
 import { InlineEdit } from '../../components/ui/InlineEdit';
-import { IconButton, SPRING, StatusPill } from '../../components/ui/primitives';
+import { IconButton, SPRING } from '../../components/ui/primitives';
 import { Tip } from '../../components/ui/Tooltip';
 import { useAppStore } from '../../stores/useAppStore';
 import { queueOf, useQueueStore } from '../../stores/useQueueStore';
 import { useUiStore } from '../../stores/useUiStore';
 import { TERMINAL_STATUSES, type PermissionLevel, type Task, type Turn } from '../../types/api';
 import { rememberLocation } from '../../utils/lastLocation';
-import { CONNECTION_LABEL, connectionHealthy, statusMeta } from '../../utils/status';
+import {
+  CONNECTION_LABEL,
+  MinimalStatusMark,
+  connectionHealthy,
+  statusMeta,
+} from '../../utils/status';
 import { cn } from '../../utils/text';
 import { Inspector } from '../inspector/Inspector';
 import { Composer } from './Composer';
@@ -312,15 +317,7 @@ export function ConversationPage() {
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {run && meta && (
-              <StatusPill
-                tone={meta.tone}
-                icon={meta.icon}
-                live={meta.live}
-                label={meta.label}
-                className={phone ? 'px-1.5' : undefined}
-              >
-                <span className={phone ? 'sr-only' : undefined}>{meta.label}</span>
-              </StatusPill>
+              <MinimalStatusMark status={run.status} meta={meta} className="px-1" />
             )}
             {!connectionHealthy(connection) && (
               <Tip label={`事件流${CONNECTION_LABEL[connection]}`}>

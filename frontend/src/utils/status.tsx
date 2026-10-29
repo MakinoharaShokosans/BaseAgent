@@ -1,4 +1,4 @@
-/** 任务状态与连接状态的统一呈现：文字、色调、图标三者同时表达（不只靠颜色）。 */
+import { Check, Clock, Loader2, Square, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { ConnectionState } from '../api/sse';
 import type { TaskStatus } from '../types/api';
@@ -10,8 +10,9 @@ import {
   OrbitGlyph,
 } from '../components/icons/Glyphs';
 import type { Tone } from '../components/ui/primitives';
+import { cn } from './text';
 
-interface StatusMeta {
+export interface StatusMeta {
   label: string;
   tone: Tone;
   icon: ReactNode;
@@ -51,3 +52,68 @@ export const CONNECTION_LABEL: Record<ConnectionState, string> = {
 export function connectionHealthy(state: ConnectionState): boolean {
   return state === 'open' || state === 'closed' || state === 'connecting';
 }
+
+export function MinimalStatusMark({
+  status,
+  meta,
+  className,
+}: {
+  status: TaskStatus | string;
+  meta: StatusMeta;
+  className?: string;
+}) {
+  if (status === 'succeeded') {
+    return (
+      <span
+        className={cn('inline-flex shrink-0 items-center justify-center text-ok', className)}
+        title="已完成"
+        aria-label="已完成"
+      >
+        <Check size={16} strokeWidth={2.5} />
+      </span>
+    );
+  }
+  if (status === 'failed') {
+    return (
+      <span
+        className={cn('inline-flex shrink-0 items-center justify-center text-bad', className)}
+        title="失败"
+        aria-label="失败"
+      >
+        <X size={16} strokeWidth={2.5} />
+      </span>
+    );
+  }
+  if (status === 'cancelled') {
+    return (
+      <span
+        className={cn('inline-flex shrink-0 items-center justify-center text-mute', className)}
+        title="已取消"
+        aria-label="已取消"
+      >
+        <Square size={12} fill="currentColor" />
+      </span>
+    );
+  }
+  if (meta.live) {
+    return (
+      <span
+        className={cn('inline-flex shrink-0 items-center justify-center text-accent', className)}
+        title={meta.label}
+        aria-label={meta.label}
+      >
+        <Loader2 size={15} className="animate-spin" />
+      </span>
+    );
+  }
+  return (
+    <span
+      className={cn('inline-flex shrink-0 items-center justify-center text-warn', className)}
+      title={meta.label}
+      aria-label={meta.label}
+    >
+      <Clock size={15} />
+    </span>
+  );
+}
+
