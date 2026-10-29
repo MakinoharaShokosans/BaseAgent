@@ -189,7 +189,7 @@ def make_tool_runner(
                     artifact_id = own
                     if result.is_truncated:
                         content += f"\n[完整输出: artifact://{own}]"
-                if item.trust == "untrusted" and deps.envelope is not None:
+                if item.trust == "untrusted" and not failed and deps.envelope is not None:
                     content = deps.envelope(r.target.name, item.trust, content)  # 裁剪之后再包
                 detail.update(
                     artifact_id=artifact_id or _artifact_of(content) or "",

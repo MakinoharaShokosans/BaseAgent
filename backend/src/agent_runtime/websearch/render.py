@@ -84,4 +84,9 @@ def render_report(report: WebSearchReport, *, max_chars: int, envelope: bool = T
 def render_failure(report: WebSearchReport) -> str:
     """空报告：一条失败观察值，建议换角度。绝不透传任何原始网页文本。"""
     reasons = "；".join(report.warnings[:3]) or "没有找到可核实的资料"
-    return f"研究没有得到可用的结论（{reasons}）。请换一个角度提问，或先用本地证据继续推进。"
+    is_network_issue = any(
+        kw in reasons for kw in ("超时", "时间用尽", "不可用", "拒绝了请求", "连接", "失败")
+    )
+    if is_network_issue:
+        return f"网络检索未获取到有效内容（{reasons}）。建议检查网络连接或更换关键词，换一个角度提问。"
+    return f"未检索到相关的公开网页内容（{reasons}）。请换一个角度提问或提供更具体的关键词。"

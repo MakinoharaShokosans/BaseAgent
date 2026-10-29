@@ -168,6 +168,16 @@ function Args({ args }: { args: Record<string, unknown> }) {
   );
 }
 
+/** 过滤内部信封协议标签与防注入警示语，为用户展示纯净的工具输出与错误信息 */
+function formatToolText(text: string): string {
+  if (!text) return '';
+  let out = text.trim();
+  out = out.replace(/^<(?:tool_observation|external_content)\b[^>]*>\s*/i, '');
+  out = out.replace(/\s*<\/(?:tool_observation|external_content)>\s*$/i, '');
+  out = out.replace(/^以上内容来自不可信来源[^\n]*\n+/i, '');
+  return out.trim();
+}
+
 function Output({ item, taskId }: { item: Item; taskId: string }) {
   const [full, setFull] = useState<string | null>(null);
   const load = useMutation({
@@ -175,7 +185,8 @@ function Output({ item, taskId }: { item: Item; taskId: string }) {
     onSuccess: (text) => setFull(text),
   });
   const live = item.state === 'running';
-  const text = full ?? item.result ?? '';
+  const raw = full ?? item.result ?? '';
+  const text = formatToolText(raw);
   const failed = item.state === 'failed';
   const cut = item.truncated || (!!item.artifactId && full === null);
 
@@ -290,7 +301,7 @@ function Detail({ item, taskId }: { item: Item; taskId: string }) {
         )}
         {item.timedOut && <span className="text-bad">超时</span>}
         {item.folded && <span>已在上下文中折叠</span>}
-        {item.tool.startsWith('mcp__') && (
+        {(item.tool.startsWith('mcp__') || item.tool === 'websearch') && (
           <span className="flex items-center gap-1">
             <Shield size={11} />
             不可信来源
