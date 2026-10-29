@@ -7,7 +7,7 @@ type Item = Extract<TimelineItem, { kind: 'say' }>;
 export function SayBlock({ item }: { item: Item }) {
   const { body, progress } = parseSay(item.text);
   return (
-    <div className="text-[14px]">
+    <div className="text-[15px]">
       <SafeMarkdown text={body || item.text} />
       {item.streaming && (
         <span className="ml-0.5 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse bg-accent/70" />

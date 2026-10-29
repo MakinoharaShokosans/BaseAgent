@@ -134,13 +134,13 @@ export function RunView({
       {run.error && <p className="text-[13px] text-bad">{run.error}</p>}
 
       {terminal && run.delivery && (
-        <div className="rounded-2xl bg-card/80 px-4 py-3 shadow-card">
+        <div className="py-1">
           <SafeMarkdown text={run.delivery} />
         </div>
       )}
 
       {terminal && (
-        <div className="flex items-center gap-1 text-[12px] text-mute">
+        <div className="flex items-center gap-1 border-t border-ink/[0.06] pt-2 text-[12px] text-mute dark:border-white/[0.06]">
           <span className="tabular-nums">
             {run.stepCount} 回合 · {run.totalTokens.toLocaleString()} Token
             {run.startedTs && run.finishedTs

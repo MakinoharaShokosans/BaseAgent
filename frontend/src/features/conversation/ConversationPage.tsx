@@ -13,6 +13,7 @@ import {
   useWorkspaces,
 } from '../../api/queries';
 import { useContextSnapshot, useSessionSettings } from '../../api/useSettings';
+import { SafeMarkdown } from '../../components/common/SafeMarkdown';
 import { McpStatus } from '../../components/domain/McpStatus';
 import { InlineEdit } from '../../components/ui/InlineEdit';
 import { IconButton, SPRING } from '../../components/ui/primitives';
@@ -57,21 +58,25 @@ function PastTask({ task, turn }: { task: Task; turn: Turn | undefined }) {
         />
       ) : (
         turn?.content && (
-          <div className="rounded-2xl bg-card/80 px-4 py-3 shadow-card">
-            <div className="prose-agent whitespace-pre-wrap text-[14.5px]">{turn.content}</div>
+          <div className="py-1">
+            <SafeMarkdown text={turn.content} />
           </div>
         )
       )}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex items-center gap-1.5 text-[12px] text-mute hover:text-ink"
-      >
-        <ChevronRight size={12} className={cn('transition-transform', open && 'rotate-90')} />
-        <span>{open ? '收起过程' : '过程'}</span>
-        {task.status !== 'succeeded' && <span className="text-bad">{meta.label}</span>}
-        <span className="tabular-nums">{task.step_count} 回合</span>
-      </button>
+      <div className="flex items-center gap-1.5 border-t border-ink/[0.06] pt-2 text-[12px] text-mute dark:border-white/[0.06]">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex items-center gap-1.5 transition-colors hover:text-ink"
+        >
+          <ChevronRight size={12} className={cn('transition-transform', open && 'rotate-90')} />
+          <span className="underline decoration-ink/15 decoration-dashed underline-offset-2 hover:decoration-ink/40 dark:decoration-white/20 dark:hover:decoration-white/50">
+            {open ? '收起过程' : '过程'}
+          </span>
+          {task.status !== 'succeeded' && <span className="text-bad">{meta.label}</span>}
+          <span className="tabular-nums">{task.step_count} 回合</span>
+        </button>
+      </div>
     </div>
   );
 }

@@ -42,16 +42,18 @@ export function ReasoningBlock({ item }: { item: Item }) {
           touched.current = true;
           setOpen((v) => !v);
         }}
-        className="flex items-center gap-1.5 rounded-lg py-0.5 pr-2 text-mute transition-colors hover:text-ink"
+        className="group flex items-center gap-1.5 py-0.5 text-mute transition-colors hover:text-ink"
       >
-        <Brain size={14} className={cn(item.streaming && 'animate-breathe text-accent')} />
-        <span className="tabular-nums">{label}</span>
+        <Brain size={14} className={cn('shrink-0', item.streaming && 'animate-breathe text-accent')} />
+        <span className="tabular-nums font-mono text-[12.5px] underline decoration-ink/20 decoration-dashed underline-offset-4 group-hover:decoration-ink/50 dark:decoration-white/20 dark:group-hover:decoration-white/50">
+          {label}
+        </span>
         <Chevron open={open} size={12} />
       </button>
       <Reveal open={open}>
         <div
           ref={body}
-          className="mt-1 max-h-72 overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-accent/25 pl-3 font-mono text-[12.5px] leading-relaxed text-mute"
+          className="mt-1.5 max-h-72 overflow-y-auto whitespace-pre-wrap break-words pl-5 font-mono text-[12.5px] leading-relaxed text-mute/80 dark:text-mute/70"
         >
           {stripControl(item.text)}
           {item.streaming && (
