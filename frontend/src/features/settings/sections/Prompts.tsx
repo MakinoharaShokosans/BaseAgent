@@ -3,6 +3,7 @@
  * 展示某个会话下一次请求里该段的渲染全文；安全指令固定不可编辑。
  */
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { motion } from 'motion/react';
 import { ChevronDown, ChevronUp, Lock, RotateCcw, Save, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, isUnsupported } from '../../../api/endpoints';
@@ -10,34 +11,42 @@ import { sessionTitle, useWorkspaces } from '../../../api/queries';
 import { ConfirmDialog } from '../../../components/modals/ConfirmDialog';
 import { IconButton } from '../../../components/ui/primitives';
 import { Select } from '../../../components/ui/Select';
-import { Segmented } from '../../../components/ui/Toggle';
 import { useAppStore } from '../../../stores/useAppStore';
 import { usePendingStore } from '../../../stores/usePendingStore';
 import type { PromptDetail, PromptInfo, PromptKind } from '../../../types/api';
-import { diffLines } from '../../../utils/diff';
 import { cn } from '../../../utils/text';
 import { Scope } from '../parts';
 
+const TEMPLATE_ORDER = [
+  'system',
+  'subagent',
+  'subagent_report',
+  'compactor',
+  'task_compactor',
+  'websearch_plan',
+  'websearch_extract',
+];
+
 const TITLES: Record<string, string> = {
   system: '系统提示词',
-  compactor: '会话压缩',
-  task_compactor: '任务内压缩',
   subagent: '子智能体',
   subagent_report: '子智能体汇报',
+  compactor: '长会话压缩',
+  task_compactor: '任务内压缩',
   websearch_plan: '联网搜索·规划',
   websearch_extract: '联网搜索·提炼',
 };
 
 const TEMPLATE_FALLBACK: PromptInfo[] = (
   [
-    ['system', '主 Agent'],
-    ['compactor', '会话压缩'],
-    ['task_compactor', '任务内压缩'],
+    ['system', '主智能体'],
     ['subagent', '子智能体'],
     ['subagent_report', '子智能体汇报'],
+    ['compactor', '长会话压缩'],
+    ['task_compactor', '任务内压缩'],
     ['websearch_plan', '联网搜索·规划'],
     ['websearch_extract', '联网搜索·提炼'],
-  ] as [string, string][]
+  ] as const
 ).map(([name, usage]) => ({
   name,
   kind: 'template' as PromptKind,
@@ -48,18 +57,20 @@ const TEMPLATE_FALLBACK: PromptInfo[] = (
   max_chars: 0,
 }));
 
-const DYNAMIC: PromptInfo[] = [
-  ['tools', '工具定义'],
-  ['skills', '技能清单'],
-  ['mcp_index', 'MCP 索引'],
-  ['project_rules', '项目规则'],
-  ['workspace_memory', '工作区记忆'],
-  ['session_memory', '会话记忆'],
-  ['task_data', '环境与近期新增'],
-].map(([name, title]) => ({
-  name: name as string,
+const DYNAMIC: PromptInfo[] = (
+  [
+    ['project_rules', '项目规则'],
+    ['workspace_memory', '工作区记忆'],
+    ['session_memory', '会话记忆'],
+    ['task_data', '环境与近期新增'],
+    ['tools', '工具定义'],
+    ['skills', '技能清单'],
+    ['mcp_index', 'MCP 索引'],
+  ] as const
+).map(([name, title]) => ({
+  name,
   kind: 'dynamic' as PromptKind,
-  title: title as string,
+  title,
   usage: '',
   size: 0,
   customized: false,
@@ -70,7 +81,7 @@ const FIXED: PromptInfo[] = [
   {
     name: 'canary',
     kind: 'fixed',
-    title: '安全标记',
+    title: '金丝雀防御标记',
     usage: '',
     size: 0,
     customized: false,
@@ -96,10 +107,16 @@ function usePromptApi() {
     enabled: !supported,
   });
   const templates = useMemo(() => {
-    if (supported)
-      return (list.data ?? [])
+    if (supported) {
+      const listData = (list.data ?? [])
         .filter((p) => p.kind === 'template')
         .map((p) => ({ ...p, title: TITLES[p.name] ?? p.title }));
+      return listData.sort((a, b) => {
+        const ia = TEMPLATE_ORDER.indexOf(a.name);
+        const ib = TEMPLATE_ORDER.indexOf(b.name);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      });
+    }
     return TEMPLATE_FALLBACK.map((p) => ({
       ...p,
       customized: p.name === 'system' && settings.data?.system_prompt != null,
@@ -113,7 +130,6 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
   const notify = useAppStore((s) => s.notify);
   const mark = usePendingStore((s) => s.mark);
   const [draft, setDraft] = useState<string | null>(null);
-  const [mode, setMode] = useState<'edit' | 'diff'>('edit');
   const [resetting, setResetting] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -225,38 +241,23 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
       };
     },
     onSuccess: done,
+    onError: (e: Error) => notify(e.message, 'error'),
   });
 
-  const diff = useMemo(
-    () => (mode === 'diff' && d ? diffLines(d.default, text) : []),
-    [mode, d, text],
-  );
-
   return (
-    <div className="flex min-h-0 flex-col">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
+      <div className="mb-2.5 flex shrink-0 flex-wrap items-center gap-2">
         <h2 className="text-[15px] font-semibold">{info.title}</h2>
         <Scope>全局</Scope>
         {d?.customized && <span className="stamp">已自定义</span>}
         <span className="flex-1" />
-        <Segmented
-          label="视图"
-          value={mode}
-          onChange={setMode}
-          options={[
-            { value: 'edit', label: '编辑' },
-            { value: 'diff', label: '对比初始' },
-          ]}
-        />
-        {mode === 'edit' && (
-          <IconButton
-            label="搜索 (Ctrl+F)"
-            active={showSearch}
-            onClick={() => setShowSearch((v) => !v)}
-          >
-            <Search size={15} />
-          </IconButton>
-        )}
+        <IconButton
+          label="搜索 (Ctrl+F)"
+          active={showSearch}
+          onClick={() => setShowSearch((v) => !v)}
+        >
+          <Search size={15} />
+        </IconButton>
         <IconButton
           label="恢复初始"
           disabled={!d?.customized && !dirty}
@@ -276,122 +277,97 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
         </IconButton>
       </div>
 
-      {mode === 'edit' ? (
-        <div
-          className="relative flex flex-col rounded-xl border border-line bg-card shadow-sm transition-all focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/10"
-          onKeyDown={handleKeyDown}
-        >
-          {showSearch && (
-            <div className="flex items-center gap-2 border-b border-line/40 bg-ink/[0.02] px-3 py-1.5 text-xs">
-              <Search size={13} className="text-mute" />
-              <input
-                type="search"
-                autoFocus
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setActiveMatchIndex(0);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (e.shiftKey) {
-                      goToMatch(activeMatchIndex - 1);
-                    } else {
-                      goToMatch(activeMatchIndex + 1);
-                    }
-                  } else if (e.key === 'Escape') {
-                    setShowSearch(false);
+      <div
+        className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-card shadow-sm transition-all focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/10"
+        onKeyDown={handleKeyDown}
+      >
+        {showSearch && (
+          <div className="flex shrink-0 items-center gap-2 border-b border-line/40 bg-ink/[0.02] px-3 py-1.5 text-xs">
+            <Search size={13} className="text-mute" />
+            <input
+              type="search"
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setActiveMatchIndex(0);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (e.shiftKey) {
+                    goToMatch(activeMatchIndex - 1);
+                  } else {
+                    goToMatch(activeMatchIndex + 1);
                   }
-                }}
-                placeholder="在提示词中查找... (Enter 下一个 / Shift+Enter 上一个)"
-                className="field h-7 flex-1 rounded-lg px-2 text-xs"
-              />
-              <span className="tabular-nums text-mute text-2xs">
-                {matches.length > 0
-                  ? `${activeMatchIndex + 1}/${matches.length}`
-                  : searchQuery
-                    ? '无匹配'
-                    : ''}
-              </span>
-              <IconButton
-                label="上一个匹配"
-                disabled={matches.length === 0}
-                onClick={() => goToMatch(activeMatchIndex - 1)}
-                className="h-6 w-6"
-              >
-                <ChevronUp size={13} />
-              </IconButton>
-              <IconButton
-                label="下一个匹配"
-                disabled={matches.length === 0}
-                onClick={() => goToMatch(activeMatchIndex + 1)}
-                className="h-6 w-6"
-              >
-                <ChevronDown size={13} />
-              </IconButton>
-              <IconButton
-                label="关闭搜索"
-                onClick={() => setShowSearch(false)}
-                className="h-6 w-6"
-              >
-                <X size={13} />
-              </IconButton>
-            </div>
-          )}
-          <div className="relative flex min-h-[26rem] flex-1 overflow-hidden rounded-b-xl">
-            <div
-              ref={gutterRef}
-              className="select-none overflow-hidden border-r border-line/40 bg-ink/[0.02] py-2.5 pl-3 pr-2 text-right font-mono text-[12.5px] leading-relaxed text-mute/40 tabular-nums"
-              aria-hidden="true"
-            >
-              {Array.from({ length: lineCount }, (_, i) => (
-                <div key={i + 1}>{i + 1}</div>
-              ))}
-            </div>
-            <textarea
-              ref={textareaRef}
-              aria-label={info.title}
-              spellCheck={false}
-              value={text}
-              onChange={(e) => setDraft(e.target.value)}
-              onScroll={(e) => {
-                if (gutterRef.current) {
-                  gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+                } else if (e.key === 'Escape') {
+                  setShowSearch(false);
                 }
               }}
-              className="min-h-[26rem] flex-1 resize-y overflow-x-auto whitespace-pre bg-transparent px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink outline-none"
+              placeholder="在提示词中查找... (Enter 下一个 / Shift+Enter 上一个)"
+              className="field h-7 flex-1 rounded-lg px-2 text-xs"
             />
-          </div>
-        </div>
-      ) : (
-        <div className="max-h-[36rem] min-h-[26rem] overflow-auto rounded-xl bg-code py-2 font-mono text-[12px] leading-[1.6] text-code-ink">
-          {diff.map((l, i) => (
-            <div
-              key={i}
-              className={cn(
-                'flex whitespace-pre-wrap break-all px-3',
-                l.kind === 'add' && 'bg-ok/15',
-                l.kind === 'del' && 'bg-bad/15',
-              )}
+            <span className="tabular-nums text-mute text-2xs">
+              {matches.length > 0
+                ? `${activeMatchIndex + 1}/${matches.length}`
+                : searchQuery
+                  ? '无匹配'
+                  : ''}
+            </span>
+            <IconButton
+              label="上一个匹配"
+              disabled={matches.length === 0}
+              onClick={() => goToMatch(activeMatchIndex - 1)}
+              className="h-6 w-6"
             >
-              <span
-                className={cn(
-                  'w-4 shrink-0 select-none',
-                  l.kind === 'add' ? 'text-ok' : l.kind === 'del' ? 'text-bad' : 'text-code-ink/30',
-                )}
-              >
-                {l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}
-              </span>
-              <span className="min-w-0 flex-1">{l.text || ' '}</span>
-            </div>
-          ))}
+              <ChevronUp size={13} />
+            </IconButton>
+            <IconButton
+              label="下一个匹配"
+              disabled={matches.length === 0}
+              onClick={() => goToMatch(activeMatchIndex + 1)}
+              className="h-6 w-6"
+            >
+              <ChevronDown size={13} />
+            </IconButton>
+            <IconButton
+              label="关闭搜索"
+              onClick={() => setShowSearch(false)}
+              className="h-6 w-6"
+            >
+              <X size={13} />
+            </IconButton>
+          </div>
+        )}
+        <div className="relative flex flex-1 min-h-0 overflow-hidden">
+          <div
+            ref={gutterRef}
+            className="select-none overflow-hidden border-r border-line/40 bg-ink/[0.02] py-2.5 pl-3 pr-2 text-right font-mono text-[12.5px] leading-relaxed text-mute/40 tabular-nums shrink-0"
+            aria-hidden="true"
+          >
+            {Array.from({ length: lineCount }, (_, i) => (
+              <div key={i + 1}>{i + 1}</div>
+            ))}
+          </div>
+          <textarea
+            ref={textareaRef}
+            aria-label={info.title}
+            spellCheck={false}
+            value={text}
+            onChange={(e) => setDraft(e.target.value)}
+            onScroll={(e) => {
+              if (gutterRef.current) {
+                gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+              }
+            }}
+            className="h-full w-full flex-1 resize-none overflow-auto whitespace-pre bg-transparent px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink outline-none"
+          />
         </div>
-      )}
+      </div>
 
       <div
         className={cn(
-          'mt-1.5 flex items-center justify-between text-2xs tabular-nums',
+          'mt-2 flex shrink-0 items-center justify-between text-2xs tabular-nums',
           over ? 'text-bad' : 'text-mute',
         )}
       >
@@ -456,8 +432,8 @@ function DynamicViewer({ info }: { info: PromptInfo }) {
     retry: false,
   });
   return (
-    <div>
-      <div className="mb-2 flex flex-wrap items-center gap-2">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
+      <div className="mb-2.5 flex shrink-0 flex-wrap items-center gap-2">
         <h2 className="text-[15px] font-semibold">{info.title}</h2>
         <Lock size={13} className="text-mute" aria-label="只读" />
         <span className="flex-1" />
@@ -468,7 +444,7 @@ function DynamicViewer({ info }: { info: PromptInfo }) {
           {isUnsupported(q.error) ? '后端未提供' : (q.error as Error).message}
         </p>
       ) : (
-        <pre className="max-h-[34rem] min-h-[10rem] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-code p-3 font-mono text-[12px] leading-relaxed text-code-ink">
+        <pre className="flex-1 min-h-0 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-line bg-code p-3 font-mono text-[12px] leading-relaxed text-code-ink">
           {q.data?.text ?? ''}
         </pre>
       )}
@@ -485,8 +461,8 @@ const FIXED_TEXT: Record<string, string> = {
 
 function UnsupportedTemplate({ info }: { info: PromptInfo }) {
   return (
-    <div>
-      <div className="mb-2 flex flex-wrap items-center gap-2">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
+      <div className="mb-2.5 flex shrink-0 flex-wrap items-center gap-2">
         <h2 className="text-[15px] font-semibold">{info.title}</h2>
         <Scope>全局</Scope>
       </div>
@@ -508,15 +484,15 @@ export function Prompts() {
   const info = all.find((p) => p.name === selected) ?? all[0];
 
   const groups: { title: string; items: PromptInfo[] }[] = [
-    { title: '模板', items: templates },
-    { title: '动态分区', items: DYNAMIC },
-    { title: '固定', items: FIXED },
+    { title: '智能体核心模板', items: templates },
+    { title: '实时动态上下文', items: DYNAMIC },
+    { title: '安全合规防御', items: FIXED },
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-[13rem_minmax(0,1fr)] lg:gap-6">
-      <nav aria-label="提示词分区" className="md:space-y-3">
-        <div className="md:hidden">
+    <div className="grid h-full min-h-0 flex-1 gap-4 md:grid-cols-[14rem_minmax(0,1fr)] lg:gap-6">
+      <nav aria-label="提示词分区" className="flex h-full min-h-0 flex-col pr-1 md:overflow-y-auto">
+        <div className="mb-3 shrink-0 md:hidden">
           <Select
             label="分区"
             value={info?.name ?? ''}
@@ -524,39 +500,53 @@ export function Prompts() {
             options={all.map((p) => ({ value: p.name, label: p.title }))}
           />
         </div>
-        <div className="hidden space-y-3 md:block">
+        <div className="hidden space-y-4 md:block">
           {groups.map((g) => (
             <div key={g.title}>
-              <div className="eyebrow mb-1 px-2">{g.title}</div>
+              <div className="eyebrow mb-1.5 px-2 text-2xs font-semibold tracking-wider text-mute/80 uppercase">
+                {g.title}
+              </div>
               <ul className="space-y-0.5">
-                {g.items.map((p) => (
-                  <li key={p.name}>
-                    <button
-                      onClick={() => setSelected(p.name)}
-                      aria-current={p.name === info?.name ? 'true' : undefined}
-                      className={cn(
-                        'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition-colors',
-                        p.name === info?.name
-                          ? 'bg-ink/[0.07] font-medium'
-                          : 'text-mute hover:bg-ink/[0.045] hover:text-ink',
-                      )}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{p.title}</span>
-                      {p.customized && (
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
-                          aria-label="已自定义"
-                        />
-                      )}
-                    </button>
-                  </li>
-                ))}
+                {g.items.map((p) => {
+                  const active = p.name === info?.name;
+                  return (
+                    <li key={p.name}>
+                      <button
+                        onClick={() => setSelected(p.name)}
+                        aria-current={active ? 'true' : undefined}
+                        className={cn(
+                          'group flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition-colors',
+                          active ? 'font-medium text-ink' : 'text-mute hover:text-ink',
+                        )}
+                      >
+                        <span className="relative inline-block min-w-0 max-w-full">
+                          <span className="block truncate">{p.title}</span>
+                          {active && (
+                            <motion.div
+                              layoutId="active-prompt-category-underline"
+                              className="absolute -bottom-0.5 inset-x-0 h-[2px] rounded-full bg-accent"
+                              transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                            />
+                          )}
+                        </span>
+                        <span className="min-w-0 flex-1" />
+                        {p.customized && (
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                            aria-label="已自定义"
+                            title="已自定义"
+                          />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ))}
         </div>
       </nav>
-      <div className="min-w-0">
+      <div className="flex h-full min-h-0 flex-1 flex-col">
         {info?.kind === 'template' &&
           (supported || info.name === 'system' ? (
             <Editor key={info.name} info={info} supported={supported} />
@@ -565,12 +555,14 @@ export function Prompts() {
           ))}
         {info?.kind === 'dynamic' && <DynamicViewer key={info.name} info={info} />}
         {info?.kind === 'fixed' && (
-          <div>
-            <div className="mb-2 flex items-center gap-2">
+          <div className="flex h-full min-h-0 flex-1 flex-col">
+            <div className="mb-2.5 flex shrink-0 items-center gap-2">
               <h2 className="text-[15px] font-semibold">{info.title}</h2>
               <Lock size={13} className="text-mute" aria-label="固定" />
             </div>
-            <p className="text-[13.5px] leading-relaxed text-mute">{FIXED_TEXT[info.name]}</p>
+            <div className="rounded-xl border border-line bg-card p-4">
+              <p className="text-[13.5px] leading-relaxed text-mute">{FIXED_TEXT[info.name]}</p>
+            </div>
           </div>
         )}
       </div>

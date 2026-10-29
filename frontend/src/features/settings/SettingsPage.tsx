@@ -110,12 +110,17 @@ export function SettingsPage() {
           </div>
         )}
         {(!phone || current) && (
-          <div className="min-w-0 flex-1 overflow-y-auto">
+          <div
+            className={cn(
+              'min-w-0 flex-1',
+              current?.id === 'prompts' ? 'flex h-full flex-col overflow-hidden' : 'overflow-y-auto',
+            )}
+          >
             <div
               className={cn(
                 'mx-auto w-full p-3 sm:p-6',
                 current?.id === 'prompts'
-                  ? 'max-w-[1560px] 2xl:max-w-[1760px]'
+                  ? 'flex h-full min-h-0 flex-1 flex-col max-w-[1560px] 2xl:max-w-[1760px]'
                   : 'max-w-[1080px]',
               )}
             >
