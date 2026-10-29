@@ -25,6 +25,7 @@ import {
 import { motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/endpoints';
+import { subscribeGlobal } from '../../api/sse';
 import {
   hasSessionMeta,
   isLive,
@@ -130,6 +131,25 @@ export function Sidebar({ collapsedRail = false }: { collapsedRail?: boolean }) 
 
   const refresh = (workspaceId: string) =>
     client.invalidateQueries({ queryKey: ['sessions', workspaceId] });
+
+  // 全局事件流：跨会话/任务状态变更时实时失效缓存并更新侧栏
+  useEffect(() => {
+    const handle = subscribeGlobal({
+      onEvent: (ev) => {
+        const data = (ev.data || {}) as Record<string, unknown>;
+        const sessionId = (data.session_id as string) || undefined;
+        const workspaceId = (data.workspace_id as string) || undefined;
+        if (sessionId) {
+          void client.invalidateQueries({ queryKey: ['activity', sessionId] });
+          void client.invalidateQueries({ queryKey: ['tasks', sessionId] });
+        }
+        if (workspaceId) {
+          void client.invalidateQueries({ queryKey: ['sessions', workspaceId] });
+        }
+      },
+    });
+    return () => handle.close();
+  }, [client]);
 
   const go = (workspaceId: string, sessionId?: string) => {
     if (phone) setNavOpen(false);

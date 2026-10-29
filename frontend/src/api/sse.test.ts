@@ -5,6 +5,7 @@ import {
   FrameParser,
   MAX_BACKOFF_MS,
   subscribe,
+  subscribeGlobal,
   type ConnectionState,
 } from './sse';
 
@@ -202,3 +203,37 @@ describe('defaultBackoff', () => {
     expect(defaultBackoff(50)).toBe(MAX_BACKOFF_MS);
   });
 });
+
+describe('subscribeGlobal', () => {
+  it('delivers global events, ignores heartbeat, and can be closed', async () => {
+    const received: unknown[] = [];
+    const states: ConnectionState[] = [];
+    const handle = subscribeGlobal({
+      url: '/api/v1/events',
+      fetchImpl: async () =>
+        streamOf([
+          ': ping\n\n',
+          'event: heartbeat\ndata: {"ts":123}\n\n',
+          'event: task.started\ndata: {"task_id":"t1","name":"task.started","ts":1000,"data":{"session_id":"s1","workspace_id":"w1"}}\n\n',
+          'event: task.finished\ndata: {"task_id":"t1","name":"task.finished","ts":2000,"data":{"session_id":"s1","workspace_id":"w1"}}\n\n',
+        ], true),
+      onEvent: (e) => received.push(e),
+      onState: (s) => states.push(s),
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(received).toHaveLength(2);
+    expect(received[0]).toEqual({
+      task_id: 't1',
+      name: 'task.started',
+      ts: 1000,
+      data: { session_id: 's1', workspace_id: 'w1' },
+    });
+    expect(states).toContain('open');
+
+    handle.close();
+    await handle.done;
+    expect(states.at(-1)).toBe('closed');
+  });
+});
+

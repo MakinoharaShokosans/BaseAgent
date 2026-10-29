@@ -189,3 +189,79 @@ export function subscribe(options: SseOptions): SseHandle {
     done,
   };
 }
+
+export interface GlobalEventPayload {
+  task_id: string;
+  name: string;
+  ts: number;
+  data: Record<string, unknown>;
+}
+
+export function subscribeGlobal(options: {
+  url?: string;
+  fetchImpl?: Fetch;
+  sleep?: (ms: number) => Promise<void>;
+  onEvent: (event: GlobalEventPayload) => void;
+  onState?: (state: ConnectionState) => void;
+}): SseHandle {
+  const url = options.url ?? '/api/v1/events';
+  const fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
+  const sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const controller = new AbortController();
+
+  async function run(): Promise<void> {
+    let attempt = 0;
+    while (!controller.signal.aborted) {
+      options.onState?.(attempt === 0 ? 'connecting' : 'reconnecting');
+      try {
+        const response = await fetchImpl(url, {
+          headers: { Accept: 'text/event-stream' },
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        options.onState?.('open');
+        attempt = 0;
+        const reader = response.body.getReader();
+        const abort = () => void reader.cancel().catch(() => undefined);
+        controller.signal.addEventListener('abort', abort, { once: true });
+        const decoder = new TextDecoder();
+        const parser = new FrameParser();
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            for (const frame of parser.push(decoder.decode(value, { stream: true }))) {
+              if (frame.event === 'heartbeat') continue;
+              try {
+                const parsed = JSON.parse(frame.data) as GlobalEventPayload;
+                options.onEvent(parsed);
+              } catch {
+                // ignore
+              }
+            }
+          }
+        } finally {
+          controller.signal.removeEventListener('abort', abort);
+          reader.cancel().catch(() => undefined);
+        }
+      } catch {
+        // network / parse error
+      }
+      if (controller.signal.aborted) return;
+      attempt++;
+      const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
+      await sleep(delay);
+    }
+  }
+
+  const done = run();
+  return {
+    close() {
+      controller.abort();
+      options.onState?.('closed');
+    },
+    done,
+  };
+}

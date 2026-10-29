@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { RefreshCw, Search, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { api } from '../../../api/endpoints';
 import { ConfirmDialog } from '../../../components/modals/ConfirmDialog';
 import { IconButton, Reveal, Chevron } from '../../../components/ui/primitives';
@@ -165,11 +165,24 @@ export function Mcp() {
   const client = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const mark = usePendingStore((s) => s.mark);
+  const [query, setQuery] = useState('');
+
   const servers = useQuery({
     queryKey: ['mcp-servers'],
     queryFn: api.mcp.servers,
     refetchInterval: 8000,
   });
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return servers.data ?? [];
+    return (servers.data ?? []).filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.tools.some((t) => t.toLowerCase().includes(q)),
+    );
+  }, [servers.data, query]);
+
   const master = useQuery({ queryKey: ['mcp-settings'], queryFn: api.mcp.settings, retry: false });
   const toggleMaster = useMutation({
     mutationFn: (enabled: boolean) => api.mcp.setEnabledAll(enabled),
@@ -198,8 +211,37 @@ export function Mcp() {
         </span>
       }
     >
-      {(servers.data ?? []).length === 0 && <div className="py-3 text-[13px] text-mute">—</div>}
-      {(servers.data ?? []).map((s) => (
+      <div className="relative mb-3">
+        <Search
+          size={14}
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-mute"
+        />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索 MCP 服务器或工具名称..."
+          className="field h-9 pl-8.5 pr-8 text-[13px]"
+        />
+        {query && (
+          <button
+            onClick={() => setQuery('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-mute hover:text-ink"
+            aria-label="清空搜索"
+          >
+            <X size={13} />
+          </button>
+        )}
+      </div>
+
+      {query && filtered.length === 0 && (
+        <p className="py-6 text-center text-sm text-mute">
+          未找到与 &quot;{query}&quot; 匹配的 MCP 服务器或工具
+        </p>
+      )}
+
+      {filtered.length === 0 && !query && <div className="py-3 text-[13px] text-mute">—</div>}
+      {filtered.map((s) => (
         <Server key={s.name} server={s} writable={writable} />
       ))}
       {servers.isError && (

@@ -63,37 +63,45 @@ export function RunView({
       {nodes.map((n) => {
         if ('agents' in n) return <AgentGroup key={n.key} items={n.agents} />;
         const item = n.item;
+        const turn = 'turn' in item ? item.turn : 'step' in item ? item.step : undefined;
+        let content = null;
         switch (item.kind) {
           case 'reasoning':
-            return <ReasoningBlock key={n.key} item={item} />;
+            content = <ReasoningBlock item={item} />;
+            break;
           case 'say':
-            return <SayBlock key={n.key} item={item} />;
+            content = <SayBlock item={item} />;
+            break;
           case 'tool':
-            return <ToolCard key={n.key} item={item} taskId={run.taskId} />;
+            content = <ToolCard item={item} taskId={run.taskId} />;
+            break;
           case 'decision':
-            return (
-              <p
-                key={n.key}
-                className={cn('text-[12.5px]', item.approved ? 'text-ok' : 'text-warn')}
-              >
+            content = (
+              <p className={cn('text-[12.5px]', item.approved ? 'text-ok' : 'text-warn')}>
                 {item.approved ? '已批准' : `已拒绝：${item.text}`}
               </p>
             );
+            break;
           case 'guard':
-            return (
-              <p key={n.key} className="text-[12.5px] text-warn">
-                {item.text}
-              </p>
-            );
+            content = <p className="text-[12.5px] text-warn">{item.text}</p>;
+            break;
           case 'unknown':
-            return (
-              <p key={n.key} className="font-mono text-2xs text-mute/60">
-                {item.name}
-              </p>
-            );
+            content = <p className="font-mono text-2xs text-mute/60">{item.name}</p>;
+            break;
           default:
-            return null;
+            content = null;
         }
+        if (!content) return null;
+        return (
+          <div
+            key={n.key}
+            id={turn ? `turn-item-${turn}` : undefined}
+            data-turn={turn}
+            className="scroll-mt-6"
+          >
+            {content}
+          </div>
+        );
       })}
 
       {live && run.approval && (

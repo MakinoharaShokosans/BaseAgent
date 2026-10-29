@@ -59,6 +59,10 @@ function createApi(client: HttpClient = http) {
     sessions: {
       list: (workspaceId: string) =>
         client.get<Session[]>(`/workspaces/${enc(workspaceId)}/sessions`),
+      search: (q: string, workspaceId?: string) =>
+        client.get<Session[]>(
+          `/sessions/search?q=${enc(q)}${workspaceId ? `&workspace_id=${enc(workspaceId)}` : ''}`,
+        ),
       get: (id: string) => client.get<Session>(`/sessions/${enc(id)}`),
       create: (workspaceId: string) =>
         client.post<Session>(`/workspaces/${enc(workspaceId)}/sessions`),

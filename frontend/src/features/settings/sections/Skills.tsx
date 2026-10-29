@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, ShieldAlert, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { Eye, Search, ShieldAlert, TriangleAlert, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { api } from '../../../api/endpoints';
 import { SafeMarkdown } from '../../../components/common/SafeMarkdown';
 import { IconButton, Modal } from '../../../components/ui/primitives';
@@ -56,6 +56,18 @@ export function Skills() {
   });
   const [viewing, setViewing] = useState<{ name: string; workspaceId?: string } | null>(null);
   const [trusting, setTrusting] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return skills.data ?? [];
+    return (skills.data ?? []).filter(
+      (k) =>
+        k.name.toLowerCase().includes(q) ||
+        k.description.toLowerCase().includes(q) ||
+        k.triggers.some((t) => t.toLowerCase().includes(q)),
+    );
+  }, [skills.data, query]);
 
   const canToggleSources = supportedBy(sources);
   // 技能开关是否可用：列表里有 enabled 字段才说明后端支持
@@ -81,12 +93,41 @@ export function Skills() {
     onError: (e: Error) => notify(e.message, 'error'),
   });
 
-  const bySource = (s: SkillInfo['source']) => (skills.data ?? []).filter((k) => k.source === s);
+  const bySource = (s: SkillInfo['source']) => filtered.filter((k) => k.source === s);
   const sourceOf = (s: SkillInfo['source']): SkillSource | undefined =>
     sources.data?.find((x) => x.source === s);
 
   return (
     <>
+      <div className="relative mb-3">
+        <Search
+          size={14}
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-mute"
+        />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索技能名称、描述或触发词..."
+          className="field h-9 pl-8.5 pr-8 text-[13px]"
+        />
+        {query && (
+          <button
+            onClick={() => setQuery('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-mute hover:text-ink"
+            aria-label="清空搜索"
+          >
+            <X size={13} />
+          </button>
+        )}
+      </div>
+
+      {query && filtered.length === 0 && (
+        <p className="py-6 text-center text-sm text-mute">
+          未找到与 &quot;{query}&quot; 匹配的技能
+        </p>
+      )}
+
       {(['builtin', 'global', 'workspace'] as const).map((src) => {
         const list = bySource(src);
         const info = sourceOf(src);

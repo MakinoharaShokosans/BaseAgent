@@ -3,8 +3,8 @@
  * 展示某个会话下一次请求里该段的渲染全文；安全指令固定不可编辑。
  */
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Lock, RotateCcw, Save } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp, Lock, RotateCcw, Save, Search, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, isUnsupported } from '../../../api/endpoints';
 import { sessionTitle, useWorkspaces } from '../../../api/queries';
 import { ConfirmDialog } from '../../../components/modals/ConfirmDialog';
@@ -115,6 +115,12 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [mode, setMode] = useState<'edit' | 'diff'>('edit');
   const [resetting, setResetting] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const gutterRef = useRef<HTMLDivElement>(null);
 
   const detail = useQuery({
     queryKey: ['prompt', info.name, supported],
@@ -130,11 +136,58 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
       };
     },
   });
-  useEffect(() => setDraft(null), [info.name]);
+  useEffect(() => {
+    setDraft(null);
+    setShowSearch(false);
+    setSearchQuery('');
+  }, [info.name]);
+
   const d = detail.data;
   const text = draft ?? d?.content ?? '';
   const dirty = !!d && text !== d.content;
   const over = !!d && d.max_chars > 0 && text.length > d.max_chars;
+
+  const lines = useMemo(() => text.split('\n'), [text]);
+  const lineCount = lines.length;
+  const charCount = text.length;
+  const estTokens = Math.max(0, Math.round(charCount / 3.5));
+
+  const matches = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const list: { start: number; end: number }[] = [];
+    const lowerText = text.toLowerCase();
+    const q = searchQuery.toLowerCase();
+    let pos = 0;
+    while ((pos = lowerText.indexOf(q, pos)) !== -1) {
+      list.push({ start: pos, end: pos + q.length });
+      pos += q.length;
+    }
+    return list;
+  }, [text, searchQuery]);
+
+  const goToMatch = (index: number) => {
+    if (!matches.length || !textareaRef.current) return;
+    const wrapped = (index + matches.length) % matches.length;
+    setActiveMatchIndex(wrapped);
+    const m = matches[wrapped];
+    if (!m) return;
+    const el = textareaRef.current;
+    el.focus();
+    el.setSelectionRange(m.start, m.end);
+    const linesBefore = text.slice(0, m.start).split('\n').length;
+    const approxScrollTop = Math.max(0, (linesBefore - 3) * 22);
+    el.scrollTop = approxScrollTop;
+    if (gutterRef.current) {
+      gutterRef.current.scrollTop = approxScrollTop;
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      setShowSearch((v) => !v);
+    }
+  };
 
   const done = (next: PromptDetail) => {
     client.setQueryData(['prompt', info.name, supported], next);
@@ -195,6 +248,15 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
             { value: 'diff', label: '对比初始' },
           ]}
         />
+        {mode === 'edit' && (
+          <IconButton
+            label="搜索 (Ctrl+F)"
+            active={showSearch}
+            onClick={() => setShowSearch((v) => !v)}
+          >
+            <Search size={15} />
+          </IconButton>
+        )}
         <IconButton
           label="恢复初始"
           disabled={!d?.customized && !dirty}
@@ -213,14 +275,95 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
           <Save size={15} />
         </IconButton>
       </div>
+
       {mode === 'edit' ? (
-        <textarea
-          aria-label={info.title}
-          spellCheck={false}
-          value={text}
-          onChange={(e) => setDraft(e.target.value)}
-          className="field min-h-[22rem] flex-1 resize-y font-mono text-[12.5px] leading-relaxed"
-        />
+        <div
+          className="relative flex flex-col rounded-xl border border-line bg-card shadow-sm transition-all focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/10"
+          onKeyDown={handleKeyDown}
+        >
+          {showSearch && (
+            <div className="flex items-center gap-2 border-b border-line/40 bg-ink/[0.02] px-3 py-1.5 text-xs">
+              <Search size={13} className="text-mute" />
+              <input
+                type="search"
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setActiveMatchIndex(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                      goToMatch(activeMatchIndex - 1);
+                    } else {
+                      goToMatch(activeMatchIndex + 1);
+                    }
+                  } else if (e.key === 'Escape') {
+                    setShowSearch(false);
+                  }
+                }}
+                placeholder="在提示词中查找... (Enter 下一个 / Shift+Enter 上一个)"
+                className="field h-7 flex-1 rounded-lg px-2 text-xs"
+              />
+              <span className="tabular-nums text-mute text-2xs">
+                {matches.length > 0
+                  ? `${activeMatchIndex + 1}/${matches.length}`
+                  : searchQuery
+                    ? '无匹配'
+                    : ''}
+              </span>
+              <IconButton
+                label="上一个匹配"
+                disabled={matches.length === 0}
+                onClick={() => goToMatch(activeMatchIndex - 1)}
+                className="h-6 w-6"
+              >
+                <ChevronUp size={13} />
+              </IconButton>
+              <IconButton
+                label="下一个匹配"
+                disabled={matches.length === 0}
+                onClick={() => goToMatch(activeMatchIndex + 1)}
+                className="h-6 w-6"
+              >
+                <ChevronDown size={13} />
+              </IconButton>
+              <IconButton
+                label="关闭搜索"
+                onClick={() => setShowSearch(false)}
+                className="h-6 w-6"
+              >
+                <X size={13} />
+              </IconButton>
+            </div>
+          )}
+          <div className="relative flex min-h-[22rem] flex-1 overflow-hidden rounded-b-xl">
+            <div
+              ref={gutterRef}
+              className="select-none overflow-hidden border-r border-line/40 bg-ink/[0.02] py-2.5 pl-3 pr-2 text-right font-mono text-[12.5px] leading-relaxed text-mute/40 tabular-nums"
+              aria-hidden="true"
+            >
+              {Array.from({ length: lineCount }, (_, i) => (
+                <div key={i + 1}>{i + 1}</div>
+              ))}
+            </div>
+            <textarea
+              ref={textareaRef}
+              aria-label={info.title}
+              spellCheck={false}
+              value={text}
+              onChange={(e) => setDraft(e.target.value)}
+              onScroll={(e) => {
+                if (gutterRef.current) {
+                  gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+                }
+              }}
+              className="min-h-[22rem] flex-1 resize-y overflow-x-auto whitespace-pre bg-transparent px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink outline-none"
+            />
+          </div>
+        </div>
       ) : (
         <div className="max-h-[34rem] min-h-[22rem] overflow-auto rounded-xl bg-code py-2 font-mono text-[12px] leading-[1.6] text-code-ink">
           {diff.map((l, i) => (
@@ -245,12 +388,24 @@ function Editor({ info, supported }: { info: PromptInfo; supported: boolean }) {
           ))}
         </div>
       )}
+
       <div
-        className={cn('mt-1.5 text-right text-2xs tabular-nums', over ? 'text-bad' : 'text-mute')}
+        className={cn(
+          'mt-1.5 flex items-center justify-between text-2xs tabular-nums',
+          over ? 'text-bad' : 'text-mute',
+        )}
       >
-        {text.length.toLocaleString()}
-        {d && d.max_chars > 0 ? ` / ${d.max_chars.toLocaleString()}` : ''}
+        <div className="flex items-center gap-3">
+          <span>{lineCount.toLocaleString()} 行</span>
+          <span>{charCount.toLocaleString()} 字符</span>
+          <span>约 {estTokens.toLocaleString()} tokens</span>
+        </div>
+        <div>
+          {charCount.toLocaleString()}
+          {d && d.max_chars > 0 ? ` / ${d.max_chars.toLocaleString()}` : ''}
+        </div>
       </div>
+
       {resetting && (
         <ConfirmDialog
           title="恢复初始版本"

@@ -26,18 +26,29 @@ import { useNow } from '../../utils/useNow';
 const PLAN_ICON = { completed: CheckCircle2, in_progress: CircleDot, pending: Circle } as const;
 
 function Plan({ plan }: { plan: PlanItem[] }) {
+  const scrollToTurn = (index: number) => {
+    const el =
+      document.getElementById(`turn-item-${index + 1}`) ||
+      document.querySelector(`[data-turn="${index + 1}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
   return (
     <ol className="space-y-1">
-      {plan.map((p) => {
+      {plan.map((p, idx) => {
         const Icon = PLAN_ICON[p.status];
         return (
           <li
             key={p.id}
+            onClick={() => scrollToTurn(idx)}
             className={cn(
-              'flex items-start gap-2 text-[13px] leading-snug',
+              'group flex cursor-pointer items-start gap-2 rounded-lg px-1.5 py-1 text-[13px] leading-snug transition-colors hover:bg-ink/[0.04] dark:hover:bg-white/[0.04]',
               p.status === 'completed' && 'text-mute line-through decoration-mute/40',
               p.status === 'pending' && 'text-mute',
             )}
+            title="点击跳转至对应回合"
           >
             <Icon
               size={14}
@@ -47,7 +58,9 @@ function Plan({ plan }: { plan: PlanItem[] }) {
                 p.status === 'completed' && 'text-ok',
               )}
             />
-            <span className="min-w-0 break-words">{p.title}</span>
+            <span className="min-w-0 break-words group-hover:text-ink dark:group-hover:text-white">
+              {p.title}
+            </span>
           </li>
         );
       })}
