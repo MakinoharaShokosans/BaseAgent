@@ -114,7 +114,10 @@ class WebSearchRunner:
                 if budget.remaining_wall_sec <= self._reserve:
                     timed_out = True  # 剩下的时间要留给提炼
                     break
-                queries = await self._plan(request, evidence, budget, warnings, history)
+                if rounds == 0 and request.query:
+                    queries = [request.query[:200]]
+                else:
+                    queries = await self._plan(request, evidence, budget, warnings, history)
                 if not queries:
                     break
                 rounds += 1
@@ -150,7 +153,7 @@ class WebSearchRunner:
             raw = RawReport()
         report = build_report(
             raw,
-            fetched={e.url for e in evidence.values() if e.status == "OK"},
+            fetched={e.url for e in evidence.values() if e.status in ("OK", "SNIPPET")},
             sources=tuple(
                 WebSearchSource(e.url, e.title, e.status, e.artifact_id) for e in evidence.values()
             ),
@@ -338,10 +341,10 @@ class WebSearchRunner:
         pages = "\n\n".join(
             wrap("web_page", e.text or e.title, url=e.url, trust="untrusted")
             for e in evidence.values()
-            if e.status == "OK" and e.text
+            if e.status in ("OK", "SNIPPET") and (e.text or e.title)
         )
         if not pages:
-            warnings.append("来源都没有可用的正文")
+            warnings.append("来源都没有可用的正文或摘要")
             return RawReport()
         if budget.expired:
             warnings.append("时间用尽，已取得的来源没能提炼")
@@ -392,8 +395,8 @@ class WebSearchRunner:
 
 
 def _usable(evidence: Mapping[str, Evidence]) -> int:
-    """抓到了正文的来源数；抓取失败的不算，下一轮可以补上。"""
-    return sum(1 for e in evidence.values() if e.status == "OK")
+    """抓到了可用正文或摘要的来源数。"""
+    return sum(1 for e in evidence.values() if e.status in ("OK", "SNIPPET") and (e.text or e.title))
 
 
 def _interleave(

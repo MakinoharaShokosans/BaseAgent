@@ -16,8 +16,9 @@ from pydantic import BaseModel, BeforeValidator, Field
 
 from agent_runtime.guardrails import scan_injection
 
-VERSION_PATTERN: Final = re.compile(r"^[0-9]+(\.[0-9]+)*([-.+][0-9A-Za-z.\-]+)*$")
-COMPONENT_PATTERN: Final = re.compile(r"^[A-Za-z0-9_.\-@/+ ]{1,60}$")
+VERSION_PATTERN: Final = re.compile(r"^v?[0-9A-Za-z]+([._\-+][0-9A-Za-z]+)*$")
+COMPONENT_PATTERN: Final = re.compile(r"^[A-Za-z0-9_.\-@/+ :]{1,60}$")
+_LANG_PATTERN: Final = re.compile(r"^[a-zA-Z0-9_+#.-]{1,30}$")
 LANGUAGES: Final = frozenset(
     {
         "python",
@@ -208,30 +209,33 @@ def build_report(
         cited = tuple(dict.fromkeys(u for u in item.sources if isinstance(u, str) and u in allowed))
         flagged = bool(scan_injection(answer))
         if flagged:
-            warnings.append("某条结论的文字带有疑似指令注入的样态，已标注")
+            warnings.append("结论中包含疑似注入样态的文本，已标注供甄别")
         findings.append(Finding(question, answer, confidence, cited, flagged))  # type: ignore[arg-type]
 
     facts: list[VersionFact] = []
     for fact in raw.version_facts:
+        version = fact.version.strip()
+        component = fact.component.strip()
         if (
             fact.source_url in allowed
-            and VERSION_PATTERN.match(fact.version.strip())
-            and COMPONENT_PATTERN.match(fact.component.strip())
+            and len(version) <= 60
+            and VERSION_PATTERN.match(version)
+            and COMPONENT_PATTERN.match(component)
         ):
-            facts.append(VersionFact(fact.component.strip(), fact.version.strip(), fact.source_url))
+            facts.append(VersionFact(component, version, fact.source_url))
 
     examples: list[CodeExample] = []
     for example in raw.code_examples:
-        language = example.language.strip().lower()
         if len(examples) >= limits.max_code_examples:
             truncated = True
             break
         if (
             example.source_url not in allowed
-            or language not in LANGUAGES
             or not example.code.strip()
         ):
             continue
+        raw_lang = example.language.strip().lower()
+        language = raw_lang if _LANG_PATTERN.match(raw_lang) else "text"
         code, cut = _clip(example.code, limits.max_code_chars)
         truncated = truncated or cut
         examples.append(CodeExample(language, code, example.source_url, cut))

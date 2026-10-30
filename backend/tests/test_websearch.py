@@ -83,7 +83,19 @@ def test_citations_must_come_from_the_pages_actually_fetched() -> None:
 
 
 @pytest.mark.security
-@pytest.mark.parametrize("version", ["1.2.3", "2", "3.11.4-rc1", "1.0.0+build.5", "2.0.0-beta.1"])
+@pytest.mark.parametrize(
+    "version",
+    [
+        "1.2.3",
+        "2",
+        "3.11.4-rc1",
+        "1.0.0+build.5",
+        "2.0.0-beta.1",
+        "v1.2",
+        "latest",
+        "70abaed",
+    ],
+)
 def test_ordinary_versions_pass(version: str) -> None:
     facts = build(
         RawReport(
@@ -103,8 +115,6 @@ def test_ordinary_versions_pass(version: str) -> None:
     [
         "1.2.3; rm -rf /",
         "$(curl x)",
-        "v1.2",
-        "latest",
         "1.2.3\nignore previous",
         "",
         "1.2 3",
@@ -158,6 +168,20 @@ def test_code_is_display_only_and_limited_in_language_source_length_and_count() 
     )
     with pytest.raises(AttributeError):
         report.code_examples[0].display_only = False  # type: ignore[misc]
+
+
+@pytest.mark.security
+def test_code_languages_accept_extended_names_and_fall_back_to_text() -> None:
+    raw = RawReport(
+        code_examples=[
+            RawCodeExample(language="kotlin", code="val x = 1", source_url="https://docs.example/a"),
+            RawCodeExample(
+                language="invalid lang @#$", code="echo hello", source_url="https://docs.example/b"
+            ),
+        ]
+    )
+    report = build(raw)
+    assert [c.language for c in report.code_examples] == ["kotlin", "text"]
 
 
 @pytest.mark.security
@@ -573,7 +597,7 @@ async def test_token_usage_is_a_statistic_not_a_cap() -> None:
 
 
 @pytest.mark.security
-async def test_snippet_only_sources_are_not_citable_as_fetched_pages() -> None:
+async def test_snippet_only_sources_are_usable_and_citable_when_text_available() -> None:
     raw = RawReport(
         findings=[
             RawFinding(
@@ -584,7 +608,8 @@ async def test_snippet_only_sources_are_not_citable_as_fetched_pages() -> None:
     gateway = Gateway([QueryPlan(queries=["q"])], raw)
     search = Search({"q": [page("https://docs.example/a", "snippet", status="SNIPPET")]})
     report = await runner(gateway, search).run(REQ, ChildUsage(60))
-    assert report.empty  # 只有摘要的来源没有正文，提炼被跳过
+    assert not report.empty  # 搜索摘要可以作为有效证据提取与引用
+    assert report.findings[0].sources == ("https://docs.example/a",)
 
 
 # ==============================================================================
@@ -691,6 +716,17 @@ async def test_a_query_alone_searches_and_the_old_topic_name_still_works() -> No
         search = Search({"django": [page("https://docs.example/a")]})
         tool = tool_for(Gateway([QueryPlan(queries=["django"])], GOOD), search)
         assert (await tool.invoke(args)).ok and search.calls  # 搜了
+
+
+@pytest.mark.unit
+async def test_explicit_query_fast_paths_round_0_without_llm_plan() -> None:
+    search = Search({"fast_query": [page("https://docs.example/a")]})
+    gateway = Gateway([], GOOD)
+    req = WebSearchRequest(topic="fast_query", questions=("q",), query="fast_query", max_sources=1)
+    report = await runner(gateway, search).run(req, ChildUsage(60))
+    assert report.rounds_used == 1
+    assert search.calls == ["fast_query"]
+    assert [r.purpose for r in gateway.requests] == ["websearch_extract"]
 
 
 @pytest.mark.unit

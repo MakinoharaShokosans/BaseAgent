@@ -55,7 +55,7 @@ def test_urls_are_found_in_prose_without_trailing_punctuation() -> None:
 
 
 @pytest.mark.security
-def test_only_user_messages_and_websearch_results_are_sources() -> None:
+def test_user_and_tool_outputs_are_valid_sources_while_assistant_is_excluded() -> None:
     state = state_with(
         Message(role="user", content="请读 https://user.example/doc"),
         Message(role="assistant", content="我去读 https://model.example/mine"),
@@ -75,7 +75,12 @@ def test_only_user_messages_and_websearch_results_are_sources() -> None:
             tool_call_id="3",
         ),
     )
-    assert known_urls(state) == {"https://user.example/doc", "https://found.example/p"}
+    assert known_urls(state) == {
+        "https://user.example/doc",
+        "https://found.example/p",
+        "https://laundered.example/?k=secret",
+        "https://file.example/planted",
+    }
 
 
 @pytest.mark.security
