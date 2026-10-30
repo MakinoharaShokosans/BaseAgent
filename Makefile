@@ -4,7 +4,7 @@
 BACKEND := backend
 FRONTEND := frontend
 
-.PHONY: help install lint fmt test test-backend test-frontend typecheck check clean
+.PHONY: help install start lint fmt test test-backend test-frontend typecheck check clean
 
 help: ## 列出可用任务
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -12,6 +12,9 @@ help: ## 列出可用任务
 install: ## 安装后端与前端依赖（需要联网）
 	cd $(BACKEND) && uv sync
 	cd $(FRONTEND) && pnpm install
+
+start: ## 启动沙箱 sidecar、后端与前端
+	cd $(BACKEND) && uv run baseagent start
 
 lint: ## 后端 ruff + pyright + import-linter，前端 eslint
 	cd $(BACKEND) && uv run ruff check . && uv run pyright && uv run lint-imports

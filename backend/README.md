@@ -22,10 +22,11 @@ tests/                 离线测试，按被测模块平铺；sdk/ 下是对官�
 
 依赖只能从上往下，规则写在 `pyproject.toml` 的 `[tool.importlinter]`，`make lint` 会检查。
 
-## 开发
+## 开发与运行
 
 ```bash
 make install     # uv sync，需要联网
+make start       # 启动沙箱 sidecar、后端与前端（或 uv run baseagent start）
 make lint        # ruff + pyright + import-linter
 make test        # 默认离线，不含 real_llm 与 slow
 ```
