@@ -10,6 +10,7 @@ import contextlib
 import os
 import resource
 import signal
+import sys
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -63,7 +64,12 @@ def minimal_env(
 
 
 def _preexec(limits: RunLimits) -> None:  # pragma: no cover - 在子进程里执行
-    resource.setrlimit(resource.RLIMIT_AS, (limits.rlimit_as_mb * _MB, limits.rlimit_as_mb * _MB))
+    # macOS (Darwin) 的 dyld 拥有几十 GB 的共享缓存映射，
+    # 设置常规虚拟内存限制会导致子进程启动直接崩溃
+    if sys.platform != "darwin":
+        resource.setrlimit(
+            resource.RLIMIT_AS, (limits.rlimit_as_mb * _MB, limits.rlimit_as_mb * _MB)
+        )
     resource.setrlimit(
         resource.RLIMIT_FSIZE, (limits.rlimit_fsize_mb * _MB, limits.rlimit_fsize_mb * _MB)
     )

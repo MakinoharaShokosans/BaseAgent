@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -93,7 +94,7 @@ async def test_tool_output_transient_event(rig: ApiRig) -> None:
         turn_offset=0,
     )
 
-    received: list[dict] = []  # type: ignore[type-arg]
+    received: list[Mapping[str, object]] = []
 
     async def listener() -> None:
         async for ev in rig.services.hub.stream("task_tool_test", 0, heartbeat_sec=1.0):

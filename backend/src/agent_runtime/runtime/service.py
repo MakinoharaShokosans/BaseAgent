@@ -411,6 +411,7 @@ class TaskService:
                 "terminated",
             )
         ):
+            # 记忆收尾：即时写入 turn 与会话记忆；耗时的提炼压缩已解耦为后台异步协程，不阻塞广播
             report = await self._flow.finish(
                 state.session_id,
                 state,

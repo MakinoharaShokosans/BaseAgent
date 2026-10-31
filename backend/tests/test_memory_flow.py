@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -303,6 +304,7 @@ async def test_reaching_the_watermark_compacts_after_the_turns_are_written(
     for i in range(3):  # 每对 ≥ 30 个字符 -> 很快越过 80
         state = with_state(make_state(task_id=f"t{i}", task_goal="目" * 20), facts=())
         await f.finish("s1", state, delivery="答" * 20)
+    await asyncio.gather(*f._background_tasks)
     assert ex.calls >= 1 and (await store.load_memory("s1")).watermark > 0
 
 
@@ -312,8 +314,11 @@ async def test_overflowing_the_pending_cap_triggers_an_early_merge(
 ) -> None:
     ex = Ex()
     state = finished(make_state, facts=("a", "b", "c", "d"))
-    report = await flow(store, ex, max_pending=3).finish("s1", state, delivery="ok")
-    assert ex.calls == 1 and report.compaction == "compacted"
+    f = flow(store, ex, max_pending=3)
+    report = await f.finish("s1", state, delivery="ok")
+    assert report.compaction is None
+    await asyncio.gather(*f._background_tasks)
+    assert ex.calls == 1
 
 
 @pytest.mark.unit
@@ -331,5 +336,8 @@ async def test_a_failing_extractor_is_reported_and_leaves_the_turns_written(
     f = flow(store, Ex(fail=True))
     state = finished(make_state, facts=("a", "b", "c", "d"))
     report = await f.finish("s1", state, delivery="ok")
-    assert report.compaction == "failed" and report.error is None
+    assert report.compaction is None and report.error is None
+    await asyncio.gather(*f._background_tasks)
     assert len(await store.turns_after("s1", 0)) == 2
+    assert (await store.load_memory("s1")).compaction_failures == 1
+

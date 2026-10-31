@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -116,6 +117,7 @@ class MemoryFlow:
         self._persist = persist_task_facts
         self._count = count_tokens
         self._clock = clock
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def prepare(self, session_id: str) -> SessionContext:
         memory = await self._store.load_memory(session_id)
@@ -203,8 +205,18 @@ class MemoryFlow:
             return out.memory
 
         await self._store.update_memory(session_id, apply)
-        compaction = await self._compactor.maybe_compact(session_id, force=any(result_flags))
-        return FinishReport(compaction=compaction.status, dropped=(*dropped, *compaction.dropped))
+        task = asyncio.create_task(
+            self._background_compact(session_id, force=any(result_flags))
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return FinishReport(dropped=tuple(dropped))
+
+    async def _background_compact(self, session_id: str, *, force: bool) -> None:
+        try:
+            await self._compactor.maybe_compact(session_id, force=force)
+        except Exception:
+            logger.exception("会话 {} 后台压缩记忆失败", session_id)
 
     @staticmethod
     def _redact(text: str, state: AgentState) -> str:
