@@ -35,6 +35,7 @@ import {
   type Activity,
 } from '../../api/queries';
 import { ThemeToggle } from '../../components/layout/ThemeToggle';
+import { BrandBadge, StarLogo } from '../../components/common/BrandLogo';
 import { ConfirmDialog } from '../../components/modals/ConfirmDialog';
 import { RenameWorkspaceModal } from '../../components/modals/RenameWorkspaceModal';
 import { WorkspaceModal } from '../../components/modals/WorkspaceModal';
@@ -208,6 +209,13 @@ export function Sidebar({ collapsedRail = false }: { collapsedRail?: boolean }) 
         aria-label="侧栏"
         className="relative z-drawer flex h-full w-[56px] shrink-0 flex-col items-center gap-1 border-r border-ink/[0.06] bg-side/80 py-3 backdrop-blur-2xl dark:border-white/[0.06]"
       >
+        <Link
+          to="/"
+          aria-label="返回首页"
+          className="mb-1.5 flex h-8 w-8 items-center justify-center rounded-lg transition-transform hover:scale-105 active:scale-95"
+        >
+          <StarLogo size={20} />
+        </Link>
         <IconButton label="展开侧栏" hint="Ctrl+B" side="right" onClick={toggleSidebar}>
           <PanelLeftOpen size={17} />
         </IconButton>
@@ -259,7 +267,14 @@ export function Sidebar({ collapsedRail = false }: { collapsedRail?: boolean }) 
       aria-label="侧栏"
       className="relative z-drawer flex h-full w-[280px] max-w-[86vw] shrink-0 flex-col overflow-hidden border-r border-ink/[0.06] bg-side/80 backdrop-blur-2xl backdrop-saturate-150 dark:border-white/[0.06]"
     >
-      <div className="flex h-12 shrink-0 items-center gap-1 px-3">
+      <div className="flex h-12 shrink-0 items-center gap-1.5 px-3">
+        <Link
+          to="/"
+          className="flex items-center transition-opacity hover:opacity-80"
+          aria-label="BaseAgent 首页"
+        >
+          <BrandBadge />
+        </Link>
         <span className="min-w-0 flex-1" />
         <IconButton
           label={searching ? '关闭搜索' : '搜索会话'}

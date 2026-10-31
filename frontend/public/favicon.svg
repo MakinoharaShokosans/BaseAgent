@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="star-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="45%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#f472b6" />
+    </linearGradient>
+    <radialGradient id="star-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- 背景容器：深邃黑曜石，双色主题均极致清晰 -->
+  <rect width="32" height="32" rx="7.5" fill="#0b0d12" />
+  <rect width="32" height="32" rx="7.5" fill="none" stroke="rgba(255, 255, 255, 0.12)" stroke-width="1" />
+
+  <!-- 柔光背晕 -->
+  <circle cx="16" cy="16" r="10" fill="url(#star-glow)" />
+
+  <!-- 主四芒星 (Four-pointed Star) -->
+  <path
+    d="M16 4.5 C16.8 10.2 21.8 15.2 27.5 16 C21.8 16.8 16.8 21.8 16 27.5 C15.2 21.8 10.2 16.8 4.5 16 C10.2 15.2 15.2 10.2 16 4.5 Z"
+    fill="url(#star-grad)"
+  />
+
+  <!-- 伴星微芒 -->
+  <path
+    d="M24.5 5.5 C24.8 6.8 25.7 7.7 27 8 C25.7 8.3 24.8 9.2 24.5 10.5 C24.2 9.2 23.3 8.3 22 8 C23.3 7.7 24.2 6.8 24.5 5.5 Z"
+    fill="#ffffff"
+    opacity="0.9"
+  />
+</svg>
