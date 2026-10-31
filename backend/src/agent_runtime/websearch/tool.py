@@ -47,7 +47,10 @@ class WebSearchTool(AgentTool):
             "category": {
                 "type": "string",
                 "enum": ["general", "images", "it", "news", "science"],
-                "description": "可选，搜索分类：general（综合网页，默认）、images（搜图片）、it（GitHub/StackOverflow/技术代码）、news（新闻资讯）、science（学术论文）",
+                "description": (
+                    "可选，搜索分类：general（综合网页，默认）、images（搜图片）、"
+                    "it（GitHub/StackOverflow/技术代码）、news（新闻资讯）、science（学术论文）"
+                ),
             },
             "urls": {
                 "type": "array",

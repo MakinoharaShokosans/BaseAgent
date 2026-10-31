@@ -87,7 +87,15 @@ class SidecarSearchClient:
                 )
             except DependencyUnavailableError:
                 out += [
-                    Evidence(h.url, h.title, "", "ERROR", category=h.category, img_src=h.img_src, thumbnail_src=h.thumbnail_src)
+                    Evidence(
+                        h.url,
+                        h.title,
+                        "",
+                        "ERROR",
+                        category=h.category,
+                        img_src=h.img_src,
+                        thumbnail_src=h.thumbnail_src,
+                    )
                     for h in batch
                 ]
                 continue

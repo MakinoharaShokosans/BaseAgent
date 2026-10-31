@@ -53,7 +53,9 @@ class StructuredInvoker(Protocol):
 
 
 class SearchClient(Protocol):
-    async def search(self, query: str, limit: int, task_id: str) -> SearchOutcome: ...
+    async def search(
+        self, query: str, limit: int, task_id: str, category: str = "general"
+    ) -> SearchOutcome: ...
 
     async def fetch(self, hits: Sequence[Evidence], task_id: str) -> list[Evidence]: ...
 
@@ -151,10 +153,13 @@ class WebSearchRunner:
                         f"![{e.title or '图片'}]({e.img_src or e.url})"
                         for e in image_items
                     ]
+                    question = (
+                        request.questions[0] if request.questions else request.topic
+                    )
                     raw = RawReport(
                         findings=[
                             RawFinding(
-                                question=request.questions[0] if request.questions else request.topic,
+                                question=question,
                                 answer="\n\n".join(answers),
                                 confidence="high",
                                 sources=[e.url for e in image_items],
@@ -459,7 +464,9 @@ class WebSearchRunner:
 
 def _usable(evidence: Mapping[str, Evidence]) -> int:
     """抓到了可用正文或摘要的来源数。"""
-    return sum(1 for e in evidence.values() if e.status in ("OK", "SNIPPET") and (e.text or e.title))
+    return sum(
+        1 for e in evidence.values() if e.status in ("OK", "SNIPPET") and (e.text or e.title)
+    )
 
 
 def _interleave(

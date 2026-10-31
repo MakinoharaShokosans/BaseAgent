@@ -99,5 +99,7 @@ def render_failure(report: WebSearchReport) -> str:
         kw in reasons for kw in ("超时", "时间用尽", "不可用", "拒绝了请求", "连接", "失败")
     )
     if is_network_issue:
-        return f"网络检索未获取到有效内容（{reasons}）。建议检查网络连接或更换关键词，换一个角度提问。"
+        return (
+            f"网络检索未获取到有效内容（{reasons}）。建议检查网络连接或更换关键词，换一个角度提问。"
+        )
     return f"未检索到相关的公开网页内容（{reasons}）。请换一个角度提问或提供更具体的关键词。"
