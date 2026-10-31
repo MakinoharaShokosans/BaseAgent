@@ -499,7 +499,13 @@ class BashShellConfig(_Section):
 class WebSearchConfig(_Section):
     host: str = "127.0.0.1"
     port: Port = 8003
-    provider: str = "ddgs"
+    provider: str = "searxng"
+    searxng_instances: list[str] = [
+        "https://searx.tiekoetter.com",
+        "https://searx.be",
+        "https://search.ononoki.org",
+    ]
+    searxng_language: str = "zh-CN"
     ddgs_backends: list[str] = ["yahoo", "bing", "google"]
     max_results: PosInt = 8
     fetch_concurrency: PosInt = 5

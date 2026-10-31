@@ -21,7 +21,13 @@ from services.web_search.netguard import (
     check_url,
     ip_is_public,
 )
-from services.web_search.providers import DdgsProvider, DuckDuckGoProvider, SearchBlocked, SearchHit
+from services.web_search.providers import (
+    DdgsProvider,
+    DuckDuckGoProvider,
+    SearchBlocked,
+    SearchHit,
+    SearxngProvider,
+)
 
 PUBLIC = "93.184.216.34"
 PUBLIC_B = "151.101.1.69"
@@ -363,6 +369,109 @@ async def test_duckduckgo_challenge_page_is_a_block_not_an_empty_result() -> Non
     )
     with pytest.raises(SearchBlocked):
         await provider.search("python", 5)
+
+
+@pytest.mark.unit
+async def test_searxng_provider_maps_results() -> None:
+    data = {
+        "results": [
+            {
+                "title": " Python  Docs ",
+                "url": "https://docs.python.org/3/",
+                "content": " The official   docs ",
+            },
+            {"title": "bad", "url": "javascript:alert(1)", "content": ""},
+            {"title": "Ex", "url": "https://example.com/x", "content": "Sample content"},
+        ]
+    }
+    sent_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent_requests.append(request)
+        return httpx.Response(200, json=data)
+
+    provider = SearxngProvider(
+        instances=["https://searx.example.com"],
+        user_agent="test-agent",
+        timeout_sec=5,
+        language="zh-CN",
+        transport=httpx.MockTransport(handler),
+    )
+    hits = await provider.search("python", 10)
+    assert len(hits) == 2
+    assert hits[0] == SearchHit("Python Docs", "https://docs.python.org/3/", "The official docs")
+    assert hits[1].url == "https://example.com/x"
+    assert len(sent_requests) == 1
+    assert sent_requests[0].url.params["q"] == "python"
+    assert sent_requests[0].url.params["format"] == "json"
+    assert sent_requests[0].url.params["language"] == "zh-CN"
+
+
+@pytest.mark.unit
+async def test_searxng_provider_fails_over_to_next_instance() -> None:
+    node1_data = "Too Many Requests"
+    node2_data = {
+        "results": [
+            {"title": "Node2 Hit", "url": "https://node2.example.com/item", "content": "ok"}
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "node1" in str(request.url):
+            return httpx.Response(429, text=node1_data)
+        return httpx.Response(200, json=node2_data)
+
+    provider = SearxngProvider(
+        instances=["https://node1.example.com", "https://node2.example.com"],
+        user_agent="test-agent",
+        timeout_sec=5,
+        transport=httpx.MockTransport(handler),
+    )
+    hits = await provider.search("query", 5)
+    assert len(hits) == 1
+    assert hits[0].url == "https://node2.example.com/item"
+
+
+@pytest.mark.unit
+async def test_searxng_provider_all_blocked_raises_search_blocked() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="Forbidden")
+
+    provider = SearxngProvider(
+        instances=["https://node1.example.com", "https://node2.example.com"],
+        user_agent="test-agent",
+        timeout_sec=5,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(SearchBlocked) as exc_info:
+        await provider.search("query", 5)
+    assert "所有 SearXNG 实例都失败" in str(exc_info.value)
+
+
+@pytest.mark.unit
+async def test_searxng_provider_empty_results() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": []})
+
+    provider = SearxngProvider(
+        instances=["https://node1.example.com"],
+        user_agent="test-agent",
+        timeout_sec=5,
+        transport=httpx.MockTransport(handler),
+    )
+    assert await provider.search("query", 5) == []
+
+
+@pytest.mark.unit
+async def test_searxng_provider_no_instances_raises_search_blocked() -> None:
+    provider = SearxngProvider(
+        instances=[],
+        user_agent="test-agent",
+        timeout_sec=5,
+    )
+    with pytest.raises(SearchBlocked) as exc_info:
+        await provider.search("query", 5)
+    assert "未配置任何 SearXNG 实例" in str(exc_info.value)
 
 
 def fake_ddgs(monkeypatch: pytest.MonkeyPatch, script: dict[str, Any]) -> list[str]:

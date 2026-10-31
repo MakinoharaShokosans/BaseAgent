@@ -109,6 +109,83 @@ class DuckDuckGoProvider:
         return hits[:limit]
 
 
+class SearxngProvider:
+    """SearXNG 元搜索提供者：支持公网或自建实例池，按顺序尝试，自动故障转移。
+
+    免 API Key、免额外安装进程（走公网节点），直接获取标准 JSON 响应，聚合多引擎结果。
+    """
+
+    name = "searxng"
+    needs_key = False
+    may_return_private_links = True
+
+    def __init__(
+        self,
+        *,
+        instances: Sequence[str],
+        user_agent: str,
+        timeout_sec: float,
+        language: str = "zh-CN",
+        deadline_sec: float | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._instances = tuple(i.rstrip("/") for i in instances if i.strip())
+        self._language = language.strip()
+        self._deadline = deadline_sec if deadline_sec is not None else timeout_sec * 2.0
+        self._client = httpx.AsyncClient(
+            timeout=timeout_sec,
+            transport=transport,
+            headers={"User-Agent": user_agent},
+            trust_env=False,
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def search(self, query: str, limit: int) -> list[SearchHit]:
+        if not self._instances:
+            raise SearchBlocked("未配置任何 SearXNG 实例")
+
+        started = time.monotonic()
+        failures: list[str] = []
+        for instance in self._instances:
+            if failures and time.monotonic() - started >= self._deadline:
+                break
+            params = {"q": query, "format": "json"}
+            if self._language:
+                params["language"] = self._language
+            try:
+                response = await self._client.get(f"{instance}/search", params=params)
+                if response.status_code != 200:
+                    failures.append(f"{instance}：HTTP {response.status_code}")
+                    continue
+                data = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                failures.append(f"{instance}：{exc}")
+                continue
+
+            results = data.get("results")
+            if not isinstance(results, list):
+                failures.append(f"{instance}：响应格式非预期（缺少 results 列表）")
+                continue
+
+            hits = [
+                SearchHit(
+                    re.sub(r"\s+", " ", str(r.get("title", ""))).strip(),
+                    str(r.get("url", "")),
+                    re.sub(r"\s+", " ", str(r.get("content", ""))).strip(),
+                )
+                for r in results
+                if str(r.get("url", "")).startswith(("http://", "https://"))
+            ]
+            if hits:
+                return hits[:limit]
+
+        if failures and len(failures) == len(self._instances):
+            raise SearchBlocked("所有 SearXNG 实例都失败：" + "；".join(failures))
+        return []
+
+
 class DdgsProvider:
     """``ddgs`` 库，按顺序依次试各个后端，取第一个有结果的。
 

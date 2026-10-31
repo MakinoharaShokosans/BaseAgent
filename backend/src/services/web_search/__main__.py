@@ -11,7 +11,12 @@ import uvicorn
 from baseagent_config import ConfigError, load_settings
 from services.web_search.app import WebServices, create_app
 from services.web_search.netguard import SafeFetcher
-from services.web_search.providers import DdgsProvider, DuckDuckGoProvider, SearchProvider
+from services.web_search.providers import (
+    DdgsProvider,
+    DuckDuckGoProvider,
+    SearchProvider,
+    SearxngProvider,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,7 +30,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cfg = loaded.settings.web_search
     provider: SearchProvider
-    if cfg.provider == "ddgs":
+    if cfg.provider == "searxng":
+        provider = SearxngProvider(
+            instances=cfg.searxng_instances,
+            language=cfg.searxng_language,
+            user_agent=cfg.user_agent,
+            timeout_sec=float(cfg.request_timeout_sec),
+        )
+    elif cfg.provider == "ddgs":
         provider = DdgsProvider(
             timeout_sec=float(cfg.request_timeout_sec), backends=cfg.ddgs_backends
         )
@@ -34,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
             user_agent=cfg.user_agent, timeout_sec=float(cfg.request_timeout_sec)
         )
     else:
-        print(f"未知的搜索提供者 {cfg.provider!r}（可选 ddgs、ddg）", file=sys.stderr)
+        print(f"未知的搜索提供者 {cfg.provider!r}（可选 searxng、ddgs、ddg）", file=sys.stderr)
         return 2
     services = WebServices(
         config=cfg,

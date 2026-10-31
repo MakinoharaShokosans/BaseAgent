@@ -566,7 +566,7 @@ async def test_research_runs_isolated_and_only_the_distilled_report_enters_the_t
     assert state is not None
     tool_message = next(m for m in state.messages if m.role == "tool")
     assert '<tool_observation tool="websearch" trust="untrusted">' in tool_message.content
-    assert "外部网页整理的资料" in tool_message.content
+    assert "公开网络整理的参考资料" in tool_message.content
     assert "用 migrate app 0001" in tool_message.content
     assert "phish.example" not in tool_message.content  # 钓鱼来源被净化通道丢弃
     everything = json.dumps([m.content for m in state.messages], ensure_ascii=False)

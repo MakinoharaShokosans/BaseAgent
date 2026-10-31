@@ -14,7 +14,7 @@ GET  /api/v1/health
 
 | 步骤 | 实现 |
 |---|---|
-| 检索 | 可插拔的搜索提供者，默认 `ddgs` 库（免 Key，按 `ddgs_backends` 的顺序依次试各引擎） |
+| 检索 | 可插拔的搜索提供者，默认 `searxng` 实例池（免 Key、免额外进程、原生 JSON，支持公网或自建节点自动故障转移），备选 `ddgs` 库与 `ddg` 网页抓取 |
 | 去重 | URL 指纹加内容指纹 |
 | 抓取 | 共享的异步 HTTP 客户端，信号量限制并发，跟随重定向 |
 | 清洗 | `trafilatura` 提取正文，输出保留代码块的 Markdown；放入线程池，不阻塞事件循环 |
@@ -55,7 +55,13 @@ GET  /api/v1/health
 [web_search]
 host = "127.0.0.1"
 port = 8003
-provider = "ddgs"
+provider = "searxng"
+searxng_instances = [
+    "https://searx.tiekoetter.com",
+    "https://searx.be",
+    "https://search.ononoki.org",
+]
+searxng_language = "zh-CN"
 ddgs_backends = ["yahoo", "bing", "google"]   # 依次试，取第一个有结果的
 allow_fake_ip = false         # 本机代理使用 fake-ip DNS（Clash 等）时设 true，放行 198.18.0.0/15
 max_results = 8
@@ -147,4 +153,4 @@ artifacts_dir = "storage/artifacts"
 - **去重**：URL 归一（大小写、片段、默认端口、尾部斜杠）后去重；内容指纹相同的页面只留第一个。
 - **落盘**：超过 `max_content_tokens` 写 `{artifacts_dir}/{task_id}/web_{hash}.md`，响应只回预览和路径；`task_id` 只允许 `[A-Za-z0-9_-]{1,64}`。
 - **每主机并发上限（§5 第 3 项）**与全局抓取并发都用信号量。总超时 504；搜索提供者出错以 `error` 字段表达而不是抛业务异常。
-- **提供者**：`ddgs`（默认，用 `ddgs` 库，按 `ddgs_backends` 的顺序依次试，第一个有结果的为准。实测 `auto` 随机挑后端，约三分之一的调用返回空；单个后端各有 25%–60% 的失败率，`brave`、`mojeek` 在测试网络里全被拦；依次试 yahoo、bing、google 后，同样的三个查询都能返回 7 条，单次约 1.5 秒）和 `ddg`（直接解析 `html.duckduckgo.com`，常被反爬验证页拦截，仅作备选）。搜索源拒绝请求（反爬、限流、全部后端失败）时接口返回 `error: "搜索被拦截：…"`，与“搜到 0 条”区分，模型据此知道不是换措辞能解决的。**未做**：域名白/黑名单的执行（配置项已定义）、抓取缓存、`robots.txt`、`fetched_ip` 诊断字段。
+- **提供者**：`searxng`（默认，采用公网或自建 SearXNG 实例池，免 Key、免额外本地进程、原生 JSON API，支持按 `searxng_instances` 顺序自动故障转移；兼顾多引擎聚合与抗封锁能力）、`ddgs`（用 `ddgs` 库，按 `ddgs_backends` 的顺序依次试，第一个有结果的为准）和 `ddg`（直接解析 `html.duckduckgo.com`，常被反爬验证页拦截，仅作备选）。搜索源拒绝请求（反爬、限流、全部后端/实例失败）时接口返回 `error: "搜索被拦截：…"`，与“搜到 0 条”区分，模型据此知道不是换措辞能解决的。**未做**：域名白/黑名单的执行（配置项已定义）、抓取缓存、`robots.txt`、`fetched_ip` 诊断字段。
