@@ -318,11 +318,24 @@ class Search:
         self.fetched: list[str] = []
         self.full = {e.url: e for group in pages.values() for e in group}
 
-    async def search(self, query: str, limit: int, task_id: str) -> SearchOutcome:
+    async def search(
+        self, query: str, limit: int, task_id: str, category: str = "general"
+    ) -> SearchOutcome:
         self.calls.append(query)
         if query in self.fail:
             raise RuntimeError("search down")
-        hits = [Evidence(e.url, e.title, "摘要", "SNIPPET") for e in self.pages.get(query, [])]
+        hits = [
+            Evidence(
+                e.url,
+                e.title,
+                "摘要",
+                "SNIPPET",
+                category=e.category,
+                img_src=e.img_src,
+                thumbnail_src=e.thumbnail_src,
+            )
+            for e in self.pages.get(query, [])
+        ]
         return SearchOutcome(hits, "" if hits else self.errors.get(query, ""))
 
     async def fetch(self, hits: Sequence[Evidence], task_id: str) -> list[Evidence]:
@@ -706,7 +719,13 @@ async def test_an_empty_report_is_a_failure_observation_without_raw_text() -> No
 @pytest.mark.unit
 def test_the_tool_schema_takes_a_query_and_or_urls() -> None:
     schema = tool_for(Gateway([], GOOD), Search({})).schema()
-    assert set(schema.parameters["properties"]) == {"query", "urls", "questions", "max_sources"}
+    assert set(schema.parameters["properties"]) == {
+        "query",
+        "category",
+        "urls",
+        "questions",
+        "max_sources",
+    }
     assert "required" not in schema.parameters  # query 与 urls 至少一个，由工具校验
 
 
@@ -793,3 +812,23 @@ async def test_unreadable_urls_are_listed_with_their_status_and_at_most_five_are
     wide = Search({"x": [page(u) for u in seven]})
     await tool_for(Gateway([], GOOD), wide).invoke({"urls": seven})
     assert len(wide.fetched) <= 3  # 受 max_sources 上限约束（测试配置为 3）
+
+
+@pytest.mark.unit
+async def test_image_search_generates_markdown_image_findings() -> None:
+    img = Evidence(
+        "https://example.com/logo.html",
+        "Python Logo",
+        "",
+        "OK",
+        category="images",
+        img_src="https://example.com/logo.png",
+    )
+    search = Search({"python logo": [img]})
+    gateway = Gateway([], GOOD)
+    tool = tool_for(gateway, search)
+    result = await tool.invoke({"query": "python logo", "category": "images"})
+    assert result.ok
+    assert "![Python Logo](https://example.com/logo.png)" in result.content
+    assert "https://example.com/logo.html" in result.content
+

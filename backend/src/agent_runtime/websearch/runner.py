@@ -26,6 +26,7 @@ from agent_runtime.subagents.usage import ChildUsage
 from agent_runtime.websearch.models import (
     Evidence,
     QueryPlan,
+    RawFinding,
     RawReport,
     ReportLimits,
     WebSearchReport,
@@ -140,13 +141,30 @@ class WebSearchRunner:
                 warnings.append(
                     f"检索时间用尽（为提炼预留了 {self._reserve:g} 秒），只用已取得的来源提炼"
                 )
-            raw = (
-                await self._extract(request, evidence, budget, warnings)
-                if evidence
-                else RawReport()
-            )
             if not evidence:
                 warnings.append("没有取得任何可用来源")
+                raw = RawReport()
+            elif request.category == "images":
+                image_items = [e for e in evidence.values() if e.img_src or e.url]
+                if image_items:
+                    answers = [
+                        f"![{e.title or '图片'}]({e.img_src or e.url})"
+                        for e in image_items
+                    ]
+                    raw = RawReport(
+                        findings=[
+                            RawFinding(
+                                question=request.questions[0] if request.questions else request.topic,
+                                answer="\n\n".join(answers),
+                                confidence="high",
+                                sources=[e.url for e in image_items],
+                            )
+                        ]
+                    )
+                else:
+                    raw = RawReport()
+            else:
+                raw = await self._extract(request, evidence, budget, warnings)
         except Exception as exc:  # 任何阶段失败都降级为空报告
             logger.warning("研究失败：{}", type(exc).__name__)
             warnings.append(f"研究过程出错：{type(exc).__name__}")
@@ -155,7 +173,16 @@ class WebSearchRunner:
             raw,
             fetched={e.url for e in evidence.values() if e.status in ("OK", "SNIPPET")},
             sources=tuple(
-                WebSearchSource(e.url, e.title, e.status, e.artifact_id) for e in evidence.values()
+                WebSearchSource(
+                    e.url,
+                    e.title,
+                    e.status,
+                    e.artifact_id,
+                    category=e.category,
+                    img_src=e.img_src,
+                    thumbnail_src=e.thumbnail_src,
+                )
+                for e in evidence.values()
             ),
             limits=self._limits.report,
             rounds_used=rounds,
@@ -299,6 +326,23 @@ class WebSearchRunner:
         chosen = _interleave([o.hits for o in outcomes], evidence, room)
         if not chosen:
             return 0
+        if request.category == "images":
+            fresh = 0
+            for item in chosen:
+                if not item.url or item.url in evidence:
+                    continue
+                evidence[item.url] = Evidence(
+                    item.url,
+                    item.title,
+                    item.text,
+                    "OK",
+                    item.artifact_id,
+                    category="images",
+                    img_src=item.img_src,
+                    thumbnail_src=item.thumbnail_src,
+                )
+                fresh += 1
+            return fresh
         try:
             fetched = await self._search.fetch(chosen, request.task_id)
         except Exception as exc:  # 抓取服务出错：已有的来源照常提炼
@@ -310,7 +354,16 @@ class WebSearchRunner:
             if not item.url or item.url in evidence:
                 continue
             text = item.text[: self._limits.max_source_chars]
-            evidence[item.url] = Evidence(item.url, item.title, text, item.status, item.artifact_id)
+            evidence[item.url] = Evidence(
+                item.url,
+                item.title,
+                text,
+                item.status,
+                item.artifact_id,
+                category=item.category,
+                img_src=item.img_src,
+                thumbnail_src=item.thumbnail_src,
+            )
             fresh += item.status == "OK"
         return fresh
 
@@ -319,9 +372,19 @@ class WebSearchRunner:
         outcome = SearchOutcome(error="没有发起检索")
         for attempt in range(2):
             try:
-                outcome = await self._search.search(
-                    query, self._cap(request) + SPARE_CANDIDATES, request.task_id
-                )
+                try:
+                    outcome = await self._search.search(
+                        query,
+                        self._cap(request) + SPARE_CANDIDATES,
+                        request.task_id,
+                        category=request.category,
+                    )
+                except TypeError:
+                    outcome = await self._search.search(
+                        query,
+                        self._cap(request) + SPARE_CANDIDATES,
+                        request.task_id,
+                    )
             except Exception as exc:  # 单路失败降级为空结果，不影响其他路
                 logger.warning("检索失败：{}（{}）", query[:60], type(exc).__name__)
                 outcome = SearchOutcome(error=f"检索请求失败（{type(exc).__name__}）")

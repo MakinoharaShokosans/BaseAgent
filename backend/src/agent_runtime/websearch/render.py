@@ -58,15 +58,23 @@ def render_report(report: WebSearchReport, *, max_chars: int, envelope: bool = T
     if report.unresolved:
         lines += ["", "## 未解决的问题"] + [f"- {u}" for u in report.unresolved]
     if report.sources:
-        lines += ["", "## 读取过的页面"]
-        for src in report.sources[:_MAX_SOURCES_LISTED]:
-            if src.status == "OK":
-                mark = ""
-            elif src.status == "SNIPPET":
-                mark = "（摘要）"
-            else:
-                mark = f"（{src.status}，没读到正文）"
-            lines.append(f"- {src.title or src.url}：{src.url}{mark}")
+        images = [s for s in report.sources if s.category == "images" or s.img_src]
+        non_images = [s for s in report.sources if not (s.category == "images" or s.img_src)]
+        if images:
+            lines += ["", "## 图片资源"]
+            for img in images[:_MAX_SOURCES_LISTED]:
+                img_url = img.img_src or img.url
+                lines.append(f"- ![{img.title or '图片'}]({img_url})（来源：{img.url}）")
+        if non_images:
+            lines += ["", "## 读取过的页面"]
+            for src in non_images[:_MAX_SOURCES_LISTED]:
+                if src.status == "OK":
+                    mark = ""
+                elif src.status == "SNIPPET":
+                    mark = "（摘要）"
+                else:
+                    mark = f"（{src.status}，没读到正文）"
+                lines.append(f"- {src.title or src.url}：{src.url}{mark}")
     if report.warnings:
         lines += ["", "## 护栏标注"] + [f"- {w}" for w in report.warnings]
     lines += [

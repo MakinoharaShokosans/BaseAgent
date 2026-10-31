@@ -22,6 +22,10 @@ class SearchHit:
     title: str
     url: str
     snippet: str
+    category: str = "general"
+    img_src: str | None = None
+    thumbnail_src: str | None = None
+    engine: str = ""
 
 
 class SearchProvider(Protocol):
@@ -29,7 +33,9 @@ class SearchProvider(Protocol):
     needs_key: bool
     may_return_private_links: bool
 
-    async def search(self, query: str, limit: int) -> list[SearchHit]: ...
+    async def search(
+        self, query: str, limit: int, category: str = "general"
+    ) -> list[SearchHit]: ...
 
 
 class SearchBlocked(RuntimeError):
@@ -93,7 +99,9 @@ class DuckDuckGoProvider:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def search(self, query: str, limit: int) -> list[SearchHit]:
+    async def search(
+        self, query: str, limit: int, category: str = "general"
+    ) -> list[SearchHit]:
         response = await self._client.post("https://html.duckduckgo.com/html/", data={"q": query})
         response.raise_for_status()
         if response.status_code != 200 or "result__a" not in response.text:
@@ -102,7 +110,12 @@ class DuckDuckGoProvider:
         parser = _DuckParser()
         parser.feed(response.text)
         hits = [
-            SearchHit(re.sub(r"\s+", " ", t).strip(), url, re.sub(r"\s+", " ", s).strip())
+            SearchHit(
+                re.sub(r"\s+", " ", t).strip(),
+                url,
+                re.sub(r"\s+", " ", s).strip(),
+                category=category,
+            )
             for url, t, s in parser.hits
             if url.startswith(("http://", "https://"))
         ]
@@ -113,6 +126,7 @@ class SearxngProvider:
     """SearXNG 元搜索提供者：支持公网或自建实例池，按顺序尝试，自动故障转移。
 
     免 API Key、免额外安装进程（走公网节点），直接获取标准 JSON 响应，聚合多引擎结果。
+    支持 categories 参数搜索图片（images）、IT（it）、新闻（news）、科学（science）等多品类。
     """
 
     name = "searxng"
@@ -142,7 +156,9 @@ class SearxngProvider:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def search(self, query: str, limit: int) -> list[SearchHit]:
+    async def search(
+        self, query: str, limit: int, category: str = "general"
+    ) -> list[SearchHit]:
         if not self._instances:
             raise SearchBlocked("未配置任何 SearXNG 实例")
 
@@ -151,7 +167,9 @@ class SearxngProvider:
         for instance in self._instances:
             if failures and time.monotonic() - started >= self._deadline:
                 break
-            params = {"q": query, "format": "json"}
+            params: dict[str, Any] = {"q": query, "format": "json"}
+            if category and category != "general":
+                params["categories"] = category
             if self._language:
                 params["language"] = self._language
             try:
@@ -171,9 +189,13 @@ class SearxngProvider:
 
             hits = [
                 SearchHit(
-                    re.sub(r"\s+", " ", str(r.get("title", ""))).strip(),
-                    str(r.get("url", "")),
-                    re.sub(r"\s+", " ", str(r.get("content", ""))).strip(),
+                    title=re.sub(r"\s+", " ", str(r.get("title", ""))).strip(),
+                    url=str(r.get("url", "")),
+                    snippet=re.sub(r"\s+", " ", str(r.get("content", ""))).strip(),
+                    category=category,
+                    img_src=str(r["img_src"]) if r.get("img_src") else None,
+                    thumbnail_src=str(r["thumbnail_src"]) if r.get("thumbnail_src") else None,
+                    engine=str(r.get("engine", "")),
                 )
                 for r in results
                 if str(r.get("url", "")).startswith(("http://", "https://"))
@@ -209,10 +231,12 @@ class DdgsProvider:
         # 整条链的总时限：前面的后端慢，后面的就不试了，免得撞上 sidecar 的总超时
         self._deadline = deadline_sec if deadline_sec is not None else timeout_sec * 1.5
 
-    async def search(self, query: str, limit: int) -> list[SearchHit]:
-        return await asyncio.to_thread(self._search, query, limit)
+    async def search(
+        self, query: str, limit: int, category: str = "general"
+    ) -> list[SearchHit]:
+        return await asyncio.to_thread(self._search, query, limit, category)
 
-    def _search(self, query: str, limit: int) -> list[SearchHit]:
+    def _search(self, query: str, limit: int, category: str = "general") -> list[SearchHit]:
         from ddgs import DDGS  # 仅此提供者需要，延迟导入
         from ddgs.exceptions import DDGSException
 
@@ -229,7 +253,7 @@ class DdgsProvider:
                 if "No results found" not in str(exc):
                     failures.append(f"{backend}：{exc}")
                 continue
-            hits = _rows_to_hits(rows, limit)
+            hits = _rows_to_hits(rows, limit, category=category)
             if hits:
                 return hits
         if failures and len(failures) == len(self._backends):
@@ -237,12 +261,15 @@ class DdgsProvider:
         return []
 
 
-def _rows_to_hits(rows: Sequence[dict[str, Any]], limit: int) -> list[SearchHit]:
+def _rows_to_hits(
+    rows: Sequence[dict[str, Any]], limit: int, category: str = "general"
+) -> list[SearchHit]:
     return [
         SearchHit(
             re.sub(r"\s+", " ", str(row.get("title", ""))).strip(),
             str(row.get("href", "")),
             re.sub(r"\s+", " ", str(row.get("body", ""))).strip(),
+            category=category,
         )
         for row in rows
         if str(row.get("href", "")).startswith(("http://", "https://"))

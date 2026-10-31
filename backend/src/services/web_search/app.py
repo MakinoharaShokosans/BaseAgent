@@ -38,6 +38,7 @@ class QueryRequest(BaseModel):
     max_results: int | None = Field(default=None, ge=1)
     fetch: bool = True
     task_id: str = Field(min_length=1, max_length=64)
+    category: str = Field(default="general")
 
 
 class FetchItem(BaseModel):
@@ -117,6 +118,10 @@ def create_app(services: WebServices) -> FastAPI:
             "artifact_path": None,
             "error": None,
             "fingerprint": fingerprint(normalise_url(hit.url)),
+            "category": hit.category,
+            "img_src": hit.img_src,
+            "thumbnail_src": hit.thumbnail_src,
+            "engine": hit.engine,
         }
         host = (urlsplit(hit.url).hostname or "").lower()
         async with global_slots, host_slots[host]:
@@ -160,7 +165,12 @@ def create_app(services: WebServices) -> FastAPI:
         limit = min(body.max_results or cfg.max_results, cfg.max_results)
         try:
             async with asyncio.timeout(cfg.total_timeout_sec):
-                hits = await services.provider.search(body.query.strip(), limit * 2)
+                try:
+                    hits = await services.provider.search(
+                        body.query.strip(), limit * 2, category=body.category
+                    )
+                except TypeError:
+                    hits = await services.provider.search(body.query.strip(), limit * 2)
                 unique: list[SearchHit] = []
                 seen: set[str] = set()
                 for hit in hits:
@@ -169,10 +179,11 @@ def create_app(services: WebServices) -> FastAPI:
                         seen.add(key)
                         unique.append(hit)
                 chosen = unique[:limit]
-                if body.fetch:
-                    results = await asyncio.gather(*(fetch_one(h, body.task_id) for h in chosen))
-                else:
+                # 图片分类直接走轻量元数据通道，不抓取 HTML 正文
+                if body.category == "images" or not body.fetch:
                     results = [await _snippet_only(h) for h in chosen]
+                else:
+                    results = await asyncio.gather(*(fetch_one(h, body.task_id) for h in chosen))
         except TimeoutError as exc:
             raise HTTPException(
                 504, {"code": "TOTAL_TIMEOUT", "reason": "检索加抓取超过总超时"}
@@ -216,6 +227,10 @@ async def _snippet_only(hit: SearchHit) -> dict[str, Any]:
         "artifact_path": None,
         "error": None,
         "fingerprint": fingerprint(normalise_url(hit.url)),
+        "category": hit.category,
+        "img_src": hit.img_src,
+        "thumbnail_src": hit.thumbnail_src,
+        "engine": hit.engine,
     }
 
 

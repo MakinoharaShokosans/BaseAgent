@@ -408,6 +408,42 @@ async def test_searxng_provider_maps_results() -> None:
 
 
 @pytest.mark.unit
+async def test_searxng_provider_category_images_and_it() -> None:
+    data = {
+        "results": [
+            {
+                "title": "Python Logo",
+                "url": "https://example.com/logo.html",
+                "content": "Official Logo",
+                "img_src": "https://example.com/logo.png",
+                "thumbnail_src": "https://example.com/thumb.png",
+                "engine": "google images",
+            }
+        ]
+    }
+    sent_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent_requests.append(request)
+        return httpx.Response(200, json=data)
+
+    provider = SearxngProvider(
+        instances=["https://searx.example.com"],
+        user_agent="test-agent",
+        timeout_sec=5,
+        language="zh-CN",
+        transport=httpx.MockTransport(handler),
+    )
+    hits = await provider.search("python logo", 5, category="images")
+    assert len(hits) == 1
+    assert hits[0].category == "images"
+    assert hits[0].img_src == "https://example.com/logo.png"
+    assert hits[0].thumbnail_src == "https://example.com/thumb.png"
+    assert hits[0].engine == "google images"
+    assert sent_requests[0].url.params["categories"] == "images"
+
+
+@pytest.mark.unit
 async def test_searxng_provider_fails_over_to_next_instance() -> None:
     node1_data = "Too Many Requests"
     node2_data = {
@@ -576,7 +612,9 @@ class FakeProvider:
     ) -> None:
         self.hits, self.delay, self.error = hits, delay, error
 
-    async def search(self, query: str, limit: int) -> list[SearchHit]:
+    async def search(
+        self, query: str, limit: int, category: str = "general"
+    ) -> list[SearchHit]:
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.error:
@@ -751,3 +789,33 @@ async def test_cross_site_requests_and_bad_bodies_are_refused(tmp_path: Path) ->
         assert rebound.status_code == 403
         assert (await client.post("/api/v1/search/query", json={"query": ""})).status_code == 400
         assert (await client.get("/api/v1/health")).json()["status"] == "ok"
+
+
+@pytest.mark.unit
+async def test_query_images_category_bypasses_html_fetch(tmp_path: Path) -> None:
+    hits = [
+        SearchHit(
+            "Logo",
+            "https://example.com/logo.html",
+            "snippet",
+            category="images",
+            img_src="https://example.com/logo.png",
+            thumbnail_src="https://example.com/thumb.png",
+        )
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("Must not fetch HTML for image category")
+
+    async with make_client(tmp_path, hits, handler) as client:
+        response = await client.post(
+            "/api/v1/search/query",
+            json={"query": "logo", "category": "images", "task_id": "task_img"},
+        )
+    assert response.status_code == 200
+    res = response.json()["results"]
+    assert len(res) == 1
+    assert res[0]["category"] == "images"
+    assert res[0]["img_src"] == "https://example.com/logo.png"
+    assert res[0]["status"] == "SNIPPET_ONLY"
+

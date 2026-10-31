@@ -145,6 +145,9 @@ class WebSearchSource:
     title: str
     status: str
     artifact_id: str = ""
+    category: str = "general"
+    img_src: str = ""
+    thumbnail_src: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +276,7 @@ class WebSearchRequest:
 
     topic: str
     questions: tuple[str, ...]
+    category: str = "general"
     max_sources: int | None = None
     task_id: str = "websearch"
     query: str = ""
@@ -292,3 +296,6 @@ class Evidence:
     text: str
     status: str
     artifact_id: str = ""
+    category: str = "general"
+    img_src: str = ""
+    thumbnail_src: str = ""

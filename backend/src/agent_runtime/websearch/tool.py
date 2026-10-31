@@ -44,6 +44,11 @@ class WebSearchTool(AgentTool):
                 "type": "string",
                 "description": "要查什么，一句话或几个关键词；只想读指定网页时可以省略",
             },
+            "category": {
+                "type": "string",
+                "enum": ["general", "images", "it", "news", "science"],
+                "description": "可选，搜索分类：general（综合网页，默认）、images（搜图片）、it（GitHub/StackOverflow/技术代码）、news（新闻资讯）、science（学术论文）",
+            },
             "urls": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -119,7 +124,16 @@ class WebSearchTool(AgentTool):
         max_sources = (
             asked if isinstance(asked, int) and not isinstance(asked, bool) and asked > 0 else None
         )
-        return WebSearchRequest(topic, questions, max_sources, self._task_id, query, urls)
+        raw_category = args.get("category")
+        category = (
+            raw_category.strip()
+            if isinstance(raw_category, str)
+            and raw_category.strip() in {"general", "images", "it", "news", "science"}
+            else "general"
+        )
+        return WebSearchRequest(
+            topic, questions, category, max_sources, self._task_id, query, urls
+        )
 
 
 def _parse_urls(value: Any) -> tuple[str, ...] | str:

@@ -40,16 +40,30 @@ class SidecarSearchClient:
         self._root = artifacts_root.resolve()
         self._max = max_source_chars
 
-    async def search(self, query: str, limit: int, task_id: str) -> SearchOutcome:
+    async def search(
+        self, query: str, limit: int, task_id: str, category: str = "general"
+    ) -> SearchOutcome:
         try:
-            reply = await self._client.post_json(
-                _QUERY, {"query": query, "max_results": limit, "fetch": False, "task_id": task_id}
-            )
+            payload: dict[str, Any] = {
+                "query": query,
+                "max_results": limit,
+                "fetch": False,
+                "task_id": task_id,
+            }
+            if category and category != "general":
+                payload["category"] = category
+            reply = await self._client.post_json(_QUERY, payload)
         except DependencyUnavailableError:
             return SearchOutcome(error="搜索服务不可用")
         hits = [
             Evidence(
-                str(r.get("url", "")), str(r.get("title", "")), str(r.get("snippet", "")), "SNIPPET"
+                url=str(r.get("url", "")),
+                title=str(r.get("title", "")),
+                text=str(r.get("snippet", "")),
+                status="SNIPPET",
+                category=str(r.get("category") or category),
+                img_src=str(r.get("img_src") or ""),
+                thumbnail_src=str(r.get("thumbnail_src") or ""),
             )
             for r in reply.body.get("results", [])
             if isinstance(r, dict) and r.get("url")
@@ -72,7 +86,10 @@ class SidecarSearchClient:
                     },
                 )
             except DependencyUnavailableError:
-                out += [Evidence(h.url, h.title, "", "ERROR") for h in batch]
+                out += [
+                    Evidence(h.url, h.title, "", "ERROR", category=h.category, img_src=h.img_src, thumbnail_src=h.thumbnail_src)
+                    for h in batch
+                ]
                 continue
             results: list[dict[str, Any]] = [
                 r for r in reply.body.get("results", []) if isinstance(r, dict)
@@ -93,7 +110,14 @@ class SidecarSearchClient:
         if status == "SNIPPET_ONLY" or status == "BLOCKED":
             status = "SNIPPET"  # 只有搜索摘要，不当作正文来源
         return Evidence(
-            str(item.get("url", "")), str(item.get("title", "")), text, status, artifact_id
+            url=str(item.get("url", "")),
+            title=str(item.get("title", "")),
+            text=text,
+            status=status,
+            artifact_id=artifact_id,
+            category=str(item.get("category") or "general"),
+            img_src=str(item.get("img_src") or ""),
+            thumbnail_src=str(item.get("thumbnail_src") or ""),
         )
 
 
