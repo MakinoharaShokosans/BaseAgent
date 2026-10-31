@@ -134,7 +134,10 @@ class SafeFetcher:
         self._fake_ip = allow_fake_ip
         self._headers = {"User-Agent": user_agent, "Accept": "text/html,text/plain;q=0.9,*/*;q=0.1"}
         self._client = httpx.AsyncClient(
-            timeout=timeout_sec, transport=transport, follow_redirects=False, trust_env=False
+            timeout=httpx.Timeout(timeout_sec, connect=min(timeout_sec, 4.0)),
+            transport=transport,
+            follow_redirects=False,
+            trust_env=False,
         )
 
     async def aclose(self) -> None:

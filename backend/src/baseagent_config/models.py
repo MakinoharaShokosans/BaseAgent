@@ -510,7 +510,7 @@ class WebSearchConfig(_Section):
     max_results: PosInt = 8
     fetch_concurrency: PosInt = 5
     per_host_concurrency: PosInt = 2
-    request_timeout_sec: PosInt = 10
+    request_timeout_sec: PosInt = 6
     total_timeout_sec: PosInt = 30
     max_content_tokens: PosInt = 1500
     preview_chars: PosInt = 200
@@ -539,7 +539,7 @@ class WebSearchToolConfig(_Section):
     max_source_chars: PosInt = 6000
     max_wall_time_sec: PosInt = 60
     extract_reserve_sec: PosInt = 20
-    max_calls_per_task: PosInt = 3
+    max_calls_per_task: PosInt = 5
     max_findings: PosInt = 8
     max_answer_chars: PosInt = 500
     max_code_examples: PosInt = 5

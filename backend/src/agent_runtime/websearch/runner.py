@@ -112,6 +112,8 @@ class WebSearchRunner:
             if request.urls:
                 await self._read_urls(request, evidence, budget, warnings)
             while request.search_enabled and rounds < self._limits.max_rounds:
+                if request.category == "images" and evidence:
+                    break
                 if _usable(evidence) >= self._cap(request):
                     break
                 if budget.remaining_wall_sec <= self._reserve:
