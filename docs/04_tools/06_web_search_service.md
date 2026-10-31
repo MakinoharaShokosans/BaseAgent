@@ -57,9 +57,9 @@ host = "127.0.0.1"
 port = 8003
 provider = "searxng"
 searxng_instances = [
+    "https://search.lumy.live",
     "https://searx.tiekoetter.com",
     "https://searx.be",
-    "https://search.ononoki.org",
 ]
 searxng_language = "zh-CN"
 ddgs_backends = ["yahoo", "bing", "google"]   # 依次试，取第一个有结果的

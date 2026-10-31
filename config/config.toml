@@ -317,9 +317,9 @@ host = "127.0.0.1"
 port = 8003
 provider = "searxng"                # searxng：使用 SearXNG 实例池（推荐，免 Key 免 Docker 原生 JSON）；ddgs：依次尝试各引擎；ddg：抓 DuckDuckGo 网页
 searxng_instances = [
+    "https://search.lumy.live",
     "https://searx.tiekoetter.com",
     "https://searx.be",
-    "https://search.ononoki.org",
 ]                                   # 默认公网实例池，自动故障转移；也可填本地/自建节点如 "http://127.0.0.1:8888"
 searxng_language = "zh-CN"          # 搜索语言，如 "zh-CN"、"en" 或 ""（留空自动）
 ddgs_backends = ["yahoo", "bing", "google"]   # 取第一个有结果的；实测各后端都有 25%–60% 的失败率，所以不押单个

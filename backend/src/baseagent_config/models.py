@@ -501,9 +501,9 @@ class WebSearchConfig(_Section):
     port: Port = 8003
     provider: str = "searxng"
     searxng_instances: list[str] = [
+        "https://search.lumy.live",
         "https://searx.tiekoetter.com",
         "https://searx.be",
-        "https://search.ononoki.org",
     ]
     searxng_language: str = "zh-CN"
     ddgs_backends: list[str] = ["yahoo", "bing", "google"]
