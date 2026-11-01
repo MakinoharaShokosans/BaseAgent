@@ -4,12 +4,15 @@ import { useNavigate, useParams } from '@tanstack/react-router';
 import {
   AlignLeft,
   BookOpen,
+  Boxes,
   Cpu,
   Folder,
   Menu,
   Pencil,
   Plus,
   Shield,
+  Sparkles,
+  Wrench,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, isUnsupported } from '../../api/endpoints';
@@ -18,6 +21,7 @@ import { useWorkspaces } from '../../api/queries';
 import { McpStatus } from '../../components/domain/McpStatus';
 import { CopyButton } from '../../components/ui/CopyButton';
 import { Select } from '../../components/ui/Select';
+import { Toggle } from '../../components/ui/Toggle';
 import { IconButton } from '../../components/ui/primitives';
 import { RenameWorkspaceModal } from '../../components/modals/RenameWorkspaceModal';
 import { useAppStore } from '../../stores/useAppStore';
@@ -59,7 +63,28 @@ export function WorkspacePage() {
     permission_level: null,
     model: null,
     rules_enabled: null,
+    disabled_tools: [],
+    enabled_mcp_servers: null,
+    disabled_skills: [],
   };
+
+  const toolsQuery = useQuery({
+    queryKey: ['tools'],
+    queryFn: api.system.tools,
+    retry: false,
+  });
+
+  const mcpServersQuery = useQuery({
+    queryKey: ['mcp-servers'],
+    queryFn: api.mcp.servers,
+    retry: false,
+  });
+
+  const skillsQuery = useQuery({
+    queryKey: ['skills'],
+    queryFn: api.skills.list,
+    retry: false,
+  });
 
   const save = useMutation({
     mutationFn: (next: WorkspaceSettings) =>
@@ -67,6 +92,9 @@ export function WorkspacePage() {
         permission_level: next.permission_level,
         model: next.model,
         rules_enabled: next.rules_enabled,
+        disabled_tools: next.disabled_tools ?? [],
+        enabled_mcp_servers: next.enabled_mcp_servers,
+        disabled_skills: next.disabled_skills ?? [],
       }),
     onSuccess: (data) => {
       client.setQueryData(['wsettings', workspaceId], data);
@@ -310,6 +338,157 @@ export function WorkspacePage() {
                     { value: 'off', label: '关闭' },
                   ]}
                 />
+              </div>
+            </div>
+          </div>
+
+          {/* 已挂载能力（Capabilities） */}
+          <div className="mt-6 overflow-hidden rounded-2xl border border-ink/[0.07] bg-card shadow-sm divide-y divide-ink/[0.06] dark:border-white/[0.08] dark:divide-white/[0.07]">
+            <div className="px-4 py-3.5 sm:px-5 bg-ink/[0.02] dark:bg-white/[0.02]">
+              <div className="text-[13.5px] font-semibold text-ink">已挂载能力（Capabilities）</div>
+              <div className="text-2xs text-mute">按工作区精细化控制内置工具、MCP 扩展与技能的启用状态</div>
+            </div>
+
+            {/* 内置与系统工具 */}
+            <div className="px-4 py-3.5 sm:px-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink/[0.04] text-mute dark:bg-white/[0.04]">
+                  <Wrench size={16} />
+                </div>
+                <div>
+                  <div className="text-[13.5px] font-medium text-ink">内置工具</div>
+                  <div className="text-2xs text-mute">主 Agent 在该工作区可调用的内置工具集</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-0 sm:pl-11">
+                {(toolsQuery.data ?? []).map((t) => {
+                  const isEnabled = !(current.disabled_tools ?? []).includes(t.name);
+                  return (
+                    <div
+                      key={t.name}
+                      className="flex items-center justify-between p-2.5 rounded-xl border border-ink/[0.06] bg-ink/[0.01] dark:border-white/[0.06] dark:bg-white/[0.01]"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="text-[12.5px] font-medium text-ink truncate font-mono">{t.name}</div>
+                        <div className="text-2xs text-mute truncate">{t.description}</div>
+                      </div>
+                      <Toggle
+                        checked={isEnabled}
+                        disabled={!supported || save.isPending}
+                        label={`切换工具 ${t.name}`}
+                        onChange={(enabled) => {
+                          const prev = current.disabled_tools ?? [];
+                          const next = enabled ? prev.filter((x) => x !== t.name) : [...prev, t.name];
+                          save.mutate({ ...current, disabled_tools: next });
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* MCP 服务 */}
+            <div className="px-4 py-3.5 sm:px-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink/[0.04] text-mute dark:bg-white/[0.04]">
+                  <Boxes size={16} />
+                </div>
+                <div>
+                  <div className="text-[13.5px] font-medium text-ink">MCP 服务</div>
+                  <div className="text-2xs text-mute">按工作区过滤启用的外部 MCP 服务器</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-0 sm:pl-11">
+                {(mcpServersQuery.data ?? []).length === 0 ? (
+                  <div className="text-xs text-mute py-1">未检测到已注册的 MCP 服务</div>
+                ) : (
+                  (mcpServersQuery.data ?? []).map((s) => {
+                    const isEnabled =
+                      current.enabled_mcp_servers === null ||
+                      current.enabled_mcp_servers === undefined
+                        ? true
+                        : current.enabled_mcp_servers.includes(s.name);
+                    return (
+                      <div
+                        key={s.name}
+                        className="flex items-center justify-between p-2.5 rounded-xl border border-ink/[0.06] bg-ink/[0.01] dark:border-white/[0.06] dark:bg-white/[0.01]"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="text-[12.5px] font-medium text-ink truncate">{s.name}</div>
+                          <div className="text-2xs text-mute truncate">
+                            {s.tools.length} 个工具 · {s.status}
+                          </div>
+                        </div>
+                        <Toggle
+                          checked={isEnabled}
+                          disabled={!supported || save.isPending}
+                          label={`切换 MCP 服务 ${s.name}`}
+                          onChange={(enabled) => {
+                            const allNames = (mcpServersQuery.data ?? []).map((item) => item.name);
+                            let next: string[];
+                            if (current.enabled_mcp_servers === null || current.enabled_mcp_servers === undefined) {
+                              next = enabled ? allNames : allNames.filter((x) => x !== s.name);
+                            } else {
+                              next = enabled
+                                ? Array.from(new Set([...current.enabled_mcp_servers, s.name]))
+                                : current.enabled_mcp_servers.filter((x) => x !== s.name);
+                            }
+                            save.mutate({ ...current, enabled_mcp_servers: next });
+                          }}
+                        />
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* 技能 (Skills) */}
+            <div className="px-4 py-3.5 sm:px-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink/[0.04] text-mute dark:bg-white/[0.04]">
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <div className="text-[13.5px] font-medium text-ink">技能 (Skills)</div>
+                  <div className="text-2xs text-mute">按工作区启用或禁用特定技能</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-0 sm:pl-11">
+                {(skillsQuery.data ?? []).length === 0 ? (
+                  <div className="text-xs text-mute py-1">未检测到可用技能</div>
+                ) : (
+                  (skillsQuery.data ?? []).map((k) => {
+                    const isEnabled = !(current.disabled_skills ?? []).includes(k.name);
+                    return (
+                      <div
+                        key={k.name}
+                        className="flex items-center justify-between p-2.5 rounded-xl border border-ink/[0.06] bg-ink/[0.01] dark:border-white/[0.06] dark:bg-white/[0.01]"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-[12.5px] font-medium text-ink truncate">{k.name}</span>
+                            <span className="shrink-0 rounded bg-ink/[0.06] px-1.5 py-0.5 text-3xs text-mute dark:bg-white/[0.06]">
+                              {k.source}
+                            </span>
+                          </div>
+                          <div className="text-2xs text-mute truncate">{k.description}</div>
+                        </div>
+                        <Toggle
+                          checked={isEnabled}
+                          disabled={!supported || save.isPending}
+                          label={`切换技能 ${k.name}`}
+                          onChange={(enabled) => {
+                            const prev = current.disabled_skills ?? [];
+                            const next = enabled ? prev.filter((x) => x !== k.name) : [...prev, k.name];
+                            save.mutate({ ...current, disabled_skills: next });
+                          }}
+                        />
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>

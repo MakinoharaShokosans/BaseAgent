@@ -20,6 +20,7 @@ from agent_runtime.memory import (
     SessionNotFound,
     SessionPreferences,
 )
+from agent_runtime.runtime.overrides import load_workspace_settings
 from api_support import HEADERS, ApiRig, build_rig
 
 V1 = "/api/v1"
@@ -217,3 +218,78 @@ async def test_system_prompt_override_and_restore(rig: ApiRig) -> None:
     )
     assert huge.status_code == 422
     assert (await rig.client.get(f"{V1}/settings")).status_code == 401
+
+
+@pytest.mark.unit
+async def test_workspace_settings_patch_incremental_and_isolation(rig: ApiRig) -> None:
+    path_a = rig.root / "ws_a"
+    path_b = rig.root / "ws_b"
+    path_a.mkdir()
+    path_b.mkdir()
+    res_a = await rig.client.post(
+        f"{V1}/workspaces", json={"name": "w_a", "root_path": str(path_a)}, headers=HEADERS
+    )
+    wid_a = str(res_a.json()["workspace_id"])
+    res_b = await rig.client.post(
+        f"{V1}/workspaces", json={"name": "w_b", "root_path": str(path_b)}, headers=HEADERS
+    )
+    wid_b = str(res_b.json()["workspace_id"])
+    assert wid_a != wid_b
+
+    # 1. 向工作区 A 发送 PATCH 设置 disabled_tools=["bash"]
+    patch1 = await rig.client.patch(
+        f"{V1}/workspaces/{wid_a}/settings",
+        json={"disabled_tools": ["bash"]},
+        headers=HEADERS,
+    )
+    assert patch1.status_code == 200
+    res1 = patch1.json()
+    assert res1["disabled_tools"] == ["bash"]
+
+    # 验证数据库中持久化
+    stored_a1 = await load_workspace_settings(rig.services.memory, wid_a)
+    assert stored_a1.disabled_tools == ["bash"]
+
+    # 2. 再次 PATCH rules_enabled=True，验证增量更新语义
+    # （此前设置的 disabled_tools 不会被清空或覆盖）
+    patch2 = await rig.client.patch(
+        f"{V1}/workspaces/{wid_a}/settings",
+        json={"rules_enabled": True},
+        headers=HEADERS,
+    )
+    assert patch2.status_code == 200
+    res2 = patch2.json()
+    assert res2["rules_enabled"] is True
+    assert res2["disabled_tools"] == ["bash"]
+
+    stored_a2 = await load_workspace_settings(rig.services.memory, wid_a)
+    assert stored_a2.rules_enabled is True
+    assert stored_a2.disabled_tools == ["bash"]
+
+    # 3. 验证工作区隔离性：工作区 A 的设置不影响工作区 B
+    get_b = await rig.client.get(f"{V1}/workspaces/{wid_b}/settings", headers=HEADERS)
+    assert get_b.status_code == 200
+    assert get_b.json()["disabled_tools"] == []
+
+    stored_b = await load_workspace_settings(rig.services.memory, wid_b)
+    assert stored_b.disabled_tools == []
+
+    # 4. 进一步测试 enabled_mcp_servers 与 disabled_skills 的增量更新
+    patch3 = await rig.client.patch(
+        f"{V1}/workspaces/{wid_a}/settings",
+        json={"enabled_mcp_servers": ["server_a"], "disabled_skills": ["skill_x"]},
+        headers=HEADERS,
+    )
+    assert patch3.status_code == 200
+    res3 = patch3.json()
+    assert res3["disabled_tools"] == ["bash"]
+    assert res3["rules_enabled"] is True
+    assert res3["enabled_mcp_servers"] == ["server_a"]
+    assert res3["disabled_skills"] == ["skill_x"]
+
+    stored_a3 = await load_workspace_settings(rig.services.memory, wid_a)
+    assert stored_a3.disabled_tools == ["bash"]
+    assert stored_a3.rules_enabled is True
+    assert stored_a3.enabled_mcp_servers == ["server_a"]
+    assert stored_a3.disabled_skills == ["skill_x"]
+

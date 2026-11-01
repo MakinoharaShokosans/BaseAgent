@@ -159,10 +159,11 @@ class RuntimeFactory:
         root = Path(state.workspace_path)
 
         artifacts = TaskArtifacts()
+        disabled_skills = skill_policy.disabled | set(ws_settings.disabled_skills)
         skills = SkillRegistry.scan(
             skill_roots_from_settings(settings, root, sources=skill_policy.sources),
             skill_limits_from_settings(settings),
-        ).filtered(skill_policy.disabled)
+        ).filtered(disabled_skills)
         events = TaskEvents(
             self.hub,
             state.task_id,
@@ -189,6 +190,15 @@ class RuntimeFactory:
         if websearch is not None:
             tools.append(websearch)
         mcp_tools = await self._mcp_tools()
+        if ws_settings.enabled_mcp_servers is not None:
+            allowed_mcp = set(ws_settings.enabled_mcp_servers)
+            mcp_tools = [t for t in mcp_tools if t.server in allowed_mcp]
+
+        if ws_settings.disabled_tools:
+            disabled_set = set(ws_settings.disabled_tools)
+            tools = [t for t in tools if t.name not in disabled_set]
+            mcp_tools = [t for t in mcp_tools if t.name not in disabled_set]
+
         tools.extend(mcp_tools)
         deferred = [t.name for t in mcp_tools if self._is_deferred(t)]
         pinned = [t.name for t in mcp_tools if t.name not in set(deferred)]
@@ -206,10 +216,19 @@ class RuntimeFactory:
             extra_untrusted.append("mcp_describe")
         parent_tools = {t.name: t for t in tools}  # 派发时刻父工具表的快照：子级只能是它的子集
         spawn = self._spawn_tool(state, events, parent_tools)
-        if spawn is not None:
+        if spawn is not None and (
+            not ws_settings.disabled_tools or spawn.name not in set(ws_settings.disabled_tools)
+        ):
             tools.append(spawn)
+        if ws_settings.disabled_tools:
+            disabled_set = set(ws_settings.disabled_tools)
+            tools = [t for t in tools if t.name not in disabled_set]
+            extra_untrusted = [t for t in extra_untrusted if t not in disabled_set]
         # 不可信工具必须逐名授权：研究工具，加上用户在配置里启用的 MCP 服务器通过消毒的工具
-        untrusted = [t.name for t in (websearch, *mcp_tools) if t is not None] + extra_untrusted
+        untrusted = [
+            t.name for t in (websearch, *mcp_tools)
+            if t is not None and t.name in {x.name for x in tools}
+        ] + extra_untrusted
         registry = ToolRegistry(
             tools,
             allow_untrusted=bool(untrusted),
@@ -321,6 +340,8 @@ class RuntimeFactory:
             max_consecutive_blocks=limits.max_consecutive_blocks,
             compact=compactor,
         )
+
+    build_runtime = build
 
     async def inspect_segment(self, session_id: str, segment: str) -> Mapping[str, Any] | None:
         """某一段提示词在下一次请求里的渲染全文（不含金丝雀）。

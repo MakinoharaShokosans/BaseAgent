@@ -114,17 +114,24 @@ async def get_workspace_settings(workspace_id: WorkspaceId, svc: Services) -> Wo
         "permission_level": svc.settings.runtime.approval.default_level,
         "model": None,
         "rules_enabled": svc.settings.context.rules.allow_workspace,
+        "disabled_tools": [],
+        "enabled_mcp_servers": None,
+        "disabled_skills": [],
     }
     return WorkspaceSettingsOut(
         permission_level=current.permission_level,  # type: ignore[arg-type]
         model=current.model,
         rules_enabled=current.rules_enabled,
+        disabled_tools=current.disabled_tools,
+        enabled_mcp_servers=current.enabled_mcp_servers,
+        disabled_skills=current.disabled_skills,
         defaults=defaults,
     )
 
 
 @router.put("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsOut)
-async def put_workspace_settings(
+@router.patch("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsOut)
+async def update_workspace_settings(
     workspace_id: WorkspaceId, body: WorkspaceSettingsIn, svc: Services
 ) -> WorkspaceSettingsOut:
     await svc.memory.get_workspace(workspace_id)
@@ -132,10 +139,29 @@ async def put_workspace_settings(
         known = {str(item.get("name")) for item in svc.introspection.models()}
         if body.model not in known:
             raise ApiError(422, "VALIDATION_ERROR", f"未知的模型端点：{body.model}")
+    current = await load_workspace_settings(svc.memory, workspace_id)
+    provided = body.model_dump(exclude_unset=True)
     settings = WorkspaceSettings(
-        permission_level=body.permission_level,
-        model=body.model,
-        rules_enabled=body.rules_enabled,
+        permission_level=(
+            body.permission_level if "permission_level" in provided else current.permission_level
+        ),
+        model=body.model if "model" in provided else current.model,
+        rules_enabled=body.rules_enabled if "rules_enabled" in provided else current.rules_enabled,
+        disabled_tools=(
+            body.disabled_tools
+            if "disabled_tools" in provided and body.disabled_tools is not None
+            else current.disabled_tools
+        ),
+        enabled_mcp_servers=(
+            body.enabled_mcp_servers
+            if "enabled_mcp_servers" in provided
+            else current.enabled_mcp_servers
+        ),
+        disabled_skills=(
+            body.disabled_skills
+            if "disabled_skills" in provided and body.disabled_skills is not None
+            else current.disabled_skills
+        ),
     )
     await save_workspace_settings(svc.memory, workspace_id, settings)
     return await get_workspace_settings(workspace_id, svc)

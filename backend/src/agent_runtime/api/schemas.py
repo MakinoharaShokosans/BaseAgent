@@ -288,12 +288,18 @@ class WorkspaceSettingsIn(_Request):
     permission_level: PermissionName | None = None
     model: str | None = Field(default=None, max_length=128)
     rules_enabled: bool | None = None
+    disabled_tools: list[str] | None = None
+    enabled_mcp_servers: list[str] | None = None
+    disabled_skills: list[str] | None = None
 
 
 class WorkspaceSettingsOut(_Response):
     permission_level: PermissionName | None
     model: str | None
     rules_enabled: bool | None
+    disabled_tools: list[str]
+    enabled_mcp_servers: list[str] | None
+    disabled_skills: list[str]
     defaults: dict[str, object]
 
 

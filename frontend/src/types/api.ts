@@ -42,6 +42,9 @@ export interface WorkspaceSettings {
   permission_level: PermissionLevel | null;
   model: string | null;
   rules_enabled: boolean | null;
+  disabled_tools?: string[];
+  enabled_mcp_servers?: string[] | null;
+  disabled_skills?: string[];
 }
 
 export interface Turn {

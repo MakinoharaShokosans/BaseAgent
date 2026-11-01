@@ -140,12 +140,18 @@ class WorkspaceSettings:
     permission_level: str | None = None
     model: str | None = None
     rules_enabled: bool | None = None
+    disabled_tools: list[str] = field(default_factory=list)
+    enabled_mcp_servers: list[str] | None = None
+    disabled_skills: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
             "permission_level": self.permission_level,
             "model": self.model,
             "rules_enabled": self.rules_enabled,
+            "disabled_tools": self.disabled_tools,
+            "enabled_mcp_servers": self.enabled_mcp_servers,
+            "disabled_skills": self.disabled_skills,
         }
 
     @classmethod
@@ -155,10 +161,22 @@ class WorkspaceSettings:
         level = data.get("permission_level")
         model = data.get("model")
         rules = data.get("rules_enabled")
+        tools = data.get("disabled_tools")
+        mcp = data.get("enabled_mcp_servers")
+        skills = data.get("disabled_skills")
         return cls(
             permission_level=level if isinstance(level, str) and level else None,
             model=model if isinstance(model, str) and model else None,
             rules_enabled=rules if isinstance(rules, bool) else None,
+            disabled_tools=(
+                [str(t) for t in tools if isinstance(t, str)] if isinstance(tools, list) else []
+            ),
+            enabled_mcp_servers=(
+                [str(s) for s in mcp if isinstance(s, str)] if isinstance(mcp, list) else None
+            ),
+            disabled_skills=(
+                [str(s) for s in skills if isinstance(s, str)] if isinstance(skills, list) else []
+            ),
         )
 
 

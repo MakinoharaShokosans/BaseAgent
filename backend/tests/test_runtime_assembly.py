@@ -336,3 +336,172 @@ def test_the_assembler_folds_only_when_a_window_is_given(raw: dict[str, Any]) ->
     assert assembler_from_settings(s, assets)._fold is None  # type: ignore[reportPrivateUsage]
     folded = assembler_from_settings(s, assets, context_window=128_000)
     assert folded._fold is not None  # type: ignore[reportPrivateUsage]
+
+
+@pytest.mark.unit
+async def test_workspace_capability_isolation_assembly(
+    config_path: Path, tmp_path: Path
+) -> None:
+    """ADR 0008：工作区能力按需隔离，装配期根据白名单/黑名单过滤工具、MCP 与技能。"""
+    from collections.abc import Mapping
+
+    from agent_runtime.checkpoint import CheckpointStore
+    from agent_runtime.core import AgentTool, Message, ToolCall, ToolResult, new_state
+    from agent_runtime.memory import MemoryStore
+    from agent_runtime.observability import EventHub, Redactor
+    from agent_runtime.runtime import memory_flow_from_settings
+    from agent_runtime.runtime.factory import RuntimeFactory
+    from agent_runtime.runtime.overrides import WorkspaceSettings, save_workspace_settings
+    from baseagent_config.loader import load_settings
+
+    # 1. 准备工作区根目录与自定义技能目录
+    ws_root = tmp_path / "work"
+    ws_root.mkdir()
+    skills_dir = ws_root / ".baseagent" / "skills"
+    # 创建两个技能：一个 xxx，一个 normal_skill
+    (skills_dir / "xxx").mkdir(parents=True)
+    (skills_dir / "xxx" / "SKILL.md").write_text(
+        "---\nname: xxx\ndescription: skill xxx\n---\n# xxx\n", encoding="utf-8"
+    )
+    (skills_dir / "normal_skill").mkdir(parents=True)
+    (skills_dir / "normal_skill" / "SKILL.md").write_text(
+        "---\nname: normal_skill\ndescription: normal\n---\n# normal\n", encoding="utf-8"
+    )
+
+    loaded = load_settings(
+        config_path=config_path,
+        overrides={
+            "storage": {
+                "metadata_db": str(tmp_path / "m.db"),
+                "checkpoint_db": str(tmp_path / "c.db"),
+                "events_db": str(tmp_path / "e.db"),
+                "artifacts_dir": str(tmp_path / "artifacts"),
+                "traces_dir": str(tmp_path / "traces"),
+            },
+            "skills": {"allow_workspace": True},
+        },
+        require_models=False,
+    )
+
+    async with (
+        MemoryStore(tmp_path / "m.db") as memory,
+        CheckpointStore(tmp_path / "c.db") as checkpoints,
+    ):
+        await memory.create_workspace("w1", "proj", str(ws_root))
+        await memory.create_session("s1", "w1")
+
+        # 设置工作区隔离配置：
+        # - disabled_tools=["bash", "write_file"]
+        # - disabled_skills=["xxx"]
+        # - enabled_mcp_servers=["allowed_server"]
+        ws_settings = WorkspaceSettings(
+            disabled_tools=["bash", "write_file"],
+            disabled_skills=["xxx"],
+            enabled_mcp_servers=["allowed_server"],
+        )
+        await save_workspace_settings(memory, "w1", ws_settings)
+
+        class FakeMcpTool(AgentTool):
+            trust = "untrusted"
+
+            def __init__(self, server: str, name: str) -> None:
+                self.server = server
+                self.name = name
+                self.description = f"desc of {name}"
+                self.parameters = {}
+                self.idempotent = False
+                self.timeout_sec = 10.0
+
+            async def invoke(self, args: Mapping[str, Any]) -> ToolResult:
+                return ToolResult(ok=True, content="ok")
+
+        class FakeMcpManager:
+            async def tools(self) -> list[Any]:
+                return [
+                    FakeMcpTool(server="allowed_server", name="allowed_tool"),
+                    FakeMcpTool(server="blocked_server", name="blocked_tool"),
+                ]
+
+            def exposure_of(self, server: str) -> str:
+                return "pinned"
+
+            def is_idempotent(self, name: str) -> bool:
+                return False
+
+        class DummyGateway:
+            async def invoke(self, request: Any) -> Any:
+                return Message(role="assistant", content="done")
+
+        hub = EventHub(clip_chars=300)
+        redactor = Redactor(["key"], [])
+
+        async def no_extractor(request: Any) -> None:
+            return None
+
+        flow = memory_flow_from_settings(loaded.settings, memory, no_extractor, len)
+
+        factory = RuntimeFactory(
+            loaded=loaded,
+            gateway=DummyGateway(),  # type: ignore[arg-type]
+            checkpoints=checkpoints,
+            memory=memory,
+            hub=hub,
+            redactor=redactor,
+            flow=flow,
+            mcp=FakeMcpManager(),  # type: ignore[arg-type]
+        )
+
+        state = new_state(
+            workspace_id="w1",
+            workspace_path=str(ws_root),
+            session_id="s1",
+            task_id="t1",
+            task_goal="test",
+            permission_level="workspace_write",
+            canary_token="canary-123",
+        )
+
+        # 1. 验证装配资产中的技能清单：排除了 xxx，保留了 normal_skill
+        assembled = await factory._assemble(state)
+        assert "xxx" not in assembled.assets.skills_manifest
+        assert "normal_skill" in assembled.assets.skills_manifest
+
+        # 2. 调用 factory.build_runtime(state) 构建 TaskRuntime
+        runtime = await factory.build_runtime(state)
+
+        # 提取 runtime 中的 ToolRegistry
+        registry = None
+        for cell in getattr(runtime.tools, "__closure__", ()) or ():
+            obj = cell.cell_contents
+            if hasattr(obj, "dispatcher") and hasattr(obj.dispatcher, "_registry"):
+                registry = obj.dispatcher._registry
+                break
+        assert registry is not None
+
+        # 验证 disabled_tools: 不包含 bash 与 write_file，但包含 view_file
+        assert not registry.knows("bash")
+        assert not registry.knows("write_file")
+        assert "bash" not in {s.name for s in registry.schemas()}
+        assert "write_file" not in {s.name for s in registry.schemas()}
+        assert registry.knows("view_file")
+
+        # 验证 enabled_mcp_servers: 包含 allowed_tool，拦截过滤 blocked_tool
+        assert registry.knows("allowed_tool")
+        assert not registry.knows("blocked_tool")
+        assert "allowed_tool" in {s.name for s in registry.schemas()}
+        assert "blocked_tool" not in {s.name for s in registry.schemas()}
+
+        # 3. 验证调用 runtime.tools 时拦截禁用工具并生成错误信息
+        call_bash = ToolCall(id="c1", name="bash", args={"command": "ls"})
+        call_blocked = ToolCall(id="c2", name="blocked_tool", args={})
+        res = await runtime.tools(state, (call_bash, call_blocked))
+        from collections.abc import Sequence
+        messages = res.get("messages")
+        assert isinstance(messages, Sequence)
+        assert any(
+            isinstance(m, Message) and "未知工具：bash" in m.content for m in messages
+        )
+        assert any(
+            isinstance(m, Message) and "未知工具：blocked_tool" in m.content for m in messages
+        )
+
