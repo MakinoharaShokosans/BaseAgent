@@ -20,6 +20,17 @@ from agent_runtime.core import Message
 
 _HANDLE: Final = re.compile(r"artifact://([A-Za-z0-9_.-]+)")
 _SUMMARY_CHARS: Final = 80
+_BASH_KEYWORDS: Final = (
+    "FAILED",
+    "error",
+    "AssertionError",
+    "Traceback",
+    "fatal",
+    "warning",
+    "Passed",
+    "Compiled",
+)
+_SYMBOL_PATTERN: Final = re.compile(r"\b(def|class)\s+([A-Za-z0-9_]+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +102,36 @@ def _step_index(items: Sequence[Message]) -> dict[int, int]:
     return out
 
 
+def _extract_punchline(tool_name: str, content: str) -> str:
+    """从观察值正文中确定性提取核心特征摘要（纯字符串计算，无随机与时间因子）。"""
+    non_empty_lines = [line.strip() for line in content.splitlines() if line.strip()]
+    if not non_empty_lines:
+        return ""
+    t_name = tool_name.lower()
+    is_bash = (
+        t_name in ("bash", "shell", "bash_shell")
+        or t_name.endswith("bash")
+        or t_name.endswith("shell")
+    )
+    if is_bash:
+        for kw in _BASH_KEYWORDS:
+            kw_lower = kw.lower()
+            for line in non_empty_lines:
+                if kw_lower in line.lower():
+                    flat = " ".join(line.split())
+                    return flat[:100]
+        flat_first = " ".join(non_empty_lines[0].split())
+        return flat_first[:100]
+
+    symbols = _SYMBOL_PATTERN.findall(content)
+    if symbols:
+        summary = "定义 " + ", ".join(f"{kind} {name}" for kind, name in symbols)
+        flat_sym = " ".join(summary.split())
+        return flat_sym[:100]
+    flat_line = " ".join(non_empty_lines[0].split())
+    return flat_line[:60]
+
+
 def _stubs(
     items: Sequence[Message], policy: FoldPolicy, count: Callable[[str], int]
 ) -> dict[int, Message]:
@@ -108,14 +149,18 @@ def _stubs(
         shown = _summarise(call.args) if call is not None else ""
         lines = m.content.count("\n") + 1
         handles = _HANDLE.findall(m.content)
+        punchline = _extract_punchline(m.name or "", m.content)
+        punch_info = punchline if punchline else "（空）"
         if handles:
             text = (
                 f"[已折叠] {m.name}: {shown}（{lines} 行，{len(m.content)} 字符）"
+                f"| 关键信息: {punch_info} "
                 f"→ 完整输出见产物 artifact://{handles[-1]}，可用 read_artifact 取回"
             )
         elif (m.name or "") in policy.reproducible_tools:
             text = (
                 f"[已折叠] {m.name}: {shown}（{lines} 行，{len(m.content)} 字符）"
+                f"| 概要: {punch_info} "
                 f"→ 需要时用同样的参数重新调用 {m.name}"
             )
         else:

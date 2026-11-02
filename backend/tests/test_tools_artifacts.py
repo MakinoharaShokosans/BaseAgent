@@ -75,7 +75,7 @@ async def test_paging_matches_view_file(store: Path) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("bad", [None, "", 5, "nope", "../t1/a.log", "/etc/passwd", "t1/a.log"])
+@pytest.mark.parametrize("bad", [5, "nope", "../t1/a.log", "/etc/passwd", "t1/a.log"])
 async def test_only_registered_ids_work_never_paths(store: Path, bad: object) -> None:
     tool = make(store, {"a": log(store, "a.log", "x\n")})
     out = await tool.invoke({"artifact_id": bad})
@@ -180,3 +180,32 @@ async def test_non_utf8_content_is_replaced_not_fatal(store: Path) -> None:
     tool = make(store, {"a": log(store, "a.log", b"caf\xe9\n")})
     out = await tool.invoke({"artifact_id": "a"})
     assert out.ok and "caf�" in out.content
+
+
+# ==============================================================================
+# ADR 0009: 模式 A（清单发现）与模式 B（跨产物全局搜索）
+# ==============================================================================
+
+
+@pytest.mark.unit
+async def test_read_artifact_mode_a_catalog_list(store: Path) -> None:
+    p_a = log(store, "a.log", "hello world\n")
+    p_b = log(store, "b.log", "foo bar baz\n")
+    tool = make(store, {"art_a": p_a, "art_b": p_b})
+    out = await tool.invoke({})
+    assert out.ok
+    assert "本任务产物清单（共 2 个）：" in out.content
+    assert "artifact://art_a" in out.content and "字节" in out.content
+    assert "artifact://art_b" in out.content and "字节" in out.content
+
+
+@pytest.mark.unit
+async def test_read_artifact_mode_b_cross_artifact_search(store: Path) -> None:
+    p_app = log(store, "app.log", "2026-11-02 [ERROR] connection reset by peer\nline 2\n")
+    p_build = log(store, "build.log", "compile ok\nwarning: unused var\n")
+    tool = make(store, {"obs_app": p_app, "obs_build": p_build})
+    out = await tool.invoke({"query": "connection reset"})
+    assert out.ok
+    assert "### artifact://obs_app" in out.content
+    assert "connection reset by peer" in out.content
+    assert "obs_build" not in out.content

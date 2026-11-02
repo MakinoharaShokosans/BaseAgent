@@ -114,7 +114,7 @@ def test_the_stub_names_the_tool_the_call_the_size_and_the_handle() -> None:
     stub = next(m for m in out if m.role == "tool")
     assert stub.content == (
         "[已折叠] bash: cmd1（4 行，"
-        f"{len(stream(5)[1].content)} 字符）→ 完整输出见产物 artifact://obs_step_1_bash，"
+        f"{len(stream(5)[1].content)} 字符）| 关键信息: line 0 → 完整输出见产物 artifact://obs_step_1_bash，"
         "可用 read_artifact 取回"
     )
 
@@ -250,7 +250,7 @@ def test_the_stub_points_at_the_handle_the_governor_appended_not_one_quoted_in_t
     first = step(1, size=1000)
     first[1] = Message(
         role="tool",
-        content="见 artifact://obs_step_0_old 的内容\n" + first[1].content,
+        content="line 0\n见 artifact://obs_step_0_old 的内容\n" + first[1].content,
         tool_call_id="c1",
         name="bash",
     )

@@ -10,7 +10,6 @@ from typing import Any, Final
 
 from agent_runtime.core import AgentTool, ToolResult, Trust
 from tools.builtin.files import FileLimits, numbered, page_result, parse_range, read_page
-from tools.builtin.paths import text_arg
 
 _HANDLE_PREFIX: Final = "artifact://"
 _PRODUCER: Final = re.compile(r"^(?:obs_)?step_\d+_(?P<tail>.+)$")
@@ -18,6 +17,8 @@ _SUFFIX: Final = re.compile(r"_\d+$")
 _UNSAFE: Final = re.compile(r"[^A-Za-z0-9_.-]")
 _MATCH_LINE_CAP: Final = 2000
 _LISTED_IDS: Final = 10
+_MAX_SEARCH_ARTIFACTS: Final = 10
+_MAX_SEARCH_HITS_PER_ARTIFACT: Final = 3
 
 
 class TaskArtifacts:
@@ -53,18 +54,27 @@ def producer_candidates(artifact_id: str) -> tuple[str, ...]:
 class ReadArtifactTool(AgentTool):
     name = "read_artifact"
     description = (
-        "读取本任务中被裁剪的完整输出，按 artifact_id 取回（句柄形如 artifact://obs_step_3_bash）。"
-        "只接受本任务登记过的 id，不接受路径；支持行范围分页与正则 grep（只返回匹配行）。"
+        "读取或检索本任务中被裁剪的输出产物。支持三种模式："
+        "1) 不传参数：列出当前任务所有产物清单；"
+        "2) 传入 query：在当前任务所有产物日志中全局搜索关键词并返回匹配列表；"
+        "3) 传入 artifact_id：读取指定产物的详细内容（支持 start_line/end_line 分页与 grep 过滤）。"
     )
     parameters: Mapping[str, Any] = {
         "type": "object",
         "properties": {
             "artifact_id": {"type": "string", "description": "产物 id，可带 artifact:// 前缀"},
+            "query": {
+                "type": "string",
+                "description": (
+                    "跨产物搜索关键词或正则；给出时，在当前任务所有产物日志中搜索该关键词，"
+                    "返回匹配的产物清单与命中行预览"
+                ),
+            },
             "start_line": {"type": "integer", "description": "起始行，从 1 开始"},
             "end_line": {"type": "integer", "description": "结束行（含）"},
             "grep": {"type": "string", "description": "正则；给出时只返回匹配行（忽略行范围）"},
         },
-        "required": ["artifact_id"],
+        "required": [],
     }
     timeout_sec = 15.0
     idempotent = True
@@ -85,10 +95,30 @@ class ReadArtifactTool(AgentTool):
         self._trusted = frozenset(_UNSAFE.sub("_", n) for n in trusted_producers)
 
     async def invoke(self, args: Mapping[str, Any]) -> ToolResult:
-        raw = text_arg(args, "artifact_id")
-        if not raw:
-            return ToolResult.failure("缺少参数 artifact_id（字符串）")
-        artifact_id = raw.removeprefix(_HANDLE_PREFIX)
+        raw_id = args.get("artifact_id")
+        if raw_id is not None and not isinstance(raw_id, str):
+            return ToolResult.failure("artifact_id 必须是字符串")
+        raw_query = args.get("query")
+        if raw_query is not None and not isinstance(raw_query, str):
+            return ToolResult.failure("query 必须是字符串")
+
+        aid_str = raw_id.strip() if raw_id is not None else ""
+        query_str = raw_query.strip() if raw_query is not None else ""
+
+        # 模式 A：清单发现（artifact_id 与 query 均为空）
+        if not aid_str and not query_str:
+            return await asyncio.to_thread(self._list_catalog)
+
+        # 模式 B：跨产物全局搜索（提供了 query 且 artifact_id 为空）
+        if not aid_str and query_str:
+            try:
+                regex = re.compile(query_str, re.IGNORECASE)
+            except re.error as exc:
+                return ToolResult.failure(f"query 不是合法的正则：{exc}")
+            return await asyncio.to_thread(self._search_catalog, regex)
+
+        # 模式 C：指定产物精准读取（提供了 artifact_id）
+        artifact_id = aid_str.removeprefix(_HANDLE_PREFIX)
         recorded = self._artifacts.path_of(artifact_id)
         if recorded is None:
             known = ", ".join(self._artifacts.ids()[:_LISTED_IDS]) or "（本任务还没有产物）"
@@ -105,6 +135,101 @@ class ReadArtifactTool(AgentTool):
             return ToolResult.failure(str(exc))
         result = await asyncio.to_thread(self._read, artifact_id, recorded, start, end, regex)
         return result.model_copy(update={"trust": self._trust_of(artifact_id)})
+
+    def _list_catalog(self) -> ToolResult:
+        ids = self._artifacts.ids()
+        if not ids:
+            return ToolResult(ok=True, content="（本任务还没有产物）")
+        lines: list[str] = [f"本任务产物清单（共 {len(ids)} 个）："]
+        all_trusted = True
+        for aid in ids:
+            if self._trust_of(aid) != "trusted":
+                all_trusted = False
+            recorded = self._artifacts.path_of(aid)
+            if recorded is None:
+                lines.append(f"- artifact://{aid} (路径丢失)")
+                continue
+            try:
+                path = Path(recorded).resolve()
+            except (OSError, ValueError, RuntimeError):
+                lines.append(f"- artifact://{aid} (不可读)")
+                continue
+            if not path.is_relative_to(self._root):
+                lines.append(f"- artifact://{aid} (路径越界已拒绝)")
+                continue
+            try:
+                size = path.stat().st_size
+                preview = ""
+                with path.open("r", encoding="utf-8", errors="replace", newline=None) as f:
+                    for line in f:
+                        stripped = line.strip()
+                        if stripped:
+                            preview = " ".join(stripped.split())[:80]
+                            break
+                if preview:
+                    lines.append(f"- artifact://{aid} ({size} 字节): {preview}")
+                else:
+                    lines.append(f"- artifact://{aid} ({size} 字节)")
+            except OSError:
+                lines.append(f"- artifact://{aid} (无法读取)")
+        return ToolResult(
+            ok=True,
+            content="\n".join(lines),
+            trust="trusted" if all_trusted else "untrusted",
+        )
+
+    def _search_catalog(self, regex: re.Pattern[str]) -> ToolResult:
+        ids = self._artifacts.ids()
+        if not ids:
+            return ToolResult(ok=True, content="未在任何产物中找到匹配项")
+        matches: list[tuple[str, list[tuple[int, str]]]] = []
+        more_artifacts = False
+        all_trusted = True
+        for aid in ids:
+            recorded = self._artifacts.path_of(aid)
+            if recorded is None:
+                continue
+            try:
+                path = Path(recorded).resolve()
+            except (OSError, ValueError, RuntimeError):
+                continue
+            if not path.is_relative_to(self._root):
+                continue
+            hits: list[tuple[int, str]] = []
+            try:
+                with path.open("r", encoding="utf-8", errors="replace", newline=None) as f:
+                    for lineno, line in enumerate(f, 1):
+                        if regex.search(line[:_MATCH_LINE_CAP]):
+                            hits.append((lineno, line.rstrip("\r\n")))
+                            if len(hits) >= _MAX_SEARCH_HITS_PER_ARTIFACT:
+                                break
+            except OSError:
+                continue
+            if hits:
+                if len(matches) >= _MAX_SEARCH_ARTIFACTS:
+                    more_artifacts = True
+                    break
+                if self._trust_of(aid) != "trusted":
+                    all_trusted = False
+                matches.append((aid, hits))
+        if not matches:
+            return ToolResult(ok=True, content="未在任何产物中找到匹配项")
+        blocks: list[str] = []
+        for aid, hits in matches:
+            block = f"### artifact://{aid}\n" + "\n".join(numbered(n, [line]) for n, line in hits)
+            blocks.append(block)
+        body = "\n\n".join(blocks)
+        if more_artifacts:
+            body += (
+                f"\n\n[匹配产物超过上限 {_MAX_SEARCH_ARTIFACTS} 个，"
+                f"只显示前 {_MAX_SEARCH_ARTIFACTS} 个；请收窄 query]"
+            )
+        return ToolResult(
+            ok=True,
+            content=body,
+            is_truncated=more_artifacts,
+            trust="trusted" if all_trusted else "untrusted",
+        )
 
     def _trust_of(self, artifact_id: str) -> Trust:
         candidates = producer_candidates(artifact_id)
