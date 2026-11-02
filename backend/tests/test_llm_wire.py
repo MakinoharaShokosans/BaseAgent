@@ -180,6 +180,42 @@ def test_tools_keep_thinking_on_when_the_endpoint_allows_it() -> None:
 
 
 @pytest.mark.unit
+def test_thinking_degrades_when_history_assistant_missing_reasoning() -> None:
+    # 历史中存在 assistant 消息缺失思考内容，防御性降级为 disabled
+    msg_no_reasoning = Message(role="assistant", content="hello", reasoning=None)
+    out = build(
+        endpoint(thinking_with_tools=True),
+        messages=(USER, msg_no_reasoning, Message(role="user", content="next")),
+        tools=(SEARCH,),
+    )
+    assert out["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+@pytest.mark.unit
+def test_thinking_degrades_when_history_assistant_from_another_endpoint() -> None:
+    # 跨端点产生的 assistant 消息不可回传思考，防御性降级为 disabled
+    msg_other_endpoint = Message(
+        role="assistant", content="hi", reasoning="thought", produced_by="other-model"
+    )
+    out = build(
+        endpoint(thinking_with_tools=True),
+        messages=(USER, msg_other_endpoint, Message(role="user", content="next")),
+        tools=(SEARCH,),
+    )
+    assert out["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+@pytest.mark.unit
+def test_thinking_stays_enabled_when_all_history_has_valid_reasoning() -> None:
+    out = build(
+        endpoint(thinking_with_tools=True),
+        messages=history_with_reasoning(),
+        tools=(SEARCH,),
+    )
+    assert out["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+@pytest.mark.unit
 def test_no_thinking_field_without_the_deepseek_dialect() -> None:
     out = build(endpoint(thinking_control="none"))
     assert "extra_body" not in out

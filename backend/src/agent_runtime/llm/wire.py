@@ -92,7 +92,21 @@ def build_request_kwargs(
     effort = request.reasoning_effort or endpoint.reasoning_effort
     if caps.thinking_control == "deepseek":
         # DeepSeek 默认开启思考：不发送字段不等于关闭，所以总是显式发送
-        thinking_on = caps.thinking_with_tools or not has_tools
+        if not has_tools:
+            thinking_on = True
+        elif not caps.thinking_with_tools:
+            thinking_on = False
+        else:
+            # ADR 0010: 若配置了 thinking_with_tools，预先检查历史 assistant 消息
+            # 存在缺失思考内容（None 或空）或跨端点不可回传
+            # （produced_by != endpoint.name）时退化为 False
+            broken_chain = any(
+                (m.reasoning is None or not m.reasoning.strip() or m.produced_by != endpoint.name)
+                for m in request.messages
+                if m.role == "assistant"
+            )
+            thinking_on = not broken_chain
+
         kwargs["extra_body"] = {"thinking": {"type": "enabled" if thinking_on else "disabled"}}
         if thinking_on and effort is not None:
             kwargs["reasoning_effort"] = _DEEPSEEK_EFFORT[effort]

@@ -284,7 +284,15 @@ class LLMGateway:
         call_timeout: float,
     ) -> ParsedCompletion:
         """流式调用并交付增量；返回值与整条响应同构，重试/降级沿用外层逻辑。"""
-        from agent_runtime.llm.tokens import estimate_completion_tokens, estimate_prompt_tokens
+        from agent_runtime.llm.tokens import (
+            estimate_completion_tokens,
+            estimate_prompt_tokens,
+            estimate_tokens,
+        )
+
+        kwargs = dict(kwargs)
+        if rt.endpoint.capabilities.usage_in_response:
+            kwargs["stream_options"] = {"include_usage": True}
 
         stream = await rt.client.chat.completions.create(
             **kwargs, stream=True, timeout=call_timeout
@@ -294,12 +302,16 @@ class LLMGateway:
         calls: dict[int, dict[str, Any]] = {}
         finish = ""
         field = rt.endpoint.capabilities.reasoning_field
+        stream_usage: Any = None
 
         async def delta(kind: str, text: str) -> None:
             if request.on_delta is not None:
                 await request.on_delta(kind, text)
 
         async for chunk in stream:
+            usage_obj = getattr(chunk, "usage", None)
+            if usage_obj is not None:
+                stream_usage = usage_obj
             choices = getattr(chunk, "choices", None) or []
             if not choices:
                 continue
@@ -360,14 +372,37 @@ class LLMGateway:
             reasoning=reason,
             produced_by=rt.endpoint.name,
         )
-        prompt_tokens = estimate_prompt_tokens(request.messages, request.tools)
-        completion_tokens = estimate_completion_tokens(message)
-        usage = TokenUsage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-            estimated=True,
-        )
+        if stream_usage is not None:
+            prompt = int(getattr(stream_usage, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(stream_usage, "completion_tokens", 0) or 0)
+            details = getattr(stream_usage, "completion_tokens_details", None)
+            reasoning_tokens = int(getattr(details, "reasoning_tokens", 0) or 0)
+            total = int(getattr(stream_usage, "total_tokens", 0) or (prompt + completion_tokens))
+            cache_hit = getattr(stream_usage, "prompt_cache_hit_tokens", None)
+            if cache_hit is None:
+                prompt_details = getattr(stream_usage, "prompt_tokens_details", None)
+                if prompt_details is not None:
+                    cache_hit = getattr(prompt_details, "cached_tokens", None)
+            cache_miss = getattr(stream_usage, "prompt_cache_miss_tokens", None)
+            usage = TokenUsage(
+                prompt_tokens=prompt,
+                completion_tokens=completion_tokens,
+                total_tokens=total,
+                reasoning_tokens=reasoning_tokens,
+                cache_hit_tokens=int(cache_hit) if cache_hit is not None else None,
+                cache_miss_tokens=int(cache_miss) if cache_miss is not None else None,
+                estimated=False,
+            )
+        else:
+            prompt_tokens = estimate_prompt_tokens(request.messages, request.tools)
+            completion_tokens = estimate_completion_tokens(message)
+            usage = TokenUsage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
+                reasoning_tokens=estimate_tokens(reason or ""),
+                estimated=True,
+            )
         return ParsedCompletion(message, usage, finish or "stop", {})
 
     def _raise_exhausted(self, call: _Call) -> NoReturn:

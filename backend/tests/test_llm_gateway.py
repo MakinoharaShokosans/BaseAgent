@@ -878,3 +878,84 @@ async def test_streaming_accumulates_content_and_emits_deltas() -> None:
         ("reasoning", "ing"),
     ]
     assert parsed.usage.total_tokens > 0
+
+
+@pytest.mark.unit
+async def test_streaming_captures_usage_chunk_and_metrics() -> None:
+    from types import SimpleNamespace
+
+    from agent_runtime.core import Message
+    from agent_runtime.llm import LLMRequest
+
+    chunks = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(content="hi", reasoning_content="think"),
+                )
+            ]
+        ),
+        # 模拟流式协议末尾 Usage Chunk（choices 为空，usage 挂在根对象）
+        SimpleNamespace(
+            choices=[],
+            usage=SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=25),
+                prompt_cache_hit_tokens=80,
+                prompt_cache_miss_tokens=20,
+            ),
+        ),
+    ]
+
+    class Stream:
+        def __aiter__(self):
+            async def walk():
+                for chunk in chunks:
+                    yield chunk
+
+            return walk()
+
+    class Completions:
+        async def create(self, **kwargs: Any):
+            assert kwargs.get("stream_options") == {"include_usage": True}
+            return Stream()
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    ep = endpoint()
+    ep = ep.model_copy(
+        update={
+            "capabilities": ep.capabilities.model_copy(
+                update={"streaming": True, "usage_in_response": True}
+            )
+        }
+    )
+    gw = LLMGateway(
+        {"fast": GatewayTier(0.0, (ep,))},
+        LlmConfig(),
+        client_factory=lambda _: client,  # type: ignore[arg-type]
+    )
+    rt = SimpleNamespace(endpoint=ep, client=client)
+
+    parsed = await gw._stream_once(
+        rt,  # type: ignore[arg-type]
+        {},
+        LLMRequest(
+            tier="fast",
+            messages=(Message(role="user", content="hi"),),
+            stream=True,
+            on_delta=None,
+        ),
+        call_timeout=1,
+    )
+    assert parsed.message.content == "hi"
+    assert parsed.message.reasoning == "think"
+    assert parsed.usage.estimated is False
+    assert parsed.usage.prompt_tokens == 100
+    assert parsed.usage.completion_tokens == 50
+    assert parsed.usage.total_tokens == 150
+    assert parsed.usage.reasoning_tokens == 25
+    assert parsed.usage.cache_hit_tokens == 80
+    assert parsed.usage.cache_miss_tokens == 20

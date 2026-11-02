@@ -124,9 +124,9 @@ json_schema = false                 # 文档未提及，按不支持
 usage_in_response = true
 merge_consecutive_user = false      # 端点要求角色严格交替时设为 true
 thinking_control = "deepseek"       # none | deepseek：显式发送 thinking 开关
-thinking_with_tools = false         # 带 tools 的请求关闭思考（DeepSeek 带工具必须回传全部历史思考）
+thinking_with_tools = true          # ADR 0010: 解锁带 tools 思考（遵循 DeepSeek 带工具全量思考回传协议）
 reasoning_field = "reasoning_content"
-reasoning_passback = "never"        # never | tool_turns | opaque | all_when_tools
+reasoning_passback = "all_when_tools" # ADR 0010: never | tool_turns | opaque | all_when_tools（带工具时全量回传历史思考链）
 streaming = true                    # 支持 OpenAI 兼容的流式增量
 
 [models.fast]                       # 工具调度、记忆压缩、研究提炼、子智能体：要便宜、要快
